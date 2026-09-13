@@ -22,7 +22,11 @@ const consoleInput = document.getElementById('console-input') as HTMLInputElemen
 const logEl = document.getElementById('log') as HTMLPreElement;
 const logCount = document.getElementById('log-count') as HTMLSpanElement;
 
-const MOD_ZIP_URL = '/woomera.zip';
+function publicAsset(path: string): string {
+  return `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+}
+
+const MOD_ZIP_URL = publicAsset('woomera.zip');
 const MOD_ZIP_ROOT = 'EscapeFromWoomera_v084/';
 const GAME_DIR = 'woomera';
 // Win32-only binaries and unused bulk: never staged into the WASM filesystem.
@@ -241,9 +245,9 @@ async function boot() {
   try {
     setVeil('Fetching game logic…', 'WASM client/server + engine extras.', 0.55);
     const [clientRes, serverRes, extrasRes] = await Promise.all([
-      fetch('/hlsdk/client.wasm'),
-      fetch('/hlsdk/server.wasm'),
-      fetch('/engine/extras.pk3'),
+      fetch(publicAsset('hlsdk/client.wasm')),
+      fetch(publicAsset('hlsdk/server.wasm')),
+      fetch(publicAsset('engine/extras.pk3')),
     ]);
     if (!clientRes.ok || !serverRes.ok) throw new Error('game-logic WASM fetch failed');
     const clientWasm = new Uint8Array(await clientRes.arrayBuffer());
@@ -255,13 +259,13 @@ async function boot() {
       canvas,
       arguments: ['-game', GAME_DIR],
       filesMap: {
-        'xash.wasm': '/engine/xash.wasm',
-        'filesystem_stdio.wasm': '/engine/filesystem_stdio.wasm',
-        'cl_dlls/menu_emscripten_wasm32.wasm': '/engine/libmenu.wasm',
-        'libref_webgl2.wasm': '/engine/libref_webgl2.wasm',
-        'libref_soft.wasm': '/engine/libref_soft.wasm',
-        'cl_dlls/client_emscripten_wasm32.wasm': '/hlsdk/client.wasm',
-        'dlls/hl_emscripten_wasm32.wasm': '/hlsdk/server.wasm',
+        'xash.wasm': publicAsset('engine/xash.wasm'),
+        'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
+        'cl_dlls/menu_emscripten_wasm32.wasm': publicAsset('engine/libmenu.wasm'),
+        'libref_webgl2.wasm': publicAsset('engine/libref_webgl2.wasm'),
+        'libref_soft.wasm': publicAsset('engine/libref_soft.wasm'),
+        'cl_dlls/client_emscripten_wasm32.wasm': publicAsset('hlsdk/client.wasm'),
+        'dlls/hl_emscripten_wasm32.wasm': publicAsset('hlsdk/server.wasm'),
       },
       module: {
         print: (text: string) => log(text),
