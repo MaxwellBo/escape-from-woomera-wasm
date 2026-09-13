@@ -13,25 +13,41 @@ Project page that inspired this: https://julianoliver.com/projects/escape-from-w
   `woomera/`. Win32-only `dlls/`/`cl_dlls/` and unused bulk (`SAVE/`,
   `Storyboard/`) are skipped; `liblist.gam` is rewritten to reference the WASM
   game-logic names.
+- `public/valve.zip` — `valve/` from the official Half-Life: Uplink demo
+  (models, sounds, sprites, HUD, `pak0.pak`) plus `delta.lst` from the
+  open Half-Life 1 SDK. Unpacked beside the mod.
 - `public/engine/` — Xash3D-FWGS WebAssembly runtime
   (`xash.wasm`, renderers, menu, filesystem layer).
-- `public/hlsdk/` — stock Half-Life client/server game logic as WASM.
-- `src/main.ts` — loader UI: stages the mod, intakes your retail `valve/`,
-  writes everything into WASM memory, then boots with `-game woomera` and loads
-  `efw_prototype_level1` (buttons for levels 1–3 + engine console included).
+- `public/hlsdk/` — stock Half-Life client/server game logic as WASM, plus
+  `delta.lst` (the engine’s network field table).
+- `src/main.ts` — loader UI: stages the mod, stages vendored Uplink `valve/`
+  data, writes everything into WASM memory, then boots with `-game woomera`
+  and loads `efw_prototype_level1` (buttons for levels 1–3 + engine console
+  included).
 
-## You must supply retail Half-Life data (not included)
+## Half-Life data (Uplink demo)
 
-The engine and the mod ship here, but the base-game `valve/` data is
-copyrighted by Valve and is **not** in this repo. In the browser:
+Valve open-sourced the **Half-Life 1 SDK** (game logic), not the GoldSrc
+engine binary or the retail `valve/` art. This site uses:
 
-1. Wait for step 1 (mod assets) to finish.
-2. Install Half-Life once (e.g. via Steam) and click **Select Half-Life
-   folder**, choosing the folder that contains `valve/` (needs
-   `valve/pak0.pak`). Files never leave your machine — they are copied into
-   in-memory WASM storage for the session only.
-3. Click **Boot Woomera in WASM**, then click the game view to capture
-   mouse/keyboard. Keyboard + mouse required, as with the original.
+- **Xash3D-FWGS** — open-source GoldSrc-compatible engine, compiled to WASM
+- **hlsdk-portable** — that open SDK, compiled to WASM (`public/hlsdk/`)
+- **Half-Life: Uplink** demo `valve/` — Valve/Sierra’s freely distributed
+  1999 demo (models, sounds, sprites, HUD). Retail WADs such as
+  `halflife.wad` are *not* included.
+- **`delta.lst`** — from [ValveSoftware/halflife](https://github.com/ValveSoftware/halflife)
+  (`network/delta.lst`). Uplink does not ship this file; Xash will not boot
+  without it. Redistributed under the Half-Life 1 SDK LICENSE
+  (`public/hlsdk/LICENSE`).
+
+`scripts/vendor.sh` downloads the archived Uplink installer, extracts it,
+and `scripts/pack-valve.py` writes `public/valve.zip` (Win32 DLLs and the
+demo’s own maps omitted; SDK `delta.lst` added). A full Steam install can
+still be selected as an override.
+
+1. Wait for steps 1–2 (mod zip + Uplink `valve/`). The engine boots itself.
+2. Click the game view to capture mouse/keyboard.
+3. Optional: **Override with your install** if you have retail Half-Life.
 
 ## Honest limitation: stock game logic, not the mod's custom code
 
@@ -64,4 +80,8 @@ npm run vendor   # scripts/vendor.sh
 - Engine WASM: `xash3d-fwgs@1.2.2` (npm)
 - Game-logic WASM: `hlsdk-portable@0.1.3` (npm mirror — upstream delisted it;
   source fallback: https://github.com/FWGS/hlsdk-portable)
-- Engine source: FWGS/Xash3D-FWGS (GPL). Half-Life data © Valve — not included.
+- Engine source: FWGS/Xash3D-FWGS (GPL)
+- Base game: Half-Life: Uplink demo `valve/` from
+  https://archive.org/download/Half-lifeUplink/hluplink.exe
+  (Valve/Sierra, 1999, freely distributed demo)
+- `delta.lst` + HLSDK LICENSE: https://github.com/ValveSoftware/halflife
