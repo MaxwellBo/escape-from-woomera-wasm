@@ -1,0 +1,21 @@
+{
+  "name": "escape-woomera-wasm",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Run the original Escape From Woomera Half-Life mod in the browser via the Xash3D-FWGS WebAssembly engine.",
+  "scripts": {
+    "dev": "vite --port 47831 --host 127.0.0.1",
+    "build": "tsc && vite build",
+    "preview": "vite preview --port 47831 --host 127.0.0.1",
+    "vendor": "bash scripts/vendor.sh"
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "xash3d-fwgs": "1.2.2"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.2",
+    "vite": "^6.3.5"
+  }
+}

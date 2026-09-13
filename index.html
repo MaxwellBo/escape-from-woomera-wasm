@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="The original Escape From Woomera Half-Life mod (2004), running in the browser via the Xash3D-FWGS WebAssembly engine." />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Escape from Woomera — Original Mod in the Browser (WASM)</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>Escape <em>from</em> Woomera</h1>
+          <p class="sub">The original 2004 Half-Life mod, in the browser via Xash3D-FWGS WebAssembly</p>
+        </div>
+        <nav class="toplinks">
+          <button id="btn-about" class="ghost" type="button">About / Sources</button>
+          <button id="btn-help" class="ghost" type="button">Setup guide</button>
+        </nav>
+      </header>
+
+      <main class="layout">
+        <section class="stage">
+          <div class="canvas-wrap">
+            <canvas id="game" width="960" height="600"></canvas>
+            <div id="veil" class="veil">
+              <div class="veil-card">
+                <h2 id="veil-title">Preparing…</h2>
+                <p id="veil-sub">Loading engine and mod assets.</p>
+                <div class="bar"><div id="veil-fill"></div></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="controls">
+            <div class="steps">
+              <div class="step" id="step-assets">
+                <span class="n">1</span>
+                <div>
+                  <strong>Mod assets</strong>
+                  <span id="assets-status">waiting…</span>
+                </div>
+              </div>
+              <div class="step" id="step-valve">
+                <span class="n">2</span>
+                <div>
+                  <strong>Your Half-Life data</strong>
+                  <span id="valve-status">not selected</span>
+                </div>
+                <div class="row">
+                  <button id="btn-folder" class="primary" type="button">Select Half-Life folder…</button>
+                  <label class="ghost file-label" for="dir-input">…or pick via file dialog</label>
+                  <input id="dir-input" type="file" webkitdirectory class="hidden-input" />
+                </div>
+              </div>
+              <div class="step" id="step-launch">
+                <span class="n">3</span>
+                <div>
+                  <strong>Launch</strong>
+                  <span id="launch-status">engine idle</span>
+                </div>
+                <div class="row">
+                  <button id="btn-launch" class="primary" type="button" disabled>Boot Woomera in WASM</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="maps hidden" id="maps-panel">
+              <span>Start map:</span>
+              <button data-map="efw_prototype_level1" type="button">Level 1</button>
+              <button data-map="efw_prototype_level2" type="button">Level 2</button>
+              <button data-map="efw_prototype_level3" type="button">Level 3</button>
+              <form id="console-form">
+                <input id="console-input" type="text" placeholder="engine console command…" autocomplete="off" spellcheck="false" />
+                <button type="submit">Send</button>
+              </form>
+            </div>
+          </div>
+
+          <details class="logbox">
+            <summary>Engine log <span id="log-count">0</span></summary>
+            <pre id="log"></pre>
+          </details>
+        </section>
+
+        <aside class="side">
+          <section class="panel">
+            <h3>What is running</h3>
+            <dl class="file">
+              <div><dt>Engine</dt><dd>Xash3D-FWGS (WASM)</dd></div>
+              <div><dt>Game logic</dt><dd>hlsdk-portable (WASM)</dd></div>
+              <div><dt>Mod</dt><dd>EscapeFromWoomera v0.84</dd></div>
+              <div><dt>Status</dt><dd id="engine-status">idle</dd></div>
+            </dl>
+          </section>
+          <section class="panel muted">
+            <h3>Fair warning</h3>
+            <p>
+              The mod's custom game code only ever shipped as Windows DLLs, so the
+              browser runs its maps, models, textures and sounds on stock Half-Life
+              game logic. You can walk the real Woomera compound, but scripted
+              systems (hope meter, conversations) will be degraded or missing.
+            </p>
+          </section>
+          <section class="panel muted">
+            <h3>You need retail Half-Life</h3>
+            <p>
+              Engine + mod ship here; the base-game <code>valve/</code> data does not
+              (copyrighted). Point step 2 at a Half-Life install (e.g. from Steam)
+              containing <code>valve/pak0.pak</code>. Files stay on your machine and
+              are copied into in-memory WASM storage for the session only.
+            </p>
+          </section>
+        </aside>
+      </main>
+
+      <div id="about" class="overlay hidden">
+        <div class="card wide">
+          <h2>About this build</h2>
+          <p>
+            <strong>Escape from Woomera</strong> (EFW Team, 2002–2004, demo v0.84) is a
+            Half-Life (GoldSrc) mod widely cited as the first documentary video game.
+            This page boots the <strong>original mod files</strong> — its three
+            <code>efw_prototype_level*</code> maps and shipped assets — inside the
+            open-source Xash3D-FWGS engine cross-compiled to WebAssembly, with
+            stock Half-Life game logic likewise compiled to WASM.
+          </p>
+          <div class="cols">
+            <div>
+              <h3>Provenance</h3>
+              <ul>
+                <li>Mod: EscapeFromWoomera_v084.zip, archived official site (ljudmila.org)</li>
+                <li>Engine WASM: xash3d-fwgs@1.2.2 (npm)</li>
+                <li>Game-logic WASM: hlsdk-portable@0.1.3 (npm mirror)</li>
+                <li>Base game: your own Half-Life install (not included)</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Sources</h3>
+              <ul class="sources">
+                <li><a href="https://julianoliver.com/projects/escape-from-woomera/" target="_blank" rel="noreferrer">Julian Oliver — project page</a></li>
+                <li><a href="https://en.wikipedia.org/wiki/Escape_from_Woomera" target="_blank" rel="noreferrer">Wikipedia — Escape from Woomera</a></li>
+                <li><a href="https://www.moddb.com/mods/escape-from-woomera" target="_blank" rel="noreferrer">ModDB — Escape from Woomera</a></li>
+              </ul>
+            </div>
+          </div>
+          <div class="row">
+            <button id="btn-close-about" class="primary" type="button">Back</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="help" class="overlay hidden">
+        <div class="card">
+          <h2>Setup guide</h2>
+          <ol class="how">
+            <li>Wait for step 1 to finish (mod assets unpack from the vendored zip).</li>
+            <li>Install Half-Life once (Steam) and click <strong>Select Half-Life folder</strong>, choosing the folder that contains <code>valve/</code>. Nothing is uploaded anywhere.</li>
+            <li>Click <strong>Boot Woomera in WASM</strong>. The engine starts with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
+            <li>Click the game view to capture mouse/keyboard. A keyboard and mouse are required, as with the original.</li>
+            <li>If the screen stays black, open the engine log below the game and the browser console — missing <code>valve/</code> files are the usual cause.</li>
+          </ol>
+          <div class="row">
+            <button id="btn-close-help" class="primary" type="button">Got it</button>
+          </div>
+        </div>
+      </div>
+
+      <footer class="foot">
+        <span>Unofficial preservation build. Engine: FWGS/Xash3D-FWGS (GPL). Mod demo: EFW Team, 2004 (freeware). Half-Life data © Valve — not included.</span>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
