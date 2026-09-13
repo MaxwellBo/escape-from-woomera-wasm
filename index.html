@@ -45,11 +45,11 @@
               <div class="step" id="step-valve">
                 <span class="n">2</span>
                 <div>
-                  <strong>Your Half-Life data</strong>
-                  <span id="valve-status">not selected</span>
+                  <strong>Half-Life data</strong>
+                  <span id="valve-status">loading Uplink demo…</span>
                 </div>
                 <div class="row">
-                  <button id="btn-folder" class="primary" type="button">Select Half-Life folder…</button>
+                  <button id="btn-folder" class="ghost" type="button">Override with your install…</button>
                   <label class="ghost file-label" for="dir-input">…or pick via file dialog</label>
                   <input id="dir-input" type="file" webkitdirectory class="hidden-input" />
                 </div>
@@ -104,12 +104,13 @@
             </p>
           </section>
           <section class="panel muted">
-            <h3>You need retail Half-Life</h3>
+            <h3>Half-Life data included</h3>
             <p>
-              Engine + mod ship here; the base-game <code>valve/</code> data does not
-              (copyrighted). Point step 2 at a Half-Life install (e.g. from Steam)
-              containing <code>valve/pak0.pak</code>. Files stay on your machine and
-              are copied into in-memory WASM storage for the session only.
+              Step 2 loads Valve’s official <strong>Half-Life: Uplink</strong> demo
+              (1999, freely distributed), the open Half-Life 1 SDK game logic
+              compiled to WASM, and SDK <code>delta.lst</code> (required to boot).
+              Optional: override with a full Steam <code>valve/</code> folder if you
+              have one.
             </p>
           </section>
         </aside>
@@ -133,7 +134,8 @@
                 <li>Mod: EscapeFromWoomera_v084.zip, archived official site (ljudmila.org)</li>
                 <li>Engine WASM: xash3d-fwgs@1.2.2 (npm)</li>
                 <li>Game-logic WASM: hlsdk-portable@0.1.3 (npm mirror)</li>
-                <li>Base game: your own Half-Life install (not included)</li>
+                <li>Base game: Half-Life: Uplink demo valve/ (Valve/Sierra, 1999)</li>
+                <li>delta.lst: ValveSoftware/halflife (Half-Life 1 SDK)</li>
               </ul>
             </div>
             <div>
@@ -155,11 +157,11 @@
         <div class="card">
           <h2>Setup guide</h2>
           <ol class="how">
-            <li>Wait for step 1 to finish (mod assets unpack from the vendored zip).</li>
-            <li>Install Half-Life once (Steam) and click <strong>Select Half-Life folder</strong>, choosing the folder that contains <code>valve/</code>. Nothing is uploaded anywhere.</li>
-            <li>Click <strong>Boot Woomera in WASM</strong>. The engine starts with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
+            <li>Wait for steps 1–2 (mod zip + vendored Uplink <code>valve/</code> data). The engine then boots on its own.</li>
+            <li>Optional: click <strong>Override with your install</strong> to use a full Steam Half-Life <code>valve/</code> folder instead of the demo.</li>
+            <li>If boot did not start, click <strong>Boot Woomera in WASM</strong>. It runs with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
             <li>Click the game view to capture mouse/keyboard. A keyboard and mouse are required, as with the original.</li>
-            <li>If the screen stays black, open the engine log below the game and the browser console — missing <code>valve/</code> files are the usual cause.</li>
+            <li>If the screen stays black, open the engine log below the game and the browser console.</li>
           </ol>
           <div class="row">
             <button id="btn-close-help" class="primary" type="button">Got it</button>
@@ -168,7 +170,7 @@
       </div>
 
       <footer class="foot">
-        <span>Unofficial preservation build. Engine: FWGS/Xash3D-FWGS (GPL). Mod demo: EFW Team, 2004 (freeware). Half-Life data © Valve — not included.</span>
+        <span>Unofficial preservation build. Engine: FWGS/Xash3D-FWGS (GPL). Mod demo: EFW Team, 2004 (freeware). Base game: Half-Life: Uplink demo (Valve, 1999).</span>
       </footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
