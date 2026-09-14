@@ -27,6 +27,7 @@ function publicAsset(path: string): string {
 }
 
 const MOD_ZIP_URL = publicAsset('woomera.zip');
+const VALVE_ZIP_URL = publicAsset('valve.zip');
 const MOD_ZIP_ROOT = 'EscapeFromWoomera_v084/';
 const GAME_DIR = 'woomera';
 // Win32-only binaries and unused bulk: never staged into the WASM filesystem.
@@ -72,6 +73,51 @@ function fmtMB(bytes: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+function formatErr(err: unknown): string {
+  if (err instanceof Error) {
+    const extra = 'errno' in err ? ` errno=${String((err as { errno?: unknown }).errno)}` : '';
+    return `${err.name}: ${err.message}${extra}`;
+  }
+  if (err && typeof err === 'object') {
+    const o = err as { message?: unknown; name?: unknown; status?: unknown };
+    const parts = [o.name, o.message, o.status !== undefined ? `status=${String(o.status)}` : '']
+      .map((p) => (p === undefined || p === '' ? '' : String(p)))
+      .filter(Boolean);
+    if (parts.length) return parts.join(' ');
+    try {
+      return JSON.stringify(err);
+    } catch {
+      /* ignore */
+    }
+  }
+  return String(err);
+}
+
+/** Split a GoldSrc PACK into loose files so we never FS.writeFile a 50MB blob. */
+function explodePak(pak: Uint8Array, dest: Map<string, Uint8Array>, prefix: string) {
+  const magic = String.fromCharCode(pak[0] ?? 0, pak[1] ?? 0, pak[2] ?? 0, pak[3] ?? 0);
+  if (magic !== 'PACK') {
+    dest.set(`${prefix}pak0.pak`, pak);
+    return;
+  }
+  const view = new DataView(pak.buffer, pak.byteOffset, pak.byteLength);
+  const off = view.getUint32(4, true);
+  const length = view.getUint32(8, true);
+  for (let i = 0; i < length; i += 64) {
+    let name = '';
+    for (let j = 0; j < 56; j++) {
+      const c = pak[off + i + j];
+      if (!c) break;
+      name += String.fromCharCode(c);
+    }
+    name = name.replace(/\\/g, '/');
+    if (!name) continue;
+    const eoff = view.getUint32(off + i + 56, true);
+    const esize = view.getUint32(off + i + 60, true);
+    dest.set(`${prefix}${name}`, pak.subarray(eoff, eoff + esize));
+  }
+}
+
 // ---- staged-file helpers -------------------------------------------------
 
 function shouldSkip(rel: string) {
@@ -99,14 +145,75 @@ async function stageModZip() {
       continue;
     }
     let out = rel;
-    if (rel.toLowerCase() === 'liblist.gam') out = patchLibList(new TextDecoder().decode(data));
-    staged.woomera.set(`${GAME_DIR}/${out}`, data as Uint8Array);
+    let payload = data as Uint8Array;
+    if (rel.toLowerCase() === 'liblist.gam') {
+      payload = new TextEncoder().encode(patchLibList(new TextDecoder().decode(data)));
+    }
+    staged.woomera.set(`${GAME_DIR}/${out}`, payload);
     bytes += (data as Uint8Array).length;
   }
   assetsStatus.textContent = `${staged.woomera.size} files (${fmtMB(bytes)}), skipped ${skipped} Win32/unused`;
   markDone('step-assets');
-  setVeil('Mod assets ready', 'Now point step 2 at your Half-Life install.', 0.5);
+  setVeil('Mod assets ready', 'Loading vendored Half-Life: Uplink data…', 0.5);
   log(`mod staged: ${staged.woomera.size} files, ${fmtMB(bytes)} (skipped ${skipped})`);
+}
+
+async function stageValveZip() {
+  setVeil('Loading Half-Life data…', 'Fetching Valve’s official Uplink demo (vendored).', 0.52);
+  const res = await fetch(VALVE_ZIP_URL);
+  if (!res.ok) throw new Error(`valve zip fetch failed: HTTP ${res.status}`);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  setVeil('Unpacking Half-Life data…', 'Inflating pak0, wads, sprites, sounds.', 0.58);
+  await new Promise((r) => setTimeout(r, 30));
+  const entries = unzipSync(buf);
+  staged.valve.clear();
+  let bytes = 0;
+  let skipped = 0;
+  for (const [name, data] of Object.entries(entries)) {
+    if (name.endsWith('/')) continue;
+    const rel = name.replace(/\\/g, '/');
+    const lower = rel.toLowerCase();
+    if (lower.endsWith('.dll') || lower.includes('/dlls/') || lower.includes('/cl_dlls/')) {
+      skipped++;
+      continue;
+    }
+    const file = data as Uint8Array;
+    if (lower.endsWith('.pak')) {
+      explodePak(file, staged.valve, 'valve/');
+      bytes += file.length;
+      continue;
+    }
+    staged.valve.set(rel, file);
+    bytes += file.length;
+  }
+  seedDeltaLst();
+  const { pak, models } = summarizeValve();
+  if (pak === 0 && models === 0) throw new Error('vendored valve.zip has no valve models or pak');
+  valveStatus.textContent = `${staged.valve.size} files (${fmtMB(bytes)}) from Uplink demo`;
+  markDone('step-valve');
+  btnLaunch.disabled = false;
+  log(`valve staged: ${staged.valve.size} files, ${fmtMB(bytes)} (skipped ${skipped} Win32)`);
+}
+
+function findStaged(files: Map<string, Uint8Array>, suffix: string): Uint8Array | undefined {
+  const needle = suffix.toLowerCase().replace(/\\/g, '/');
+  for (const [path, data] of files) {
+    const p = path.toLowerCase().replace(/\\/g, '/');
+    if (p === needle || p.endsWith(`/${needle}`)) return data;
+  }
+  return undefined;
+}
+
+/** Xash loads delta.lst from the gamedir (then valve/). Uplink does not ship it. */
+function seedDeltaLst(extra?: Uint8Array) {
+  const data =
+    extra ??
+    findStaged(staged.valve, 'delta.lst') ??
+    findStaged(staged.woomera, 'delta.lst');
+  if (!data) return false;
+  staged.valve.set('valve/delta.lst', data);
+  staged.woomera.set(`${GAME_DIR}/delta.lst`, data);
+  return true;
 }
 
 /** Point the mod at WASM game-logic names instead of the Win32 DLLs. */
@@ -122,9 +229,9 @@ function patchLibList(original: string): string {
     'startmap "efw_prototype_level1"',
     'trainingmap "efw_prototype_level1"',
     'mpentity "info_player_deathmatch"',
-    'gamedll "dlls/hl_emscripten_wasm32.wasm"',
-    'gamedll1 "dlls/hl_emscripten_wasm32.wasm"',
-    'cldll "cl_dlls/client_emscripten_wasm32.wasm"',
+    'gamedll "dlls/hl.dll"',
+    'gamedll1 "dlls/hl.dll"',
+    'cldll "1"',
     '',
   ].join('\n');
 }
@@ -147,22 +254,25 @@ async function collectDirectory(handle: unknown, base: string, out: Map<string, 
 function summarizeValve() {
   let bytes = 0;
   let pak = 0;
+  let models = 0;
   for (const [p, d] of staged.valve) {
     bytes += d.length;
     if (/(^|\/)valve\/pak\d+\.pak$/i.test(p)) pak++;
+    if (/(^|\/)valve\/models\//i.test(p)) models++;
   }
-  return { files: staged.valve.size, bytes, pak };
+  return { files: staged.valve.size, bytes, pak, models };
 }
 
 async function acceptValveFiles() {
-  const { files, bytes, pak } = summarizeValve();
-  if (pak === 0) {
-    valveStatus.textContent = `picked ${files} files but no valve/pak*.pak found — pick the Half-Life root`;
-    log(`WARNING: valve intake has ${files} files but no pak0.pak; boot will likely fail`);
+  seedDeltaLst();
+  const { files, bytes, pak, models } = summarizeValve();
+  if (pak === 0 && models === 0) {
+    valveStatus.textContent = `picked ${files} files but no valve/ models or pak — pick the Half-Life root`;
+    log(`WARNING: valve intake has ${files} files but no pak0.pak / models; boot will likely fail`);
     btnLaunch.disabled = true;
     return;
   }
-  valveStatus.textContent = `${files} files (${fmtMB(bytes)}) incl. ${pak} pak(s) — ready`;
+  valveStatus.textContent = `${files} files (${fmtMB(bytes)}) incl. ${pak} pak(s), ${models} models — ready`;
   markDone('step-valve');
   btnLaunch.disabled = false;
   log(`valve staged: ${files} files, ${fmtMB(bytes)}, ${pak} pak(s)`);
@@ -209,26 +319,35 @@ function mkdirTree(FS: { mkdir: (p: string) => void }, path: string) {
     try {
       FS.mkdir(cur);
     } catch {
-      /* already exists */
+      /* exists, or we'll fail on write */
     }
   }
 }
 
 function writeTree(
-  FS: { mkdir: (p: string) => void; writeFile: (p: string, d: Uint8Array) => void; unlink: (p: string) => void },
+  FS: {
+    mkdir: (p: string) => void;
+    writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
+    unlink: (p: string) => void;
+  },
   files: Map<string, Uint8Array>,
   onProgress?: (done: number, total: number) => void,
 ) {
   const entries = [...files.entries()];
   entries.forEach(([path, data], i) => {
-    const slash = path.lastIndexOf('/');
-    if (slash > 0) mkdirTree(FS, path.slice(0, slash));
+    const dest = path.startsWith('/') ? path : `/${path.replace(/^\//, '')}`;
+    const slash = dest.lastIndexOf('/');
+    if (slash > 0) mkdirTree(FS, dest.slice(0, slash));
     try {
-      FS.unlink(path);
+      FS.unlink(dest);
     } catch {
       /* not present */
     }
-    FS.writeFile(path, data);
+    try {
+      FS.writeFile(dest, data.slice());
+    } catch (err) {
+      throw new Error(`write ${dest} (${data.length} bytes): ${formatErr(err)}`);
+    }
     if (onProgress && i % 50 === 0) onProgress(i, entries.length);
   });
   onProgress?.(entries.length, entries.length);
@@ -244,17 +363,23 @@ async function boot() {
   engineStatus.textContent = 'initializing WASM';
   try {
     setVeil('Fetching game logic…', 'WASM client/server + engine extras.', 0.55);
-    const [clientRes, serverRes, extrasRes] = await Promise.all([
+    const [clientRes, serverRes, extrasRes, deltaRes] = await Promise.all([
       fetch(publicAsset('hlsdk/client.wasm')),
       fetch(publicAsset('hlsdk/server.wasm')),
       fetch(publicAsset('engine/extras.pk3')),
+      fetch(publicAsset('hlsdk/delta.lst')),
     ]);
     if (!clientRes.ok || !serverRes.ok) throw new Error('game-logic WASM fetch failed');
     const clientWasm = new Uint8Array(await clientRes.arrayBuffer());
     const serverWasm = new Uint8Array(await serverRes.arrayBuffer());
     const extras = extrasRes.ok ? new Uint8Array(await extrasRes.arrayBuffer()) : null;
+    const sdkDelta = deltaRes.ok ? new Uint8Array(await deltaRes.arrayBuffer()) : undefined;
+    if (!seedDeltaLst(sdkDelta)) {
+      throw new Error('missing valve/delta.lst (HLSDK network table; required to boot)');
+    }
 
     setVeil('Starting engine…', 'Initializing Xash3D WebAssembly runtime.', 0.7);
+    log('boot: creating Xash3D');
     engine = new Xash3D({
       canvas,
       arguments: ['-game', GAME_DIR],
@@ -272,31 +397,67 @@ async function boot() {
         printErr: (text: string) => log(`ERR: ${text}`),
       },
     });
+    log('boot: init()');
     await engine.init();
+    log('boot: init ok');
 
     const FS = (engine.em as unknown as { FS?: unknown })?.FS as
-      | { mkdir: (p: string) => void; writeFile: (p: string, d: Uint8Array) => void; unlink: (p: string) => void }
+      | {
+          mkdir: (p: string) => void;
+          writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
+          unlink: (p: string) => void;
+        }
       | undefined;
     if (!FS) throw new Error('WASM filesystem unavailable after init');
+    log(`boot: writing ${staged.valve.size} valve files + ${staged.woomera.size} woomera files`);
 
     setVeil('Installing game files…', 'Writing woomera/ + valve/ into WASM memory.', 0.8);
     await new Promise((r) => setTimeout(r, 30));
     writeTree(FS, staged.valve, (done, total) =>
       setVeil('Installing game files…', `valve/ ${done}/${total}`, 0.8 + 0.1 * (done / Math.max(1, total))),
     );
+    log('boot: valve files written');
     writeTree(FS, staged.woomera);
-    FS.writeFile(`${GAME_DIR}/cl_dlls/client_emscripten_wasm32.wasm`, clientWasm);
-    FS.writeFile(`${GAME_DIR}/dlls/hl_emscripten_wasm32.wasm`, serverWasm);
+    log('boot: woomera files written');
+    mkdirTree(FS, `/${GAME_DIR}/cl_dlls`);
+    mkdirTree(FS, `/${GAME_DIR}/dlls`);
+    mkdirTree(FS, '/valve');
+    mkdirTree(FS, '/rwdir');
+    FS.writeFile(`/${GAME_DIR}/cl_dlls/client_emscripten_wasm32.wasm`, clientWasm);
+    FS.writeFile(`/${GAME_DIR}/dlls/hl_emscripten_wasm32.wasm`, serverWasm);
     if (extras) {
       try {
-        FS.writeFile('valve/extras.pk3', extras);
+        FS.writeFile('/valve/extras.pk3', extras);
       } catch {
         /* non-fatal */
       }
     }
+    const FSEx = FS as typeof FS & {
+      readdir?: (p: string) => string[];
+      symlink?: (oldpath: string, newpath: string) => void;
+      chdir?: (p: string) => void;
+    };
+    try {
+      FSEx.symlink?.('/woomera', '/rwdir/woomera');
+    } catch {
+      /* exists */
+    }
+    try {
+      FSEx.symlink?.('/valve', '/rwdir/valve');
+    } catch {
+      /* exists */
+    }
+    try {
+      FSEx.chdir?.('/rwdir');
+    } catch {
+      /* ignore */
+    }
+    log(`boot: root=${(FSEx.readdir?.('/') ?? []).join(' ')}`);
+    log(`boot: rwdir=${(FSEx.readdir?.('/rwdir') ?? []).join(' ')}`);
+    log(`boot: woomera=${(FSEx.readdir?.('/woomera') ?? []).slice(0, 20).join(' ')}`);
     log('filesystem staged: woomera + valve + WASM game logic');
-
     setVeil('Running…', 'Main loop starting.', 0.95);
+    log('boot: main()');
     engine.main();
     veil.classList.add('hidden');
     mapsPanel.classList.remove('hidden');
@@ -312,7 +473,7 @@ async function boot() {
       }
     }, 4000);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
     engineStatus.textContent = 'failed';
     setVeil('Boot failed', msg, 1);
@@ -360,22 +521,22 @@ document.getElementById('btn-close-help')?.addEventListener('click', () => {
   document.getElementById('help')?.classList.add('hidden');
 });
 
-void stageModZip()
-  .then(() => {
-    if (staged.valve.size > 0) void acceptValveFiles();
-    // Diagnostics: ?selftest=1 boots the engine with no retail data to prove
-    // the WASM runtime, FS staging and log plumbing work. It is expected to
-    // fail when the engine can't find valve/pak0.pak — the log shows how far
-    // it got.
-    if (new URLSearchParams(location.search).get('selftest') === '1') {
-      log('selftest: booting without retail data (expected to fail at valve/pak0.pak)');
-      btnLaunch.disabled = false;
-      void boot();
-    }
-  })
-  .catch((err: unknown) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    assetsStatus.textContent = `failed: ${msg}`;
-    setVeil('Asset load failed', msg, 1);
-    log(`MOD STAGE FAILED: ${msg}`);
-  });
+void (async () => {
+  await stageModZip();
+  await stageValveZip();
+  setVeil('Ready', 'Click the game view after boot to capture mouse/keyboard.', 0.62);
+  const params = new URLSearchParams(location.search);
+  if (params.get('noboot') === '1') {
+    log('noboot: assets ready, waiting for manual launch');
+    return;
+  }
+  log('assets ready — booting Woomera');
+  await boot();
+})().catch((err: unknown) => {
+  const msg = formatErr(err);
+  const assetsReady = document.getElementById('step-assets')?.classList.contains('done');
+  if (assetsReady) valveStatus.textContent = `failed: ${msg}`;
+  else assetsStatus.textContent = `failed: ${msg}`;
+  setVeil('Asset load failed', msg, 1);
+  log(`STAGE FAILED: ${msg}`);
+});
