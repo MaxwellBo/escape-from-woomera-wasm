@@ -217,7 +217,21 @@ def main() -> None:
     )
 
     cmake_root = sdk / "CMakeLists.txt"
+    # xash3d-fwgs@1.2.2 exports libc time() as (i32)->i64 (WASM_BIGINT).
+    # Without it, emscripten legalizes time_t to i32+getTempRet0 and instantiate fails.
     cmake_snip = (
+        "# EFW_OVERLAY\n"
+        "if(EMSCRIPTEN)\n"
+        "\tset_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS TRUE)\n"
+        "\tadd_compile_options(-fPIC)\n"
+        "\tadd_link_options(-sSIDE_MODULE=1 -sWASM_BIGINT=1)\n"
+        '\tset(CMAKE_SHARED_LIBRARY_SUFFIX ".wasm")\n'
+        '\tset(CMAKE_STRIP "/bin/true" CACHE STRING "" FORCE)\n'
+        "endif()\n"
+    )
+    text = cmake_root.read_text(encoding="utf-8", errors="replace")
+    # Drop a late copy that does not apply to already-created targets.
+    late = (
         "# EFW_OVERLAY\n"
         "if(EMSCRIPTEN)\n"
         "\tadd_compile_options(-fPIC)\n"
@@ -225,10 +239,33 @@ def main() -> None:
         '\tset(CMAKE_SHARED_LIBRARY_SUFFIX ".wasm")\n'
         "endif()\n"
     )
-    text = cmake_root.read_text(encoding="utf-8", errors="replace")
-    text = text.replace("/* EFW_OVERLAY */\n", "# EFW_OVERLAY\n")
-    if "if(EMSCRIPTEN)" not in text or "SIDE_MODULE" not in text:
-        text = text.rstrip() + "\n\n" + cmake_snip
+    text = text.replace("/* EFW_OVERLAY */\n", "")
+    if "add_link_options(-sSIDE_MODULE=1)" in text and "project (HLSDK-PORTABLE)" in text:
+        # If the block is only at the end, move it after project().
+        if text.find("add_link_options(-sSIDE_MODULE=1)") > text.find("add_subdirectory(dlls)"):
+            text = text.replace(late, "")
+            # also remove trailing endif block variants
+            text = text.replace(
+                "# EFW_OVERLAY\n"
+                "if(EMSCRIPTEN)\n"
+                "\tadd_compile_options(-fPIC)\n"
+                "\tadd_link_options(-sSIDE_MODULE=1)\n"
+                '\tset(CMAKE_SHARED_LIBRARY_SUFFIX ".wasm")\n'
+                '\tset(CMAKE_STRIP "/bin/true" CACHE STRING "" FORCE)\n'
+                "endif()\n",
+                "",
+            )
+    if "add_link_options(-sSIDE_MODULE=1)" not in text.split("option(BUILD_CLIENT")[0]:
+        text = text.replace(
+            "project (HLSDK-PORTABLE)\n",
+            "project (HLSDK-PORTABLE)\n\n" + cmake_snip,
+            1,
+        )
+    # Re-apply onto an already-overlaid tree (idempotent).
+    text = text.replace(
+        "\tadd_link_options(-sSIDE_MODULE=1)\n",
+        "\tadd_link_options(-sSIDE_MODULE=1 -sWASM_BIGINT=1)\n",
+    )
     cmake_root.write_text(text, encoding="utf-8")
     print(f"overlay applied to {sdk}")
 

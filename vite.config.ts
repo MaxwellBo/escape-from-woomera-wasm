@@ -14,6 +14,9 @@ export default defineConfig({
   server: {
     port: 47831,
     host: '127.0.0.1',
+    watch: {
+      ignored: ['**/third_party/**', '**/node_modules/**'],
+    },
   },
   preview: {
     port: 47831,
