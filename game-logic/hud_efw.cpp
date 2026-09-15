@@ -245,6 +245,12 @@ int CHudEfw::Draw( float flTime )
 			SPR_Set( g_hDiary, 255, 255, 255 );
 			SPR_DrawHoles( 0, dx, dy, &rc );
 		}
+		else
+		{
+			char dlabel[32];
+			snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
+			gHUD.DrawHudString( ScreenWidth - 160, 48, ScreenWidth - 8, dlabel, r, g, b );
+		}
 	}
 	return 1;
 }

@@ -310,11 +310,14 @@ static void EFW_SendEfwShowChunks( CBasePlayer *pPlayer, int line, const char *t
 void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **lines, int nLines )
 {
 	int i;
+	EfwDllState *st = EFW_Dll();
 	if( !pPlayer )
 		return;
 	EFW_SendEfwShow( pPlayer, 0xff, NULL );
 	if( ( !title || !title[0] ) && nLines <= 0 )
 		return;
+	/* efw_ShowMenu 0x100c6e60 writes DAT_1013487c = now on each show. */
+	st->talkStart = gpGlobals->time;
 	EFW_SendEfwShowChunks( pPlayer, 0, title ? title : "" );
 	if( nLines < 0 )
 		nLines = 0;

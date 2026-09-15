@@ -321,6 +321,7 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	{
 		strncpy( body, r->text, sizeof( body ) - 1 );
 		body[sizeof( body ) - 1] = '\0';
+		EFW_Print( pPlayer, r->text );
 		if( r->actionCount )
 		{
 			for( i = 0; i < r->actionCount; i++ )

@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll5`;
+    return `${url}?v=efw-dll6`;
   return url;
 }
 
@@ -538,6 +538,7 @@ async function boot() {
     if (!clientRes.ok || !serverRes.ok) throw new Error('game-logic WASM fetch failed');
     const clientWasm = new Uint8Array(await clientRes.arrayBuffer());
     const serverWasm = new Uint8Array(await serverRes.arrayBuffer());
+    log(`hlsdk wasm ${publicAsset('hlsdk/client.wasm')} ${clientWasm.byteLength}b / server ${serverWasm.byteLength}b`);
     const extras = extrasRes.ok ? new Uint8Array(await extrasRes.arrayBuffer()) : null;
     const sdkDelta = deltaRes.ok ? new Uint8Array(await deltaRes.arrayBuffer()) : undefined;
     if (!seedDeltaLst(sdkDelta)) {
@@ -742,19 +743,16 @@ document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (E / efw_Talk)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
-  void captureInput();
 });
 document.getElementById('btn-use')?.addEventListener('click', () => {
   log('> use (efw_spider)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_spider');
-  void captureInput();
 });
 document.getElementById('btn-give')?.addEventListener('click', () => {
   log('> give (efw_Give)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Give');
-  void captureInput();
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
   log('> diary (I / efw_diary)');
