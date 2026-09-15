@@ -18,7 +18,7 @@
 
 struct EfwState
 {
-	int hope;
+	float hope; // original slot 1, init 80 (FUN_100c6740)
 	unsigned int diary;
 	int diaryPage;
 	int diaryOpen;
@@ -46,6 +46,8 @@ struct EfwState
 	int pendingChoice;
 	float choiceLock;
 	float lastThinkTime;
+	float talkStarted;
+	float hopeDt;
 };
 
 EfwState *EFW_GetState( CBasePlayer *pPlayer );

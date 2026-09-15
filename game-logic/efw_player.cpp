@@ -1,5 +1,9 @@
 #ifndef CLIENT_DLL
 
+// Port of recovered EscapeFromWoomera.dll overlay (Ghidra 12, VA map in
+// decompile/recovered/NAMES.md). Engine callbacks use hlsdk-portable names
+// instead of the Win32 DAT_10121e* import table.
+
 #include "extdll.h"
 #include "util.h"
 #include "cbase.h"
@@ -122,6 +126,10 @@ static int EFW_MailPick( void )
 static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
 static int gmsgEfwHint = 0;
+static int gmsgEFWData = 0;
+static int gmsgEFWShow = 0;
+static int gmsgEFWMenu = 0;
+static int gmsgEFWCtPrv = 0;
 
 static cvar_t efw_hope_cvar = { "efw_hope", "0", FCVAR_SERVER };
 static cvar_t efw_hud_cvar = { "efw_hud", "", FCVAR_SERVER };
@@ -281,12 +289,23 @@ static void EFW_HostDiaryPrev( void )
 
 void EFW_LinkUserMessages( void )
 {
+	// Original LinkUserMessages (0x1007af20): ShowMenu, EFWShow, EFWData,
+	// EFW_Menu, EFW_Cntxt, EFW_CtPrv. Hope/EfwDiary/EfwHint are WASM extras
+	// so the browser HUD can draw without the 2004 VGUI storyboard path.
 	if( !gmsgHope )
 		gmsgHope = REG_USER_MSG( "Hope", 1 );
 	if( !gmsgEfwDiary )
 		gmsgEfwDiary = REG_USER_MSG( "EfwDiary", 6 );
 	if( !gmsgEfwHint )
 		gmsgEfwHint = REG_USER_MSG( "EfwHint", -1 );
+	if( !gmsgEFWData )
+		gmsgEFWData = REG_USER_MSG( "EFWData", 5 );
+	if( !gmsgEFWShow )
+		gmsgEFWShow = REG_USER_MSG( "EFWShow", -1 );
+	if( !gmsgEFWMenu )
+		gmsgEFWMenu = REG_USER_MSG( "EFW_Menu", 1 );
+	if( !gmsgEFWCtPrv )
+		gmsgEFWCtPrv = REG_USER_MSG( "EFW_CtPrv", 1 );
 	{
 		static int cvars_registered;
 		static int cmds_registered;
@@ -347,7 +366,7 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 	if( !pPlayer || !gmsgHope )
 		return;
 	st = EFW_GetState( pPlayer );
-	hope = st->hope;
+	hope = (int)( st->hope + 0.5f );
 	if( hope < 0 )
 		hope = 0;
 	if( hope > 100 )
@@ -358,6 +377,16 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 	{
 		MESSAGE_BEGIN( MSG_ONE, gmsgHope, NULL, pPlayer->pev );
 			WRITE_BYTE( hope );
+		MESSAGE_END();
+	}
+	if( gmsgEFWData )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgEFWData, NULL, pPlayer->pev );
+			WRITE_BYTE( hope );
+			WRITE_BYTE( st->diaryOpen ? 1 : 0 );
+			WRITE_BYTE( st->diaryPage );
+			WRITE_BYTE( st->talking ? 1 : 0 );
+			WRITE_BYTE( (int)( st->items & 0xff ) );
 		MESSAGE_END();
 	}
 }
@@ -450,13 +479,19 @@ void EFW_SendDiary( CBasePlayer *pPlayer )
 void EFW_AdjustHope( CBasePlayer *pPlayer, int delta )
 {
 	EfwState *st = EFW_GetState( pPlayer );
-	st->hope += delta;
-	if( st->hope > 100 )
-		st->hope = 100;
-	if( st->hope <= 0 )
+	st->hope += (float)delta;
+	if( st->hope > 100.0f )
+		st->hope = 100.0f;
+	if( st->hope <= 0.0f )
 	{
-		st->hope = 0;
+		st->hope = 0.0f;
 		EFW_Print( pPlayer, "Run out of hope!" );
+		if( gmsgEFWMenu )
+		{
+			MESSAGE_BEGIN( MSG_ONE, gmsgEFWMenu, NULL, pPlayer->pev );
+				WRITE_BYTE( 0x4d );
+			MESSAGE_END();
+		}
 	}
 	EFW_SendHope( pPlayer );
 }
@@ -632,10 +667,11 @@ static void EFW_InitPlayerState( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 	memset( st, 0, sizeof( *st ) );
-	st->hope = 72;
+	st->hope = 80.0f; // original FUN_100c6740 slot 1 = 80.0
 	st->diary = ( 1u << 1 );
 	st->diaryPage = 1;
-	st->nextHopeDrain = gpGlobals->time + 45.0f;
+	st->hopeDt = 0;
+	st->talkStarted = 0;
 	st->lastThinkTime = gpGlobals->time;
 	for( i = 0; kDefaultTopics[i]; i++ )
 		EFW_AddTopic( pPlayer, kDefaultTopics[i] );
@@ -1407,13 +1443,32 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	if( st->lastThinkTime > 1.0f && gpGlobals->time + 0.5f < st->lastThinkTime )
 		EFW_InitPlayerState( pPlayer );
 
-	pPlayer->pev->armorvalue = (float)st->hope;
+	pPlayer->pev->armorvalue = st->hope;
 
 	if( st->lastThinkTime != gpGlobals->time || st->thinkFrames == 0 )
 	{
 		CBaseEntity *pMark;
+		float dt;
+
+		dt = gpGlobals->time - st->lastThinkTime;
+		if( dt < 0.0f || st->thinkFrames == 0 )
+			dt = 0.0f;
+		if( dt > 0.2f )
+			dt = 0.2f; // original FUN_100c6a70 clamp
+		st->hopeDt = dt;
 		st->lastThinkTime = gpGlobals->time;
 		st->thinkFrames++;
+
+		// efw_ThinkHope 0x100c6ad0: hope -= dt * (1/12), clamp 0..100
+		if( !st->talking && dt > 0.0f && st->hope > 0.0f )
+		{
+			st->hope -= dt * ( 1.0f / 12.0f );
+			if( st->hope < 0.0f )
+				st->hope = 0.0f;
+			if( st->hope <= 0.0f )
+				EFW_AdjustHope( pPlayer, 0 );
+		}
+
 		if( ( st->thinkFrames % 30 ) == 1 )
 		{
 			EFW_SendHope( pPlayer );
@@ -1421,14 +1476,28 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			EFW_SyncInv( pPlayer );
 			if( !st->talking )
 			{
+				CBaseEntity *pNpc = EFW_NearestTalkNpc( pPlayer, 200.0f );
 				pMark = EFW_NearestMarker( pPlayer, 140.0f );
-				if( pMark )
+				if( pNpc && ( !pMark || ( pNpc->pev->origin - pPlayer->pev->origin ).Length()
+					<= ( EFW_Place( pMark ) - pPlayer->pev->origin ).Length() ) )
+				{
+					char near[160];
+					snprintf( near, sizeof( near ), "Talk to %s", EFW_ScriptNameForNpc( pNpc ) );
+					EFW_SendHint( pPlayer, near );
+					if( gmsgEFWCtPrv )
+					{
+						MESSAGE_BEGIN( MSG_ONE, gmsgEFWCtPrv, NULL, pPlayer->pev );
+							WRITE_BYTE( ENTINDEX( pNpc->edict() ) );
+						MESSAGE_END();
+					}
+				}
+				else if( pMark )
 				{
 					char near[160];
 					snprintf( near, sizeof( near ), "Use: %s", EFW_MarkerLabel( pMark ) );
 					EFW_SendHint( pPlayer, near );
 				}
-				else if( st->hint[0] && strncmp( st->hint, "Use:", 4 ) )
+				else if( st->hint[0] && strncmp( st->hint, "Use:", 4 ) && strncmp( st->hint, "Talk to", 7 ) )
 					EFW_SendHint( pPlayer, st->hint );
 			}
 			else if( st->hint[0] )
@@ -1439,18 +1508,23 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		if( st->talking )
 		{
 			CBaseEntity *pNpc = CBaseEntity::Instance( INDEXENT( st->talking ) );
-			if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 512.0f )
+			float dist = 0;
+			if( pNpc )
+				dist = ( pNpc->pev->origin - pPlayer->pev->origin ).Length();
+			// original DAT_1011d130 = 200 ; DAT_1011d128 = 20s timeout
+			if( !pNpc || dist > 200.0f )
+			{
+				EFW_Print( pPlayer, "Conversation hidden, partner too far" );
+				EFW_CloseTalk( pPlayer );
+			}
+			else if( st->talkStarted > 0.0f && gpGlobals->time >= st->talkStarted + 20.0f )
 			{
 				EFW_CloseTalk( pPlayer );
 			}
 		}
 
 		if( !st->talking && st->nextHopeDrain && gpGlobals->time >= st->nextHopeDrain )
-		{
-			st->nextHopeDrain = gpGlobals->time + 45.0f;
-			if( st->hope > 8 )
-				EFW_AdjustHope( pPlayer, -1 );
-		}
+			st->nextHopeDrain = 0;
 	}
 
 	slot = 0;

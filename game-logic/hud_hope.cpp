@@ -8,6 +8,20 @@
 DECLARE_MESSAGE( m_Hope, Hope )
 
 static char g_efwHint[192];
+static int g_efwDataHope = -1;
+static int g_efwTalking;
+
+static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
+{
+	BEGIN_READ( pbuf, iSize );
+	g_efwDataHope = READ_BYTE();
+	READ_BYTE();
+	READ_BYTE();
+	g_efwTalking = READ_BYTE();
+	if( iSize > 4 )
+		READ_BYTE();
+	return 1;
+}
 
 static int EFW_ReadShare( const char *name, char *dst, int dstSize )
 {
@@ -96,6 +110,7 @@ int CHudHope::Init( void )
 	g_efwHint[0] = '\0';
 	HOOK_MESSAGE( Hope );
 	gEngfuncs.pfnHookUserMsg( "EfwHint", __MsgFunc_EfwHint );
+	gEngfuncs.pfnHookUserMsg( "EFWData", __MsgFunc_EFWData );
 	gEngfuncs.pfnAddCommand( "efw_js_pick", EFW_JsPick );
 	gEngfuncs.pfnAddCommand( "efw_Talk", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_choose", EFW_FwdServer );
@@ -195,6 +210,7 @@ int CHudHope::MsgFunc_Hope( const char *pszName, int iSize, void *pbuf )
 {
 	BEGIN_READ( pbuf, iSize );
 	m_iHope = READ_BYTE();
+	g_efwDataHope = m_iHope;
 	m_iFlags |= HUD_ACTIVE;
 	return 1;
 }
@@ -214,6 +230,8 @@ int CHudHope::Draw( float flTime )
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 
+	if( m_iHope < 0 && g_efwDataHope >= 0 )
+		m_iHope = g_efwDataHope;
 	if( m_iHope < 0 )
 	{
 		const char *hs = gEngfuncs.pfnGetCvarString( "efw_hope" );
@@ -240,6 +258,8 @@ int CHudHope::Draw( float flTime )
 
 		snprintf( label, sizeof( label ), "HOPE  %d", m_iHope );
 		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
+		if( g_efwTalking )
+			gHUD.DrawHudString( x + w + 88, y + 16, ScreenWidth - 8, "TALK", r, g, b );
 		hy = y + 34;
 	}
 	else

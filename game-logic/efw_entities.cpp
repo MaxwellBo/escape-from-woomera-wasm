@@ -102,6 +102,7 @@ public:
 	int ObjectCaps( void ) { return CBaseMonster::ObjectCaps() | FCAP_IMPULSE_USE; }
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
+	void EXPORT IdleThink( void );
 };
 
 LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
@@ -125,6 +126,34 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 {
 	if( pActivator && pActivator->IsPlayer() )
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
+}
+
+void CRefugee::IdleThink( void )
+{
+	CBaseEntity *pPlayer;
+	const char *tn;
+	Vector delta;
+	float dist;
+
+	// CRefugee::IdleThink 0x100c6440 — skip "queue" NPCs; walk toward the
+	// player when they are 100–300 units away.
+	pev->nextthink = gpGlobals->time + 0.1f;
+	StudioFrameAdvance();
+	tn = STRING( pev->targetname );
+	if( tn && strstr( tn, "queue" ) )
+		return;
+	pPlayer = UTIL_FindEntityByClassname( NULL, "player" );
+	if( !pPlayer )
+		return;
+	delta = pPlayer->pev->origin - pev->origin;
+	delta.z = 0;
+	dist = delta.Length();
+	if( dist < 100.0f || dist > 300.0f )
+		return;
+	pev->movetype = MOVETYPE_STEP;
+	pev->solid = SOLID_SLIDEBOX;
+	pev->angles.y = UTIL_VecToYaw( delta );
+	WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
 }
 
 void CRefugee::Precache( void )
@@ -184,6 +213,8 @@ void CRefugee::Spawn( void )
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
 	EFW_FinishTalkNpc( this );
 	SetUse( &CRefugee::TalkUse );
+	SetThink( &CRefugee::IdleThink );
+	pev->nextthink = gpGlobals->time + 0.1f;
 }
 
 class CPatrolGuard : public CBaseMonster

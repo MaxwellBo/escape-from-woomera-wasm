@@ -47,17 +47,17 @@ demo’s own maps omitted; SDK `delta.lst` added).
 1. Wait for steps 1–2 (mod zip + Uplink `valve/`). The engine boots itself.
 2. Click the game view to capture the mouse (pointer lock) and keyboard. Esc releases the mouse.
 
-## Scripted systems (reimplemented)
+## Scripted systems (decompile port)
 
 The original hope meter, conversations, diary, and markers only shipped as
-Win32 DLLs, and their source was never released. This build **reimplements**
-those systems on hlsdk-portable so they run in WASM:
+Win32 DLLs. Those DLLs were decompiled (`decompile/`) and the recovered
+overlay is compiled into the WASM client/server:
 
-- `monster_refugee` NPCs spawn with detainee models and the `Conversations/*.txt` talk tree (Use / click / `efw_spider`)
-- Hope HUD drains slowly and rises when diary pages unlock
-- Diary (`i`, `[` / `]`) shows the official `EFW_Diary_*.spr` pages
-- `efw_Marker` interactions (pliers workbench, kitchen bin, hiding place, ID tag board). Walk up and press **Use**.
-- EFW inventory weapons (`weapon_efw_*`) including the mail package / SIM card
+- Hope starts at **80** and drains at `dt/12` (original `efw_ThinkHope`)
+- Conversations load `Conversations/*.txt`; hide past **200** units / **20** s
+- `monster_refugee` IdleThink walks toward the player (original 100–300 range)
+- Client HUD hooks original `EFWData` / `EFW_CtPrv` plus diary sprites
+- `efw_Talk` / `efw_Give` / `efw_UseWithMarker` match the recovered ClientCommand chain
 
 Rebuild the WASM modules after changing `game-logic/`:
 

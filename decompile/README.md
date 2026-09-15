@@ -5,7 +5,10 @@ The v0.84 gameplay was compiled as Win32 GoldSrc modules:
 - `dlls/EscapeFromWoomera.dll` (server, 1 302 621 bytes)
 - `cl_dlls/client.dll` (client HUD, 573 440 bytes)
 
-Those binaries are **not loaded** by the WASM engine. This directory recovers their code with Ghidra so a later port can replace the from-scratch overlay in `game-logic/`.
+Those binaries are **not loaded** by the WASM engine. Recovered C lives in
+`out/` and `recovered/`. The playable port is `game-logic/`, compiled into
+`public/hlsdk/{client,server}.wasm` (hope formula, EFWData, conversation
+range, refugee IdleThink, ClientCommand names).
 
 ## Recovered output (this tree)
 

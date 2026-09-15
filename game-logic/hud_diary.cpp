@@ -44,6 +44,11 @@ static int EFW_LoadDiarySprite( int page, HSPRITE *out )
 		snprintf( path, sizeof( path ), "sprites/efw_diary_%02d.spr", page );
 		spr = SPR_Load( path );
 	}
+	if( !spr )
+	{
+		snprintf( path, sizeof( path ), "sprites/efw_diary_%02d%s.spr", page, "" );
+		spr = SPR_Load( path );
+	}
 	if( spr && out )
 		*out = spr;
 	return spr != 0;

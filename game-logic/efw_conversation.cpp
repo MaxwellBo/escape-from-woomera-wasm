@@ -268,6 +268,7 @@ static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->talking = ENTINDEX( pNpc->edict() );
 	st->menuMode = EFW_MENU_TOPICS;
 	st->menuCount = 0;
+	st->talkStarted = gpGlobals->time;
 	snprintf( menu, sizeof( menu ), "Talk to %s\n", npc );
 
 	slot = 0;
@@ -307,6 +308,7 @@ void EFW_CloseTalk( CBasePlayer *pPlayer )
 	st->talking = 0;
 	st->menuMode = EFW_MENU_NONE;
 	st->menuCount = 0;
+	st->talkStarted = 0;
 	EFW_ShowMenu( pPlayer, 0, 0, "" );
 }
 
@@ -399,7 +401,7 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 		strcat( body, "\n1. Continue" );
 	{
 		char tail[32];
-		snprintf( tail, sizeof( tail ), "\nDiary %u hope %d", st->diary, st->hope );
+		snprintf( tail, sizeof( tail ), "\nDiary %u hope %d", st->diary, (int)( st->hope + 0.5f ) );
 		if( strlen( body ) + strlen( tail ) < sizeof( body ) )
 			strcat( body, tail );
 	}
