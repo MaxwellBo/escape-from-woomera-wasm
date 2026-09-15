@@ -54,7 +54,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 canvas#canvas {
   display: block;
-  /* Beat Emscripten inline sizes (it otherwise uses window.innerWidth and clips). */
+  /* SDL/Emscripten sets inline width/height to window.innerWidth with
+     !important. JS rewrites that to 100% so the wrap does not crop the GL
+     framebuffer (see pinWindowSizeToView / lockCanvasCssToWrap). */
   width: 100% !important;
   height: 100% !important;
   background: #000;

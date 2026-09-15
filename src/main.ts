@@ -354,15 +354,58 @@ function writeTree(
 }
 
 /**
- * Xash MainUI lays out in 1024×768 and scales by ScreenHeight/768.
- * That only fits when ScreenWidth >= ScreenHeight * 4/3.
+ * Root cause of the clipped menu:
  *
- * SDL2's Emscripten port reads window.innerWidth/innerHeight as the drawable
- * size — the whole browser, not the canvas. The menu is rasterised for that
- * large screen and the CSS box then clips the right-hand hint column (and
- * originally the top of the menu: GL's origin is bottom-left).
+ * Xash MainUI is authored at 1024×768. When the drawable is ≥ 4:3 it scales
+ * with ScreenHeight/768, so the 1024-wide layout only fits if
+ * ScreenWidth >= ScreenHeight * 4/3.
+ *
+ * SDL2's Emscripten backend does not use the <canvas> box. It treats the
+ * *browser window* as the drawable:
+ *   - wasm imports `window.innerWidth` / `window.innerHeight`
+ *   - `emscripten_get_screen_size` writes `screen.width` / `screen.height`
+ *   - it then sizes the canvas backing store (and often inline CSS
+ *     `width/height: Npx !important`) to that window/screen size
+ *
+ * Our canvas lives in a smaller 4:3 `.canvas-wrap` with `overflow: hidden`.
+ * If the GL backing store is 960×720 while MainUI rasterises for ~1280×window,
+ * WebGL clips to the backing store. GL's origin is bottom-left, so the top of
+ * the menu and the orange QMF_NOTIFY hints on the right are what disappear.
+ *
+ * Fix: report the wrap's pixel size from every metric SDL reads, CSS-lock the
+ * canvas to the wrap, and never shrink the backing store below what the
+ * engine actually allocated (that would clip in GL, which CSS cannot undo).
  */
-function viewBox() {
+type ViewSize = { width: number; height: number };
+
+function protoGetter<T extends object>(obj: T, prop: string): (() => number) | undefined {
+  const desc =
+    Object.getOwnPropertyDescriptor(obj, prop) ??
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), prop);
+  const get = desc?.get;
+  return get ? () => Number(get.call(obj)) : undefined;
+}
+
+const nativeInnerWidth = protoGetter(window, 'innerWidth');
+const nativeInnerHeight = protoGetter(window, 'innerHeight');
+const nativeScreenWidth = protoGetter(screen, 'width');
+const nativeScreenHeight = protoGetter(screen, 'height');
+
+function nativeWindowSize(): ViewSize {
+  return {
+    width: nativeInnerWidth?.() ?? window.innerWidth,
+    height: nativeInnerHeight?.() ?? window.innerHeight,
+  };
+}
+
+function nativeScreenSize(): ViewSize {
+  return {
+    width: nativeScreenWidth?.() ?? screen.width,
+    height: nativeScreenHeight?.() ?? screen.height,
+  };
+}
+
+function viewBox(): ViewSize {
   const wrap = canvas.parentElement;
   const fallback = { width: 960, height: 720 };
   if (!wrap) return fallback;
@@ -372,40 +415,97 @@ function viewBox() {
     width = Math.max(640, width);
     height = Math.round((width * 3) / 4);
   }
-  return { width: width - (width % 2), height: height - (height % 2) };
+  width += width % 2;
+  height -= height % 2;
+  // MainUI needs width >= height * 4/3. Rounding the wrap can make it a
+  // pixel too narrow and clip the hint column.
+  if (width * 3 < height * 4) width += 2;
+  return { width, height };
 }
 
 function sizeGameCanvas() {
   const { width, height } = viewBox();
-  canvas.width = width;
-  canvas.height = height;
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
   return { width, height };
+}
+
+function presentCanvasInWrap() {
+  // Inline `width: 1280px !important` from Emscripten beats stylesheet
+  // `width: 100% !important` and overflows `.canvas-wrap`. Rewrite it every
+  // time SDL touches the style attribute.
+  if (canvas.style.getPropertyValue('width') !== '100%' || canvas.style.getPropertyPriority('width') !== 'important') {
+    canvas.style.setProperty('width', '100%', 'important');
+    canvas.style.setProperty('height', '100%', 'important');
+  }
+}
+
+let canvasCssLocked = false;
+function lockCanvasCssToWrap() {
+  if (canvasCssLocked) return;
+  canvasCssLocked = true;
+  presentCanvasInWrap();
+  new MutationObserver(presentCanvasInWrap).observe(canvas, {
+    attributes: true,
+    attributeFilter: ['style'],
+  });
 }
 
 function logViewMetrics(tag: string) {
   const wrap = canvas.parentElement;
   const r = canvas.getBoundingClientRect();
+  const native = nativeWindowSize();
   log(
-    `${tag}: inner=${window.innerWidth}x${window.innerHeight} wrap=${wrap?.clientWidth ?? 0}x${wrap?.clientHeight ?? 0} ` +
+    `${tag}: native=${native.width}x${native.height} inner=${window.innerWidth}x${window.innerHeight} ` +
+      `screen=${screen.width}x${screen.height} (nativeScreen=${nativeScreenSize().width}x${nativeScreenSize().height}) ` +
+      `wrap=${wrap?.clientWidth ?? 0}x${wrap?.clientHeight ?? 0} ` +
       `attr=${canvas.width}x${canvas.height} css=${Math.round(r.width)}x${Math.round(r.height)} ` +
       `style=${canvas.style.width || '-'}x${canvas.style.height || '-'}`,
   );
 }
 
+function defineMetric(obj: object, prop: string, getter: () => number) {
+  try {
+    Object.defineProperty(obj, prop, {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    });
+    return true;
+  } catch (err) {
+    log(`size-shim ${prop} failed: ${formatErr(err)}`);
+    return false;
+  }
+}
+
 let windowSizePinned = false;
+let drawableShimOk = false;
 function pinWindowSizeToView() {
-  if (windowSizePinned) return;
+  if (windowSizePinned) return drawableShimOk;
   windowSizePinned = true;
-  Object.defineProperty(window, 'innerWidth', {
-    configurable: true,
-    enumerable: true,
-    get: () => viewBox().width,
-  });
-  Object.defineProperty(window, 'innerHeight', {
-    configurable: true,
-    enumerable: true,
-    get: () => viewBox().height,
-  });
+  const widthOf = () => viewBox().width;
+  const heightOf = () => viewBox().height;
+  // innerWidth is what the SDL wasm imports read. screen.* is used by
+  // emscripten_get_screen_size — best-effort, some browsers lock it.
+  const innerOk =
+    defineMetric(window, 'innerWidth', widthOf) && defineMetric(window, 'innerHeight', heightOf);
+  defineMetric(window, 'outerWidth', widthOf);
+  defineMetric(window, 'outerHeight', heightOf);
+  defineMetric(screen, 'width', widthOf);
+  defineMetric(screen, 'height', heightOf);
+  defineMetric(screen, 'availWidth', widthOf);
+  defineMetric(screen, 'availHeight', heightOf);
+  const target = viewBox();
+  drawableShimOk = innerOk && window.innerWidth === target.width && window.innerHeight === target.height;
+  if (window.visualViewport) {
+    defineMetric(window.visualViewport, 'width', widthOf);
+    defineMetric(window.visualViewport, 'height', heightOf);
+  }
+  log(
+    `size-shim: target=${target.width}x${target.height} inner=${window.innerWidth}x${window.innerHeight} ` +
+      `native=${nativeWindowSize().width}x${nativeWindowSize().height} ok=${drawableShimOk}`,
+  );
+  return drawableShimOk;
 }
 
 function inputCaptured() {
@@ -457,21 +557,20 @@ async function boot() {
     }
 
     setVeil('Starting engine…', 'Initializing Xash3D WebAssembly runtime.', 0.7);
-    pinWindowSizeToView();
-    const view = sizeGameCanvas();
-    log(`boot: creating Xash3D (${view.width}x${view.height})`);
+    lockCanvasCssToWrap();
+    const shimOk = pinWindowSizeToView();
+    const view = viewBox();
+    // Only stamp the backing store to the wrap when SDL will agree. If the
+    // size shim failed, leaving canvas.width at the wrap would GL-clip the
+    // window-sized menu (hints on the right, title at the top).
+    if (shimOk) sizeGameCanvas();
+    log(`boot: creating Xash3D (${view.width}x${view.height}) shim=${shimOk}`);
     logViewMetrics('pre-init');
     engine = new Xash3D({
       canvas,
-      arguments: [
-        '-windowed',
-        '-width',
-        String(view.width),
-        '-height',
-        String(view.height),
-        '-game',
-        GAME_DIR,
-      ],
+      arguments: shimOk
+        ? ['-windowed', '-width', String(view.width), '-height', String(view.height), '-game', GAME_DIR]
+        : ['-windowed', '-game', GAME_DIR],
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -551,14 +650,17 @@ async function boot() {
     log('boot: main()');
     logViewMetrics('pre-main');
     engine.main();
-    canvas.style.setProperty('width', '100%', 'important');
-    canvas.style.setProperty('height', '100%', 'important');
-    setTimeout(() => logViewMetrics('post-main'), 800);
+    presentCanvasInWrap();
+    setTimeout(() => {
+      presentCanvasInWrap();
+      logViewMetrics('post-main');
+      engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
+    }, 800);
     veil.classList.add('hidden');
     mapsPanel.classList.remove('hidden');
     markDone('step-launch');
     launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
-    engineStatus.textContent = 'running';
+    engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
     log('engine main loop started; auto-loading efw_prototype_level1…');
     canvas.focus();
     engine.Cmd_ExecuteString('in_mouse 1');
