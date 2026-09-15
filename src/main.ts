@@ -447,7 +447,6 @@ async function boot() {
         printErr: (text: string) => log(`ERR: ${text}`),
         // Emscripten only auto-locks the pointer on click when this is set.
         elementPointerLock: true,
-        keyboardListeningElement: canvas,
       },
     });
     log('boot: init()');
@@ -549,6 +548,8 @@ canvas.addEventListener('click', () => void captureInput());
 canvas.addEventListener('pointerdown', () => canvas.focus());
 document.addEventListener('pointerlockchange', syncCaptureUi);
 document.addEventListener('pointerlockerror', () => log('pointer lock error'));
+consoleInput.addEventListener('keydown', (e) => e.stopPropagation());
+consoleInput.addEventListener('keyup', (e) => e.stopPropagation());
 
 mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
