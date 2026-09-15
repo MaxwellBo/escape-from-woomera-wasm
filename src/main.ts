@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay19`;
+    return `${url}?v=efw-overlay20`;
   return url;
 }
 
@@ -102,8 +102,6 @@ function pokeGameInput(slot: number) {
   pickSeq += 1;
   const line = `${pickSeq} ${slot}`;
   log(`> poke ${line}`);
-  if (document.pointerLockElement)
-    document.exitPointerLock();
   const FS = (engine?.em as unknown as {
     FS?: { writeFile: (p: string, d: Uint8Array | string) => void };
   })?.FS;
@@ -122,6 +120,7 @@ function pokeGameInput(slot: number) {
   runEngineCmd(`set efw_pick ${slot}`);
   runEngineCmd(`efw_pick ${slot}`);
   runEngineCmd(`efw_choose ${slot}`);
+  void captureInput();
 }
 
 function chooseTalkSlot(slot: number) {
@@ -625,7 +624,7 @@ async function boot() {
         print: (text: string) => log(text),
         printErr: (text: string) => log(`ERR: ${text}`),
         // Emscripten only auto-locks the pointer on click when this is set.
-        elementPointerLock: false,
+        elementPointerLock: true,
       },
     });
     log('boot: init()');
@@ -715,6 +714,9 @@ async function boot() {
     setInterval(() => {
       runEngineCmd('pausable 0');
     }, 1000);
+    setInterval(() => {
+      void captureInput();
+    }, 2500);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
@@ -761,15 +763,12 @@ consoleForm.addEventListener('submit', (e) => {
 
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (E / efw_Talk)');
-  if (document.pointerLockElement)
-    document.exitPointerLock();
   runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
+  void captureInput();
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
   log('> diary (I / efw_diary)');
-  if (document.pointerLockElement)
-    document.exitPointerLock();
   runEngineCmd('pausable 0');
   pokeGameInput(199);
 });
@@ -780,9 +779,9 @@ document.querySelectorAll<HTMLButtonElement>('button[data-talk]').forEach((btn) 
       chooseTalkSlot(slot);
   });
 });
-mapsPanel.addEventListener('pointerdown', () => {
-  if (document.pointerLockElement)
-    document.exitPointerLock();
+mapsPanel.addEventListener('pointerdown', (e) => {
+  if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLInputElement)
+    return;
 });
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
