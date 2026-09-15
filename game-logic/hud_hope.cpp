@@ -76,6 +76,7 @@ int CHudHope::Init( void )
 	HOOK_MESSAGE( Hope );
 	gEngfuncs.pfnHookUserMsg( "EfwHint", __MsgFunc_EfwHint );
 	gEngfuncs.pfnAddCommand( "efw_Talk", EFW_FwdServer );
+	gEngfuncs.pfnAddCommand( "efw_choose", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_diary", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_diary_next", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_diary_prev", EFW_FwdServer );
@@ -187,6 +188,11 @@ int CHudHope::Draw( float flTime )
 					off += snprintf( pages + off, sizeof( pages ) - off, " %d", i );
 			}
 			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, pages, r, g, b );
+			hy += 14;
+		}
+		if( EFW_ReadShare( "efw_pick.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] )
+		{
+			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, fileHud, r, g, b );
 			hy += 14;
 		}
 		if( !g_efwHint[0] && EFW_ReadShare( "efw_hud.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] && strncmp( fileHud, "t=", 2 ) )

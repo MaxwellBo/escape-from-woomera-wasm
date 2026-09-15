@@ -19,6 +19,7 @@ static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist );
 static void EFW_ToggleDiary( CBasePlayer *pPlayer );
 static void EFW_StepDiary( CBasePlayer *pPlayer, int dir );
 static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot );
+static void EFW_ApplyTalkInputForce( CBasePlayer *pPlayer, int slot, int force );
 static CBasePlayer *EFW_ListenPlayer( void );
 
 static void EFW_WriteShare( const char *name, const char *text )
@@ -87,10 +88,16 @@ EfwState *EFW_GetState( CBasePlayer *pPlayer )
 
 static CBasePlayer *EFW_ListenPlayer( void )
 {
-	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
-	if( !ed || !ed->pvPrivateData )
-		return NULL;
-	return GetClassPtr( (CBasePlayer *)&ed->v );
+	int i;
+	for( i = 1; i <= 32; i++ )
+	{
+		edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( i );
+		if( !ed || !ed->pvPrivateData )
+			continue;
+		if( ed->v.flags & FL_CLIENT )
+			return GetClassPtr( (CBasePlayer *)&ed->v );
+	}
+	return NULL;
 }
 
 static void EFW_HostClientCmd( void )
@@ -111,16 +118,25 @@ static void EFW_HostChoose( void )
 	CBasePlayer *pPlayer = EFW_ListenPlayer();
 	EfwState *st;
 	int slot = 1;
+	char trace[96];
 	if( CMD_ARGC() > 1 )
 		slot = atoi( CMD_ARGV( 1 ) );
 	if( slot < 1 )
 		slot = 1;
-	ALERT( at_console, "efw: host choose %d\n", slot );
+	snprintf( trace, sizeof( trace ), "host-choose %d player=%s", slot, pPlayer ? "ok" : "none" );
+	EFW_WriteShare( "efw_pick.txt", trace );
+	ALERT( at_console, "efw: host choose %d player=%s\n", slot, pPlayer ? "ok" : "none" );
 	if( !pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
+	if( !st->talking )
+	{
+		CBaseEntity *pNear = EFW_NearestTalkNpc( pPlayer, 512.0f );
+		if( pNear )
+			EFW_StartTalk( pPlayer, pNear );
+	}
 	st->pendingChoice = slot;
-	EFW_ApplyTalkInput( pPlayer, slot );
+	EFW_ApplyTalkInputForce( pPlayer, slot, 1 );
 }
 
 static void EFW_HostDiaryToggle( void )
@@ -951,7 +967,7 @@ static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist )
 	return pBest;
 }
 
-static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot )
+static void EFW_ApplyTalkInputForce( CBasePlayer *pPlayer, int slot, int force )
 {
 	EfwState *st;
 
@@ -960,7 +976,7 @@ static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot )
 	st = EFW_GetState( pPlayer );
 	if( !st->talking )
 		return;
-	if( st->choiceLock && gpGlobals->time > 0.0f && gpGlobals->time < st->choiceLock )
+	if( !force && st->choiceLock && gpGlobals->time > 0.0f && gpGlobals->time < st->choiceLock )
 		return;
 	if( slot < 1 )
 		slot = 1;
@@ -970,6 +986,11 @@ static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot )
 		EFW_ChooseTalk( pPlayer, slot );
 	else if( st->menuMode == EFW_MENU_CONTINUE || st->menuMode == EFW_MENU_TEXT )
 		EFW_ContinueTalk( pPlayer );
+}
+
+static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot )
+{
+	EFW_ApplyTalkInputForce( pPlayer, slot, 0 );
 }
 
 int EFW_ClientCommand( edict_t *pEntity )
@@ -990,14 +1011,17 @@ int EFW_ClientCommand( edict_t *pEntity )
 		pcmd = CMD_ARGV( 1 );
 	}
 
-	if( FStrEq( pcmd, "menuselect" ) )
+	if( FStrEq( pcmd, "menuselect" ) || FStrEq( pcmd, "efw_choose" ) )
 	{
 		EfwState *st = EFW_GetState( pPlayer );
 		int slot = atoi( CMD_ARGV( arg0 + 1 ) );
-		if( st->menuMode == EFW_MENU_TOPICS )
-			EFW_ChooseTalk( pPlayer, slot );
-		else if( st->menuMode == EFW_MENU_CONTINUE || st->menuMode == EFW_MENU_TEXT )
-			EFW_ContinueTalk( pPlayer );
+		if( !st->talking )
+		{
+			CBaseEntity *pNear = EFW_NearestTalkNpc( pPlayer, 512.0f );
+			if( pNear )
+				EFW_StartTalk( pPlayer, pNear );
+		}
+		EFW_ApplyTalkInputForce( pPlayer, slot, 1 );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_Talk" ) )
@@ -1100,33 +1124,53 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
-	if( st->lastThinkTime == gpGlobals->time && st->thinkFrames > 0 )
-		return;
-	st->lastThinkTime = gpGlobals->time;
-	st->thinkFrames++;
-
-	if( ( st->thinkFrames % 30 ) == 1 )
+	if( st->lastThinkTime != gpGlobals->time || st->thinkFrames == 0 )
 	{
-		CBaseEntity *pNear;
-		EFW_SendHope( pPlayer );
-		EFW_SendDiary( pPlayer );
-		if( st->hint[0] )
-			EFW_SendHint( pPlayer, st->hint );
-		if( !st->talking )
+		st->lastThinkTime = gpGlobals->time;
+		st->thinkFrames++;
+		if( ( st->thinkFrames % 30 ) == 1 )
 		{
-			pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
+			CBaseEntity *pNear;
+			EFW_SendHope( pPlayer );
+			EFW_SendDiary( pPlayer );
+			if( st->hint[0] )
+				EFW_SendHint( pPlayer, st->hint );
+			if( !st->talking )
+			{
+				pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
+				if( pNear )
+					EFW_StartTalk( pPlayer, pNear );
+			}
+			SERVER_COMMAND( "pausable 0\nunpause\n" );
+		}
+
+		if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
+		{
+			CBaseEntity *pNear;
+			st->autoTalkAt = 0;
+			pNear = EFW_NearestTalkNpc( pPlayer, 200.0f );
 			if( pNear )
 				EFW_StartTalk( pPlayer, pNear );
 		}
-	}
 
-	if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
-	{
-		CBaseEntity *pNear;
-		st->autoTalkAt = 0;
-		pNear = EFW_NearestTalkNpc( pPlayer, 200.0f );
-		if( pNear )
-			EFW_StartTalk( pPlayer, pNear );
+		if( st->talking )
+		{
+			CBaseEntity *pNpc = CBaseEntity::Instance( INDEXENT( st->talking ) );
+			if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 512.0f )
+			{
+				EFW_Print( pPlayer, "Conversation hidden, partner too far" );
+				EFW_CloseTalk( pPlayer );
+			}
+		}
+
+		if( st->nextHopeDrain && gpGlobals->time >= st->nextHopeDrain )
+		{
+			st->nextHopeDrain = gpGlobals->time + 28.0f;
+			if( st->hope > 1 )
+				EFW_AdjustHope( pPlayer, -1 );
+			else
+				EFW_AdjustHope( pPlayer, -st->hope );
+		}
 	}
 
 	slot = 0;
@@ -1177,25 +1221,6 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
 			pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
 		}
-	}
-
-	if( st->talking )
-	{
-		CBaseEntity *pNpc = CBaseEntity::Instance( INDEXENT( st->talking ) );
-		if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 512.0f )
-		{
-			EFW_Print( pPlayer, "Conversation hidden, partner too far" );
-			EFW_CloseTalk( pPlayer );
-		}
-	}
-
-	if( st->nextHopeDrain && gpGlobals->time >= st->nextHopeDrain )
-	{
-		st->nextHopeDrain = gpGlobals->time + 28.0f;
-		if( st->hope > 1 )
-			EFW_AdjustHope( pPlayer, -1 );
-		else
-			EFW_AdjustHope( pPlayer, -st->hope );
 	}
 }
 

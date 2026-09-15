@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay15`;
+    return `${url}?v=efw-overlay16`;
   return url;
 }
 
@@ -98,22 +98,21 @@ function pressGameKey(key: string, keyCode: number) {
 
 function chooseTalkSlot(slot: number) {
   log(`> talk choice ${slot}`);
-  void captureInput();
-  pressGameKey(String(slot), 48 + slot);
-  runEngineCmd(`impulse ${slot}`);
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  canvas.focus();
+  runEngineCmd('pausable 0');
+  runEngineCmd('unpause');
   runEngineCmd(`efw_choose ${slot}`);
   runEngineCmd(`menuselect ${slot}`);
-  runGameCmd(`menuselect ${slot}`);
-  if (slot === 1) {
-    runEngineCmd('+attack');
-    setTimeout(() => runEngineCmd('-attack'), 180);
-  }
+  runGameCmd(`efw_choose ${slot}`);
 }
 
 function runEngineCmd(cmd: string) {
   if (!engine) return;
+  const withNl = cmd.endsWith('\n') ? cmd : `${cmd}\n`;
   try {
-    engine.Cmd_ExecuteString(cmd);
+    engine.Cmd_ExecuteString(withNl);
   } catch (err) {
     log(`cmd failed (${cmd}): ${formatErr(err)}`);
   }
@@ -694,8 +693,9 @@ async function boot() {
       runEngineCmd('map efw_prototype_level1');
     }, 4000);
     setInterval(() => {
+      runEngineCmd('pausable 0');
       runEngineCmd('unpause');
-    }, 3000);
+    }, 1000);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
@@ -742,17 +742,16 @@ consoleForm.addEventListener('submit', (e) => {
 
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (E / efw_Talk)');
-  void captureInput();
-  pressGameKey('e', 69);
-  runEngineCmd('+use');
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  runEngineCmd('unpause');
   runGameCmd('efw_Talk');
-  setTimeout(() => runEngineCmd('-use'), 200);
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
-  log('> diary (I / impulse 199)');
-  void captureInput();
-  pressGameKey('i', 73);
-  runEngineCmd('impulse 199');
+  log('> diary (I / efw_diary)');
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  runEngineCmd('unpause');
   runEngineCmd('efw_diary');
   runGameCmd('efw_diary');
 });
@@ -762,6 +761,21 @@ document.querySelectorAll<HTMLButtonElement>('button[data-talk]').forEach((btn) 
     if (Number.isFinite(slot) && slot > 0)
       chooseTalkSlot(slot);
   });
+});
+mapsPanel.addEventListener('pointerdown', () => {
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.target === consoleInput || e.target instanceof HTMLInputElement)
+    return;
+  if (e.repeat)
+    return;
+  if (e.key >= '1' && e.key <= '9') {
+    chooseTalkSlot(Number(e.key));
+  } else if (e.key === 'i' || e.key === 'I') {
+    document.getElementById('btn-diary')?.click();
+  }
 });
 
 document.getElementById('btn-about')?.addEventListener('click', () => {
