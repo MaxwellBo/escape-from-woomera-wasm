@@ -1221,6 +1221,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 		EFW_ApplyTalkInputForce( pPlayer, slot, 1 );
 		return 1;
 	}
+	if( FStrEq( pcmd, "efw_goto" ) )
+	{
+		EFW_HostGoto();
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_Talk" ) )
 	{
 		CBaseEntity *pEnt = NULL;
