@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay13`;
+    return `${url}?v=efw-overlay14`;
   return url;
 }
 
@@ -556,6 +556,8 @@ async function boot() {
             '1',
             '+deathmatch',
             '0',
+            '+pausable',
+            '0',
             '+map',
             'efw_prototype_level1',
           ]
@@ -566,6 +568,8 @@ async function boot() {
             '+mp_allowmonsters',
             '1',
             '+deathmatch',
+            '0',
+            '+pausable',
             '0',
             '+map',
             'efw_prototype_level1',
@@ -667,8 +671,13 @@ async function boot() {
     // That used to hit boot()'s catch and null `engine`, leaving the menu
     // on-screen but every later map/console button as a no-op.
     setTimeout(() => {
+      runEngineCmd('pausable 0');
+      runEngineCmd('unpause');
       runEngineCmd('map efw_prototype_level1');
     }, 4000);
+    setInterval(() => {
+      runEngineCmd('unpause');
+    }, 3000);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;

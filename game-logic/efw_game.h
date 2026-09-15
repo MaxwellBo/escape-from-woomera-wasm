@@ -42,6 +42,7 @@ struct EfwState
 	int hudPulses;
 	char hint[180];
 	float autoTalkAt;
+	int thinkFrames;
 };
 
 EfwState *EFW_GetState( CBasePlayer *pPlayer );

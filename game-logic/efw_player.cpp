@@ -489,9 +489,11 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 		EFW_Print( pPlayer, buf );
 		EFW_SendHint( pPlayer, buf );
 	}
-	st->hudRetry = gpGlobals->time + 2.5f;
-	st->hudPulses = 20;
-	st->autoTalkAt = gpGlobals->time + 3.5f;
+	st->hudRetry = gpGlobals->time + 0.5f;
+	st->hudPulses = 40;
+	st->autoTalkAt = gpGlobals->time + 1.0f;
+	CVAR_SET_FLOAT( "pausable", 0 );
+	SERVER_COMMAND( "pausable 0\nunpause\n" );
 }
 
 static const char *kPackageText =
@@ -1021,13 +1023,12 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
-	if( st->hudPulses && st->hudRetry && gpGlobals->time >= st->hudRetry )
+	st->thinkFrames++;
+	if( ( st->thinkFrames % 30 ) == 1 )
 	{
 		CBaseEntity *pNear;
 		char beat[192];
-		st->hudPulses--;
-		st->hudRetry = gpGlobals->time + 1.0f;
-		pPlayer->pev->armorvalue = ( st->hudPulses & 1 ) ? (float)st->hope : (float)( st->hope ? st->hope - 1 : 0 );
+		pPlayer->pev->armorvalue = ( st->thinkFrames & 32 ) ? (float)st->hope : (float)( st->hope ? st->hope - 1 : 0 );
 		pPlayer->pev->iuser1 = (int)( gpGlobals->time * 10.0f );
 		pPlayer->pev->iuser2 = st->talking;
 		{
