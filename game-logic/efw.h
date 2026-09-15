@@ -13,6 +13,7 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer );
 void EFW_PlayerPreThink( CBasePlayer *pPlayer );
 void EFW_LinkUserMessages( void );
 void EFW_OverrideNpcModel( CBaseEntity *pEntity );
+int EFW_RefugeeCount( void );
 void EFW_Spider( CBasePlayer *pPlayer );
 void EFW_Precache( void );
 #endif

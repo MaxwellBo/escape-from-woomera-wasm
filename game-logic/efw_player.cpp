@@ -39,12 +39,34 @@ EfwState *EFW_GetState( CBasePlayer *pPlayer )
 	return &g_efw[i];
 }
 
+static void EFW_HostClientCmd( void )
+{
+	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
+	if( !ed || !ed->pvPrivateData )
+		return;
+	EFW_ClientCommand( ed );
+}
+
 void EFW_LinkUserMessages( void )
 {
 	if( !gmsgHope )
 		gmsgHope = REG_USER_MSG( "Hope", 1 );
 	if( !gmsgEfwDiary )
 		gmsgEfwDiary = REG_USER_MSG( "EfwDiary", 6 );
+	if( g_engfuncs.pfnAddServerCommand )
+	{
+		static int registered;
+		if( !registered )
+		{
+			registered = 1;
+			g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
+		}
+	}
 }
 
 void EFW_Precache( void )
@@ -298,7 +320,11 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_SendHope( pPlayer );
 	EFW_SendDiary( pPlayer );
 	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\n" );
-	EFW_Print( pPlayer, "Objectives: talk to the others, keep hope alive, find a way out. Press I for the diary, E or click to talk." );
+	{
+		char buf[96];
+		snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
+		EFW_Print( pPlayer, buf );
+	}
 }
 
 static const char *kPackageText =
