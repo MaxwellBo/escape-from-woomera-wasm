@@ -272,9 +272,13 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
+	EfwDllState *st;
 	if( !pPlayer || !pNpc )
 		return;
 	EFW_SetPlayer( pPlayer );
+	st = EFW_Dll();
+	if( st->talkActive && st->talkNpc == pNpc && st->menuMode != 0 )
+		return;
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }

@@ -61,6 +61,31 @@ static int __MsgFunc_EFW_CtPrv( const char *pszName, int iSize, void *pbuf )
 	return 1;
 }
 
+int EFW_ClientKey( int down, int keynum )
+{
+	int slot = 0;
+	char buf[32];
+	if( !down )
+		return 1;
+	if( keynum >= '1' && keynum <= '9' )
+		slot = keynum - '0';
+	else if( keynum >= 1 && keynum <= 9 )
+		slot = keynum;
+	if( slot )
+	{
+		snprintf( buf, sizeof( buf ), "menuselect %d\n", slot );
+		gEngfuncs.pfnServerCmd( buf );
+		if( g_talkPrompt )
+			return 0;
+	}
+	if( keynum == 'i' || keynum == 'I' )
+	{
+		gEngfuncs.pfnServerCmd( "efw_diary\n" );
+		return 0;
+	}
+	return 1;
+}
+
 int CHudEfw::Init( void )
 {
 	g_hope = -1;

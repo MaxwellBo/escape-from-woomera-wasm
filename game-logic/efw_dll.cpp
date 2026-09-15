@@ -133,8 +133,19 @@ void EFW_ThinkDt( void )
 void EFW_ThinkHope( void )
 {
 	float hope;
+	float now = gpGlobals->time;
+	float elapsed;
+
+	if( g_efw.hopeClock <= 0.0f )
+		g_efw.hopeClock = now;
+	elapsed = now - g_efw.hopeClock;
+	if( elapsed <= 0.0f )
+		return;
+	g_efw.hopeClock = now;
+	if( elapsed > 0.2f )
+		elapsed = 0.2f;
 	hope = EFW_GetHudFloat( 1 );
-	hope -= g_efw.dt * ( 1.0f / 12.0f );
+	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
 		hope = 0.0f;
 	if( hope > 100.0f )
@@ -163,13 +174,17 @@ void EFW_SendHudState( void )
 	EFW_SetHudInt( 1, page );
 	EFW_SetHudInt( 2, ( cursor < EFW_MAX_DIARY ) ? g_efw.diaryFlags[cursor] : 0 );
 	EFW_SetHudInt( 3, EFW_MapLevel() );
-	EFW_SendEfwData();
 	if( g_efw.player && g_efw.player->m_pActiveItem )
 		EFW_SetHudInt( 4, g_efw.player->m_pActiveItem->m_iId );
 	else
 		EFW_SetHudInt( 4, -1 );
+	if( gpGlobals->time - g_efw.hudRetry >= 0.1f )
+	{
+		g_efw.hudRetry = gpGlobals->time;
+		EFW_SendEfwData();
+		EFW_TalkScan();
+	}
 	EFW_ThinkConversation();
-	EFW_TalkScan();
 }
 
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )

@@ -25,8 +25,10 @@ struct EfwDllState
 	int hudInt[7];
 	unsigned char blob[EFW_HUD_BLOB];
 
-	float lastTime;     /* DAT_1013486c */
-	float dt;           /* DAT_10134874 */
+	float lastTime;
+	float dt;
+	float hopeClock;
+	float hudRetry;
 	int diaryPages[EFW_MAX_DIARY]; /* DAT_10134444 */
 	int diaryCount;     /* DAT_10134870 */
 	int diaryFlags[EFW_MAX_DIARY]; /* DAT_10134474 */

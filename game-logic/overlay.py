@@ -52,6 +52,7 @@ def main() -> None:
             "dlls/barney.cpp",
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
+            "cl_dll/input.cpp",
         ]
         subprocess.run(["git", "-C", str(sdk), "checkout", "--", *tracked], check=False)
     for leftover in (
@@ -274,6 +275,26 @@ def main() -> None:
         "\tm_Flash.Init();\n",
         "\tm_Flash.Init();\n"
         f"\tm_Efw.Init(); {MARKER}\n",
+    )
+
+    input_cpp = cldll / "input.cpp"
+    once(
+        input_cpp,
+        "int DLLEXPORT HUD_Key_Event( int down, int keynum, const char *pszCurrentBinding )\n"
+        "{\n"
+        "	if (gViewPort)\n"
+        "		return gViewPort->KeyInput(down, keynum, pszCurrentBinding);\n"
+        "	return 1;\n"
+        "}\n",
+        "extern int EFW_ClientKey( int down, int keynum ); /* EFW_OVERLAY */\n"
+        "int DLLEXPORT HUD_Key_Event( int down, int keynum, const char *pszCurrentBinding )\n"
+        "{\n"
+        "	if( EFW_ClientKey( down, keynum ) == 0 )\n"
+        "		return 0;\n"
+        "	if (gViewPort)\n"
+        "		return gViewPort->KeyInput(down, keynum, pszCurrentBinding);\n"
+        "	return 1;\n"
+        "}\n",
     )
 
     cmake_root = sdk / "CMakeLists.txt"
