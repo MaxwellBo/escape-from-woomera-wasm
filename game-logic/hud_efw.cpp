@@ -222,12 +222,15 @@ int CHudEfw::Draw( float flTime )
 	{
 		int dw, dh, dx, dy;
 		wrect_t rc;
+		char dlabel[32];
 		if( g_loadedPage != g_diaryPage )
 		{
 			g_hDiary = 0;
 			EFW_LoadDiarySprite( g_diaryPage, &g_hDiary );
 			g_loadedPage = g_diaryPage;
 		}
+		snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
+		gHUD.DrawHudString( ScreenWidth - 160, 32, ScreenWidth - 8, dlabel, r, g, b );
 		if( g_hDiary )
 		{
 			dw = SPR_Width( g_hDiary, 0 );
@@ -244,12 +247,6 @@ int CHudEfw::Draw( float flTime )
 			rc.bottom = dh;
 			SPR_Set( g_hDiary, 255, 255, 255 );
 			SPR_DrawHoles( 0, dx, dy, &rc );
-		}
-		else
-		{
-			char dlabel[32];
-			snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
-			gHUD.DrawHudString( ScreenWidth - 160, 48, ScreenWidth - 8, dlabel, r, g, b );
 		}
 	}
 	return 1;

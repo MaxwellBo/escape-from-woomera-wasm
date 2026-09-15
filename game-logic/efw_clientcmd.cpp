@@ -187,6 +187,7 @@ static void EFW_ToggleDiary( void )
 {
 	int open = EFW_GetHudInt( 5 ) ? 0 : 1;
 	EFW_SetHudInt( 5, open );
+	EFW_DebugPrint( ">>> efw_diary open=%d page=%d", open, EFW_GetHudInt( 1 ) );
 	EFW_SendEfwData();
 }
 
