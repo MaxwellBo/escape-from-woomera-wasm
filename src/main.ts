@@ -70,6 +70,15 @@ function fmtMB(bytes: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+function runEngineCmd(cmd: string) {
+  if (!engine) return;
+  try {
+    engine.Cmd_ExecuteString(cmd);
+  } catch (err) {
+    log(`cmd failed (${cmd}): ${formatErr(err)}`);
+  }
+}
+
 function formatErr(err: unknown): string {
   if (err instanceof Error) {
     const extra = 'errno' in err ? ` errno=${String((err as { errno?: unknown }).errno)}` : '';
@@ -504,8 +513,18 @@ async function boot() {
     engine = new Xash3D({
       canvas,
       arguments: shimOk
-        ? ['-windowed', '-width', String(view.width), '-height', String(view.height), '-game', GAME_DIR]
-        : ['-windowed', '-game', GAME_DIR],
+        ? [
+            '-windowed',
+            '-width',
+            String(view.width),
+            '-height',
+            String(view.height),
+            '-game',
+            GAME_DIR,
+            '+map',
+            'efw_prototype_level1',
+          ]
+        : ['-windowed', '-game', GAME_DIR, '+map', 'efw_prototype_level1'],
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -598,14 +617,12 @@ async function boot() {
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
     log('engine main loop started; auto-loading efw_prototype_level1…');
     canvas.focus();
-    engine.Cmd_ExecuteString('in_mouse 1');
-    engine.Cmd_ExecuteString('m_rawinput 1');
+    // Host command buffer is not ready at this instant; calling into it can
+    // abort the runtime with `throw Infinity` (`_Mem_Alloc: pool == NULL`).
+    // That used to hit boot()'s catch and null `engine`, leaving the menu
+    // on-screen but every later map/console button as a no-op.
     setTimeout(() => {
-      try {
-        engine?.Cmd_ExecuteString('map efw_prototype_level1');
-      } catch (err) {
-        log(`auto-map failed: ${String(err)}`);
-      }
+      runEngineCmd('map efw_prototype_level1');
     }, 4000);
   } catch (err) {
     const msg = formatErr(err);
@@ -632,7 +649,7 @@ mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
     log(`> map ${map}`);
-    engine?.Cmd_ExecuteString(`map ${map}`);
+    runEngineCmd(`map ${map}`);
     void captureInput();
   });
 });
@@ -642,7 +659,7 @@ consoleForm.addEventListener('submit', (e) => {
   const cmd = consoleInput.value.trim();
   if (!cmd) return;
   log(`> ${cmd}`);
-  engine?.Cmd_ExecuteString(cmd);
+  runEngineCmd(cmd);
   consoleInput.value = '';
 });
 
