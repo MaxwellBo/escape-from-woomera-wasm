@@ -99,9 +99,7 @@ function pressGameKey(key: string, keyCode: number) {
 function chooseTalkSlot(slot: number) {
   log(`> cmd menuselect ${slot}`);
   runEngineCmd('pausable 0');
-  /* Host `cmd` + AddServerCommand menuselect: GetAsyncKeyState stand-in. */
   runEngineCmd(`cmd menuselect ${slot}`);
-  runEngineCmd(`menuselect ${slot}`);
 }
 
 function runEngineCmd(cmd: string) {
@@ -118,9 +116,11 @@ function runEngineCmd(cmd: string) {
 function runGameCmd(cmd: string) {
   const trimmed = cmd.trim();
   if (!trimmed) return;
-  runEngineCmd(trimmed);
+  /* Send listen-server ClientCommand once. Host+cmd together XOR-toggled diary. */
   if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b)/i.test(trimmed))
     runEngineCmd(`cmd ${trimmed}`);
+  else
+    runEngineCmd(trimmed);
 }
 
 function formatErr(err: unknown): string {
