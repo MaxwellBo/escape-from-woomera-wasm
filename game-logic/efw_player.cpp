@@ -931,6 +931,8 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 	if( !pMarker )
 		return;
 	EFW_CloseTalk( pPlayer );
+	st->diaryOpen = 0;
+	EFW_SendDiary( pPlayer );
 	name = STRING( pMarker->pev->targetname );
 	map = STRING( gpGlobals->mapname );
 
@@ -1277,6 +1279,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_Give" ) )
 	{
 		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
+		EfwState *gst = EFW_GetState( pPlayer );
+		if( gst->items & EFW_ITEM_PLIERS )
+		{
+			CBaseEntity *pAmir = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			if( pAmir && ( pAmir->pev->origin - pPlayer->pev->origin ).Length() < 280.0f )
+				pEnt = pAmir;
+		}
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
