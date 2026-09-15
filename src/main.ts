@@ -13,9 +13,7 @@ const assetsStatus = document.getElementById('assets-status') as HTMLSpanElement
 const valveStatus = document.getElementById('valve-status') as HTMLSpanElement;
 const launchStatus = document.getElementById('launch-status') as HTMLSpanElement;
 const engineStatus = document.getElementById('engine-status') as HTMLElement;
-const btnFolder = document.getElementById('btn-folder') as HTMLButtonElement;
 const btnLaunch = document.getElementById('btn-launch') as HTMLButtonElement;
-const dirInput = document.getElementById('dir-input') as HTMLInputElement;
 const mapsPanel = document.getElementById('maps-panel') as HTMLDivElement;
 const consoleForm = document.getElementById('console-form') as HTMLFormElement;
 const consoleInput = document.getElementById('console-input') as HTMLInputElement;
@@ -236,21 +234,6 @@ function patchLibList(original: string): string {
   ].join('\n');
 }
 
-// ---- Half-Life folder intake ----------------------------------------------
-
-async function collectDirectory(handle: unknown, base: string, out: Map<string, Uint8Array>) {
-  const dir = handle as { values: () => AsyncIterable<{ kind: string; name: string; getFile?: () => Promise<File> }> };
-  for await (const entry of dir.values()) {
-    const path = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.kind === 'file') {
-      const file = await entry.getFile!();
-      out.set(path, new Uint8Array(await file.arrayBuffer()));
-    } else if (entry.kind === 'directory') {
-      await collectDirectory(entry, path, out);
-    }
-  }
-}
-
 function summarizeValve() {
   let bytes = 0;
   let pak = 0;
@@ -261,52 +244,6 @@ function summarizeValve() {
     if (/(^|\/)valve\/models\//i.test(p)) models++;
   }
   return { files: staged.valve.size, bytes, pak, models };
-}
-
-async function acceptValveFiles() {
-  seedDeltaLst();
-  const { files, bytes, pak, models } = summarizeValve();
-  if (pak === 0 && models === 0) {
-    valveStatus.textContent = `picked ${files} files but no valve/ models or pak — pick the Half-Life root`;
-    log(`WARNING: valve intake has ${files} files but no pak0.pak / models; boot will likely fail`);
-    btnLaunch.disabled = true;
-    return;
-  }
-  valveStatus.textContent = `${files} files (${fmtMB(bytes)}) incl. ${pak} pak(s), ${models} models — ready`;
-  markDone('step-valve');
-  btnLaunch.disabled = false;
-  log(`valve staged: ${files} files, ${fmtMB(bytes)}, ${pak} pak(s)`);
-}
-
-async function pickFolderNative() {
-  const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker;
-  if (!picker) {
-    dirInput.click();
-    return;
-  }
-  try {
-    const root = await picker.call(window);
-    staged.valve.clear();
-    await collectDirectory(root, '', staged.valve);
-    await acceptValveFiles();
-  } catch (err) {
-    if ((err as DOMException)?.name !== 'AbortError') log(`folder pick failed: ${String(err)}`);
-  }
-}
-
-function pickFolderFallback(files: FileList | null) {
-  if (!files || files.length === 0) return;
-  staged.valve.clear();
-  const jobs: Promise<void>[] = [];
-  for (const f of Array.from(files)) {
-    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-    jobs.push(
-      f.arrayBuffer().then((buf) => {
-        staged.valve.set(rel, new Uint8Array(buf));
-      }),
-    );
-  }
-  void Promise.all(jobs).then(() => acceptValveFiles());
 }
 
 // ---- WASM filesystem -------------------------------------------------------
@@ -536,7 +473,6 @@ async function captureInput() {
 async function boot() {
   if (engine || btnLaunch.disabled) return;
   btnLaunch.disabled = true;
-  btnFolder.disabled = true;
   launchStatus.textContent = 'starting engine…';
   engineStatus.textContent = 'initializing WASM';
   try {
@@ -680,14 +616,11 @@ async function boot() {
     log(`BOOT FAILED: ${msg}`);
     engine = null;
     btnLaunch.disabled = false;
-    btnFolder.disabled = false;
   }
 }
 
 // ---- wiring -----------------------------------------------------------------
 
-btnFolder.addEventListener('click', () => void pickFolderNative());
-dirInput.addEventListener('change', () => pickFolderFallback(dirInput.files));
 btnLaunch.addEventListener('click', () => void boot());
 canvas.addEventListener('click', () => void captureInput());
 canvas.addEventListener('pointerdown', () => canvas.focus());
