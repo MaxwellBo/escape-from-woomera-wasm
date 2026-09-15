@@ -19,6 +19,10 @@ static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
 static int gmsgEfwHint = 0;
 
+static cvar_t efw_hope_cvar = { "efw_hope", "0", FCVAR_SERVER };
+static cvar_t efw_hud_cvar = { "efw_hud", "", FCVAR_SERVER };
+static cvar_t efw_diary_cvar = { "efw_diary_state", "0", FCVAR_SERVER };
+
 static EfwState g_efw[33];
 
 static int EFW_Index( CBasePlayer *pPlayer )
@@ -60,18 +64,23 @@ void EFW_LinkUserMessages( void )
 		gmsgEfwDiary = REG_USER_MSG( "EfwDiary", 6 );
 	if( !gmsgEfwHint )
 		gmsgEfwHint = REG_USER_MSG( "EfwHint", -1 );
-	if( g_engfuncs.pfnAddServerCommand )
 	{
 		static int registered;
 		if( !registered )
 		{
 			registered = 1;
-			g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
+			CVAR_REGISTER( &efw_hope_cvar );
+			CVAR_REGISTER( &efw_hud_cvar );
+			CVAR_REGISTER( &efw_diary_cvar );
+			if( g_engfuncs.pfnAddServerCommand )
+			{
+				g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
+				g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
+				g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
+				g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
+				g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
+				g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
+			}
 		}
 	}
 }
@@ -113,9 +122,13 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 	if( hope > 100 )
 		hope = 100;
 	pPlayer->pev->armorvalue = hope;
-	MESSAGE_BEGIN( MSG_ONE, gmsgHope, NULL, pPlayer->pev );
-		WRITE_BYTE( hope );
-	MESSAGE_END();
+	CVAR_SET_FLOAT( "efw_hope", (float)hope );
+	if( gmsgHope )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgHope, NULL, pPlayer->pev );
+			WRITE_BYTE( hope );
+		MESSAGE_END();
+	}
 }
 
 void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
@@ -128,6 +141,7 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 	st = EFW_GetState( pPlayer );
 	strncpy( st->hint, text, sizeof( st->hint ) - 1 );
 	st->hint[sizeof( st->hint ) - 1] = '\0';
+	CVAR_SET_STRING( "efw_hud", st->hint );
 	if( gmsgEfwHint )
 	{
 		MESSAGE_BEGIN( MSG_ONE, gmsgEfwHint, NULL, pPlayer->pev );
@@ -140,17 +154,23 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 void EFW_SendDiary( CBasePlayer *pPlayer )
 {
 	EfwState *st;
+	char buf[24];
 
 	if( !gmsgEfwDiary )
 		EFW_LinkUserMessages();
-	if( !pPlayer || !gmsgEfwDiary )
+	if( !pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
-	MESSAGE_BEGIN( MSG_ONE, gmsgEfwDiary, NULL, pPlayer->pev );
-		WRITE_BYTE( st->diaryOpen ? 1 : 0 );
-		WRITE_BYTE( st->diaryPage );
-		WRITE_LONG( (int)st->diary );
-	MESSAGE_END();
+	if( gmsgEfwDiary )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgEfwDiary, NULL, pPlayer->pev );
+			WRITE_BYTE( st->diaryOpen ? 1 : 0 );
+			WRITE_BYTE( st->diaryPage );
+			WRITE_LONG( (int)st->diary );
+		MESSAGE_END();
+	}
+	snprintf( buf, sizeof( buf ), "%d %d %u", st->diaryOpen ? 1 : 0, st->diaryPage, st->diary );
+	CVAR_SET_STRING( "efw_diary_state", buf );
 }
 
 void EFW_AdjustHope( CBasePlayer *pPlayer, int delta )
@@ -348,6 +368,19 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_SendDiary( pPlayer );
 	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\nbind e +use\n" );
 	{
+		edict_t *pent;
+		Vector spot;
+		spot = pPlayer->pev->origin + Vector( 36, 80, 0 );
+		pent = CREATE_NAMED_ENTITY( MAKE_STRING( "monster_refugee" ) );
+		if( !FNullEnt( pent ) )
+		{
+			pent->v.origin = spot;
+			pent->v.angles = Vector( 0, 270, 0 );
+			pent->v.targetname = MAKE_STRING( "Amir" );
+			DispatchSpawn( pent );
+		}
+	}
+	{
 		char buf[180];
 		CBaseEntity *pScan = NULL;
 		CBaseEntity *pBest = NULL;
@@ -364,9 +397,6 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 				pBest = pScan;
 			}
 		}
-		pPlayer->pev->angles.y = 270;
-		pPlayer->pev->v_angle.y = 270;
-		pPlayer->pev->fixangle = 1;
 		if( pBest )
 			snprintf( buf, sizeof( buf ), "People nearby: %d. Nearest %s (%.0fu). E or click to talk, I for diary.",
 				EFW_RefugeeCount(), EFW_ScriptNameForNpc( pBest ), best );

@@ -83,6 +83,13 @@ int CHudHope::Draw( float flTime )
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	gHUD.DrawHudString( 8, 8, 80, "EFW", r, g, b );
 
+	if( m_iHope < 0 )
+	{
+		const char *hs = gEngfuncs.pfnGetCvarString( "efw_hope" );
+		if( hs && hs[0] )
+			m_iHope = atoi( hs );
+	}
+
 	x = ScreenWidth / 2 - 90;
 	y = 12;
 	if( m_iHope >= 0 )
@@ -121,6 +128,20 @@ int CHudHope::Draw( float flTime )
 		p += n;
 		if( *p == '\n' )
 			p++;
+	}
+
+	{
+		const char *hud = gEngfuncs.pfnGetCvarString( "efw_hud" );
+		if( hud && hud[0] )
+		{
+			char line[84];
+			int n = 0;
+			while( hud[n] && hud[n] != '\n' && n < 80 )
+				n++;
+			memcpy( line, hud, (size_t)n );
+			line[n] = '\0';
+			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, line, r, g, b );
+		}
 	}
 	return 1;
 }

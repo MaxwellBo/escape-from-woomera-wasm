@@ -21,8 +21,8 @@ static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
 {
 	pMonster->pev->takedamage = DAMAGE_NO;
 	pMonster->pev->solid = SOLID_SLIDEBOX;
-	pMonster->pev->movetype = MOVETYPE_STEP;
-	pMonster->pev->flags |= FL_MONSTER;
+	pMonster->pev->movetype = MOVETYPE_NONE;
+	pMonster->pev->flags |= FL_MONSTER | FL_ONGROUND;
 	pMonster->pev->flags &= ~FL_KILLME;
 	pMonster->pev->deadflag = DEAD_NO;
 	pMonster->pev->effects = 0;
@@ -33,13 +33,8 @@ static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
 	pMonster->pev->animtime = gpGlobals->time;
 	pMonster->m_MonsterState = MONSTERSTATE_IDLE;
 	pMonster->ResetSequenceInfo();
-	if( pMonster->pev->nextthink <= 0 )
-	{
-		pMonster->pev->origin.z += 1;
-		DROP_TO_FLOOR( ENT( pMonster->pev ) );
-		pMonster->SetThink( &CBaseMonster::CallMonsterThink );
-		pMonster->pev->nextthink = gpGlobals->time + 0.1f;
-	}
+	pMonster->SetThink( NULL );
+	pMonster->pev->nextthink = 0;
 }
 
 static void EFW_SetVisibleModel( CBaseEntity *pEntity, const char *preferred )
@@ -187,7 +182,6 @@ void CRefugee::Spawn( void )
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
-	MonsterInit();
 	EFW_FinishTalkNpc( this );
 	SetUse( &CRefugee::TalkUse );
 }
@@ -268,11 +262,11 @@ void CPatrolGuard::Spawn( void )
 	pev->view_ofs = Vector( 0, 0, 50 );
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
-	MonsterInit();
 	EFW_FinishTalkNpc( this );
 	SetUse( &CPatrolGuard::TalkUse );
 	if( !FStringNull( pev->target ) )
 	{
+		pev->movetype = MOVETYPE_STEP;
 		SetThink( &CPatrolGuard::PatrolThink );
 		pev->nextthink = gpGlobals->time + 0.5f;
 	}

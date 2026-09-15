@@ -15,6 +15,7 @@ int CHudDiary::Init( void )
 	m_hSprite = 0;
 	m_iLoadedPage = -1;
 	HOOK_MESSAGE( EfwDiary );
+	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
 	return 1;
 }
@@ -67,6 +68,19 @@ int CHudDiary::Draw( float flTime )
 	int w, h, x, y;
 	wrect_t rc;
 	char caption[48];
+
+	{
+		const char *st = gEngfuncs.pfnGetCvarString( "efw_diary_state" );
+		if( st && st[0] )
+		{
+			int open = 0;
+			int page = m_iPage;
+			sscanf( st, "%d %d", &open, &page );
+			m_iOpen = open;
+			if( page > 0 )
+				m_iPage = page;
+		}
+	}
 
 	if( !m_iOpen )
 		return 1;
