@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay21`;
+    return `${url}?v=efw-overlay22`;
   return url;
 }
 
@@ -709,6 +709,15 @@ async function boot() {
     setInterval(() => {
       runEngineCmd('pausable 0');
     }, 2000);
+    const resumeLoop = () => {
+      const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
+      try {
+        mod?.resumeMainLoop?.();
+      } catch {
+        /* ignore */
+      }
+    };
+    setInterval(resumeLoop, 100);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
