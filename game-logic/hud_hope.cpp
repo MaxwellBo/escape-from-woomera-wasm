@@ -145,7 +145,12 @@ int CHudHope::Draw( float flTime )
 			FillRGBA( x, y, fill, 12, 255, 155, 50, 220 );
 
 		snprintf( label, sizeof( label ), "HOPE  %d", m_iHope );
-		gHUD.DrawHudString( x, y + 16, x + w, label, r, g, b );
+		{
+			cl_entity_t *lx = gEngfuncs.GetLocalPlayer();
+			if( lx && lx->curstate.iuser1 )
+				snprintf( label, sizeof( label ), "HOPE  %d  t=%d", m_iHope, lx->curstate.iuser1 );
+		}
+		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
 		hy = y + 34;
 	}
 	else

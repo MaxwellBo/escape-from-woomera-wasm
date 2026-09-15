@@ -460,7 +460,7 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 		EFW_SendHint( pPlayer, buf );
 	}
 	st->hudRetry = gpGlobals->time + 2.5f;
-	st->hudPulses = 8;
+	st->hudPulses = 20;
 	st->autoTalkAt = gpGlobals->time + 3.5f;
 }
 
@@ -993,12 +993,22 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 
 	if( st->hudPulses && st->hudRetry && gpGlobals->time >= st->hudRetry )
 	{
+		CBaseEntity *pNear;
+		char beat[192];
 		st->hudPulses--;
 		st->hudRetry = gpGlobals->time + 1.0f;
+		pPlayer->pev->iuser1 = (int)( gpGlobals->time * 10.0f );
+		pPlayer->pev->iuser2 = st->talking;
+		if( !st->talking )
+		{
+			pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
+			if( pNear )
+				EFW_StartTalk( pPlayer, pNear );
+		}
 		EFW_SendHope( pPlayer );
 		EFW_SendDiary( pPlayer );
-		if( st->hint[0] && !st->talking )
-			EFW_SendHint( pPlayer, st->hint );
+		snprintf( beat, sizeof( beat ), "t=%.0f talking=%d | %s", gpGlobals->time, st->talking, st->hint );
+		EFW_WriteShare( "efw_hud.txt", beat );
 		pPlayer->pev->armorvalue = st->hope;
 	}
 
