@@ -97,30 +97,64 @@ static void EFW_ClientPump( void )
 	char tmp[32];
 	int seq = 0;
 	int slot = 0;
+	const char *cv;
+	char name[32];
+	int s;
 
 	gEngfuncs.pfnClientCmd( "pausable 0\n" );
 
-	p = gEngfuncs.COM_LoadFile( "efw_cmd.txt", 5, &len );
-	if( p && len > 0 )
+	cv = gEngfuncs.pfnGetCvarString( "efw_pick" );
+	if( cv && cv[0] && atoi( cv ) )
 	{
-		if( len > 31 )
-			len = 31;
-		memcpy( tmp, p, (size_t)len );
-		tmp[len] = '\0';
-		gEngfuncs.COM_FreeFile( p );
-		sscanf( tmp, "%d %d", &seq, &slot );
-		if( seq > lastSeq && slot )
+		slot = atoi( cv );
+		gEngfuncs.pfnClientCmd( "efw_pick 0\n" );
+	}
+
+	if( !slot )
+	{
+		p = gEngfuncs.COM_LoadFile( "efw_cmd.txt", 5, &len );
+		if( p && len > 0 )
 		{
-			char buf[48];
-			lastSeq = seq;
-			if( slot == 199 )
-				gEngfuncs.pfnServerCmd( "efw_diary\n" );
-			else if( slot >= 1 && slot <= 9 )
-			{
-				snprintf( buf, sizeof( buf ), "efw_choose %d\n", slot );
-				gEngfuncs.pfnServerCmd( buf );
+			if( len > 31 )
+				len = 31;
+			memcpy( tmp, p, (size_t)len );
+			tmp[len] = '\0';
+			gEngfuncs.COM_FreeFile( p );
+			sscanf( tmp, "%d %d", &seq, &slot );
+			if( seq <= lastSeq )
+				slot = 0;
+			else
+				lastSeq = seq;
 		}
+	}
+
+	if( !slot )
+	{
+		for( s = lastSeq + 1; s <= lastSeq + 8 && !slot; s++ )
+		{
+			snprintf( name, sizeof( name ), "efw_cmd_%d.txt", s );
+			len = 0;
+			p = gEngfuncs.COM_LoadFile( name, 5, &len );
+			if( !p || len <= 0 )
+				continue;
+			if( len > 31 )
+				len = 31;
+			memcpy( tmp, p, (size_t)len );
+			tmp[len] = '\0';
+			gEngfuncs.COM_FreeFile( p );
+			sscanf( tmp, "%d %d", &seq, &slot );
+			if( slot )
+				lastSeq = s;
 		}
+	}
+
+	if( slot == 199 )
+		gEngfuncs.pfnServerCmd( "efw_diary\n" );
+	else if( slot >= 1 && slot <= 9 )
+	{
+		char buf[48];
+		snprintf( buf, sizeof( buf ), "efw_choose %d\n", slot );
+		gEngfuncs.pfnServerCmd( buf );
 	}
 }
 
