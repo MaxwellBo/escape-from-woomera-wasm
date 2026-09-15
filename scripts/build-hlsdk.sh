@@ -5,8 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SDK="${HLSDK_PATH:-$ROOT/third_party/hlsdk-portable}"
 EMSDK="${EMSDK_PATH:-$ROOT/third_party/emsdk}"
 # Pin to an Emscripten that can dylink into xash3d-fwgs@1.2.2 (emsdk 6.x
-# SIDE_MODULEs fail with "multiple module$0 entries"). Overlay CMake also
-# passes -sWASM_BIGINT=1 so time_t matches the engine's (i32)->i64 time().
+# SIDE_MODULEs fail with "multiple module$0 entries"). Overlay CMake uses
+# -sSIDE_MODULE=1 -sWASM_BIGINT=1 -Wl,-Bsymbolic so time_t matches the
+# engine and C++ methods are not imported via empty GOT.func slots.
 EMSDK_VERSION="${EMSDK_VERSION:-3.1.74}"
 OUT="$ROOT/public/hlsdk"
 
