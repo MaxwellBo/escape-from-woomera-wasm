@@ -2,6 +2,9 @@
 #if !defined(EFW_H)
 #define EFW_H
 
+// Hooks into hlsdk-portable. Gameplay lives in the DLL-derived port
+// (addresses in decompile/recovered/NAMES.md).
+
 #ifndef CLIENT_DLL
 class CBasePlayer;
 class CBaseEntity;
@@ -11,12 +14,16 @@ typedef struct edict_s edict_t;
 int EFW_ClientCommand( edict_t *pEntity );
 void EFW_PlayerSpawn( CBasePlayer *pPlayer );
 void EFW_PlayerPreThink( CBasePlayer *pPlayer );
-void EFW_PlayerHudPulse( CBasePlayer *pPlayer );
 void EFW_LinkUserMessages( void );
 void EFW_OverrideNpcModel( CBaseEntity *pEntity );
 int EFW_RefugeeCount( void );
-void EFW_Spider( CBasePlayer *pPlayer );
 void EFW_Precache( void );
+void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
+void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker );
+void EFW_Spider( CBasePlayer *pPlayer );
+void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc );
+CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
+int EFW_IsTalkNpc( CBaseEntity *pEnt );
 #endif
 
 #define WEAPON_EFW_PLIERS			16

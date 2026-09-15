@@ -5,7 +5,7 @@
 #include "cbase.h"
 #include "monsters.h"
 #include "player.h"
-#include "efw_game.h"
+#include "efw_dll.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -15,26 +15,6 @@ static int g_refugeeCount;
 int EFW_RefugeeCount( void )
 {
 	return g_refugeeCount;
-}
-
-static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
-{
-	pMonster->pev->takedamage = DAMAGE_NO;
-	pMonster->pev->solid = SOLID_SLIDEBOX;
-	pMonster->pev->movetype = MOVETYPE_NONE;
-	pMonster->pev->flags |= FL_MONSTER | FL_ONGROUND;
-	pMonster->pev->flags &= ~FL_KILLME;
-	pMonster->pev->deadflag = DEAD_NO;
-	pMonster->pev->effects = 0;
-	pMonster->pev->rendermode = kRenderNormal;
-	pMonster->pev->renderamt = 255;
-	pMonster->pev->sequence = 0;
-	pMonster->pev->framerate = 1.0f;
-	pMonster->pev->animtime = gpGlobals->time;
-	pMonster->m_MonsterState = MONSTERSTATE_IDLE;
-	pMonster->ResetSequenceInfo();
-	pMonster->SetThink( NULL );
-	pMonster->pev->nextthink = 0;
 }
 
 static void EFW_SetVisibleModel( CBaseEntity *pEntity, const char *preferred )
@@ -211,7 +191,6 @@ void CRefugee::Spawn( void )
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
-	EFW_FinishTalkNpc( this );
 	SetUse( &CRefugee::TalkUse );
 	SetThink( &CRefugee::IdleThink );
 	pev->nextthink = gpGlobals->time + 0.1f;
@@ -293,7 +272,6 @@ void CPatrolGuard::Spawn( void )
 	pev->view_ofs = Vector( 0, 0, 50 );
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
-	EFW_FinishTalkNpc( this );
 	SetUse( &CPatrolGuard::TalkUse );
 	if( !FStringNull( pev->target ) )
 	{

@@ -37,17 +37,45 @@ def main() -> None:
     if not dlls.is_dir() or not cldll.is_dir():
         raise SystemExit(f"not an hlsdk-portable tree: {sdk}")
 
+    # Re-apply onto a clean SDK so file lists and HUD hooks are not stacked.
+    if (sdk / ".git").is_dir() or (sdk / ".git").is_file():
+        import subprocess
+        tracked = [
+            "CMakeLists.txt",
+            "dlls/CMakeLists.txt",
+            "cl_dll/CMakeLists.txt",
+            "dlls/client.cpp",
+            "dlls/player.cpp",
+            "dlls/game.cpp",
+            "dlls/gamerules.cpp",
+            "dlls/multiplay_gamerules.cpp",
+            "dlls/barney.cpp",
+            "cl_dll/hud.h",
+            "cl_dll/hud.cpp",
+        ]
+        subprocess.run(["git", "-C", str(sdk), "checkout", "--", *tracked], check=False)
+    for leftover in (
+        "efw_game.h",
+        "efw_player.cpp",
+        "hud_hope.cpp",
+        "hud_diary.cpp",
+    ):
+        for folder in (dlls, cldll):
+            path = folder / leftover
+            if path.exists():
+                path.unlink()
+
     copies = {
         "efw.h": dlls / "efw.h",
-        "efw_game.h": dlls / "efw_game.h",
+        "efw_dll.h": dlls / "efw_dll.h",
         "efw_script.h": dlls / "efw_script.h",
         "efw_script.cpp": dlls / "efw_script.cpp",
+        "efw_dll.cpp": dlls / "efw_dll.cpp",
         "efw_conversation.cpp": dlls / "efw_conversation.cpp",
-        "efw_player.cpp": dlls / "efw_player.cpp",
+        "efw_clientcmd.cpp": dlls / "efw_clientcmd.cpp",
         "efw_entities.cpp": dlls / "efw_entities.cpp",
         "efw_weapons.cpp": dlls / "efw_weapons.cpp",
-        "hud_hope.cpp": cldll / "hud_hope.cpp",
-        "hud_diary.cpp": cldll / "hud_diary.cpp",
+        "hud_efw.cpp": cldll / "hud_efw.cpp",
     }
     for src_name, dest in copies.items():
         shutil.copy2(ROOT / src_name, dest)
@@ -59,8 +87,9 @@ def main() -> None:
         "\txen.cpp\n"
         "\tzombie.cpp\n"
         f"\tefw_script.cpp # EFW_OVERLAY\n"
+        "\tefw_dll.cpp\n"
         "\tefw_conversation.cpp\n"
-        "\tefw_player.cpp\n"
+        "\tefw_clientcmd.cpp\n"
         "\tefw_entities.cpp\n"
         "\tefw_weapons.cpp\n",
     )
@@ -76,8 +105,7 @@ def main() -> None:
         cmake_cl,
         "\tflashlight.cpp\n",
         "\tflashlight.cpp\n"
-        f"\thud_hope.cpp # EFW_OVERLAY\n"
-        "\thud_diary.cpp\n",
+        f"\thud_efw.cpp # EFW_OVERLAY\n",
     )
 
     client_cpp = dlls / "client.cpp"
@@ -131,14 +159,12 @@ def main() -> None:
     once(
         player_cpp,
         "\tg_pGameRules->PlayerSpawn( this );\n"
-        f"\tEFW_PlayerSpawn( this ); {MARKER}\n"
         "}\n",
         "\tg_pGameRules->PlayerSpawn( this );\n"
         f"\tEFW_PlayerSpawn( this ); {MARKER}\n"
         "}\n",
     )
-    # Do not pulse from UpdateClientData: that re-ran talk input in the same
-    # frame as PreThink and immediately continued past reply text.
+    # Original SendHudState is PreThink-only. Do not also tick from UpdateClientData.
     player_text = player_cpp.read_text(encoding="utf-8", errors="replace")
     player_text = player_text.replace(
         "void CBasePlayer::UpdateClientData( void )\n"
@@ -148,17 +174,10 @@ def main() -> None:
         "{\n",
         1,
     )
-    if "EFW_PlayerHudPulse" not in player_text:
-        player_text = player_text.replace(
-            "void CBasePlayer::UpdateClientData( void )\n"
-            "{\n"
-            "	if( m_fInitHUD )\n",
-            "void CBasePlayer::UpdateClientData( void )\n"
-            "{\n"
-            "	EFW_PlayerHudPulse( this ); /* EFW_OVERLAY */\n"
-            "	if( m_fInitHUD )\n",
-            1,
-        )
+    player_text = player_text.replace(
+        "	EFW_PlayerHudPulse( this ); /* EFW_OVERLAY */\n",
+        "",
+    )
     player_cpp.write_text(player_text, encoding="utf-8")
 
     game_cpp = dlls / "game.cpp"
@@ -228,32 +247,13 @@ def main() -> None:
         "\tint m_iWidth;\t\t// width of the battery innards\n"
         "};\n"
         "\n"
-        f"class CHudHope: public CHudBase {MARKER}\n"
+        f"class CHudEfw: public CHudBase {MARKER}\n"
         "{\n"
         "public:\n"
         "\tint Init( void );\n"
         "\tint VidInit( void );\n"
         "\tint Draw( float flTime );\n"
         "\tvoid Reset( void );\n"
-        "\tint MsgFunc_Hope( const char *pszName, int iSize, void *pbuf );\n"
-        "private:\n"
-        "\tint m_iHope;\n"
-        "};\n"
-        "\n"
-        "class CHudDiary: public CHudBase\n"
-        "{\n"
-        "public:\n"
-        "\tint Init( void );\n"
-        "\tint VidInit( void );\n"
-        "\tint Draw( float flTime );\n"
-        "\tvoid Reset( void );\n"
-        "\tint MsgFunc_EfwDiary( const char *pszName, int iSize, void *pbuf );\n"
-        "private:\n"
-        "\tint m_iOpen;\n"
-        "\tint m_iPage;\n"
-        "\tint m_iUnlocked;\n"
-        "\tint m_iLoadedPage;\n"
-        "\tHSPRITE m_hSprite;\n"
         "};\n"
         "\n"
         "//\n"
@@ -265,8 +265,7 @@ def main() -> None:
         hud_h,
         "\tCHudFlashlight\tm_Flash;\n",
         "\tCHudFlashlight\tm_Flash;\n"
-        f"\tCHudHope\t\tm_Hope; {MARKER}\n"
-        "\tCHudDiary\t\tm_Diary;\n",
+        f"\tCHudEfw\t\tm_Efw; {MARKER}\n",
     )
 
     hud_cpp = cldll / "hud.cpp"
@@ -274,8 +273,7 @@ def main() -> None:
         hud_cpp,
         "\tm_Flash.Init();\n",
         "\tm_Flash.Init();\n"
-        f"\tm_Hope.Init(); {MARKER}\n"
-        "\tm_Diary.Init();\n",
+        f"\tm_Efw.Init(); {MARKER}\n",
     )
 
     cmake_root = sdk / "CMakeLists.txt"

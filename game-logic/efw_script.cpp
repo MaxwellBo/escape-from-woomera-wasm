@@ -58,34 +58,6 @@ int EfwFlags_Has( const char *flags, const char *token )
 	return 0;
 }
 
-int EfwTopicUnlockedByDefault( const char *topic )
-{
-	static const char *gated[] = {
-		"PLIERS",
-		"PLIERS_GOT_PLIERS",
-		"ELECTRICIAN",
-		"WORK",
-		"MAINCOMPOUND",
-		"BINS",
-		"GREET_AMIR_SUBSEQUENT",
-		"GREET_HASSAN_SUBSEQUENT",
-		"GREET_MOUHTAZ_SUBSEQUENT",
-		"OnKitchenRoster",
-		"GotHintAboutHiding",
-		NULL
-	};
-	int i;
-
-	if( !topic || !topic[0] )
-		return 0;
-	for( i = 0; gated[i]; i++ )
-	{
-		if( !strcmp( topic, gated[i] ) )
-			return 0;
-	}
-	return 1;
-}
-
 static void EfwParseBracketActions( EfwReply *reply, char *text )
 {
 	char *open;

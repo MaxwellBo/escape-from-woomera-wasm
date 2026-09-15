@@ -1,6 +1,6 @@
 #pragma once
-// Engine-free Escape from Woomera conversation script parser.
-// Parses Conversations/*.txt from the v0.84 demo.
+// Parse Conversations/*.txt in the original v0.84 Q<>/A<> language
+// (efwConversation::ParseFile 0x100c2660).
 
 #define EFW_MAX_QUESTIONS 48
 #define EFW_MAX_REPLIES 6
@@ -42,7 +42,6 @@ void EfwScript_Clear( EfwScript *script );
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );
-int EfwTopicUnlockedByDefault( const char *topic );
 
 #ifdef __cplusplus
 }

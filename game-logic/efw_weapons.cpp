@@ -9,7 +9,7 @@
 #include "efw.h"
 
 #ifndef CLIENT_DLL
-#include "efw_game.h"
+#include "efw_dll.h"
 #endif
 
 struct EfwWeaponDef
@@ -106,8 +106,7 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 	{
 #ifndef CLIENT_DLL
 		const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
-		EfwState *st = EFW_GetState( pPlayer );
-		st->items |= def->itemBit;
+		EFW_Dll()->items |= def->itemBit;
 		MESSAGE_BEGIN( MSG_ONE, gmsgWeapPickup, NULL, pPlayer->pev );
 			WRITE_BYTE( m_iId );
 		MESSAGE_END();

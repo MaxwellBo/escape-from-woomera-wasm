@@ -75,4 +75,4 @@ Recompile these C dumps against hlsdk-portable with:
 - `thiscall` → explicit `this` (already the Ghidra calling convention on MSVC)
 - engine callbacks (`DAT_10121e*` / `DAT_100a4ff0`) → `g_engfuncs` / `gEngfuncs`
 - `FindFirstFileA(Conversations\\*.txt)` → `LOAD_FILE_FOR_ME` / packaged `public/Conversations/`
-- user messages `EFWData` / `EFW_Menu` / `EFW_CtPrv` instead of the overlay’s `efw_js_pick` path
+- user messages `EFWData` / `EFW_Menu` / `EFW_CtPrv` (the playable port no longer uses `efw_js_pick`)
