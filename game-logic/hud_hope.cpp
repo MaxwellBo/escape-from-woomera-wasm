@@ -89,6 +89,41 @@ int CHudHope::Init( void )
 	return 1;
 }
 
+static void EFW_ClientPump( void )
+{
+	static int lastSeq;
+	int len = 0;
+	byte *p;
+	char tmp[32];
+	int seq = 0;
+	int slot = 0;
+
+	gEngfuncs.pfnClientCmd( "pausable 0\n" );
+
+	p = gEngfuncs.COM_LoadFile( "efw_cmd.txt", 5, &len );
+	if( p && len > 0 )
+	{
+		if( len > 31 )
+			len = 31;
+		memcpy( tmp, p, (size_t)len );
+		tmp[len] = '\0';
+		gEngfuncs.COM_FreeFile( p );
+		sscanf( tmp, "%d %d", &seq, &slot );
+		if( seq > lastSeq && slot )
+		{
+			char buf[48];
+			lastSeq = seq;
+			if( slot == 199 )
+				gEngfuncs.pfnServerCmd( "efw_diary\n" );
+			else if( slot >= 1 && slot <= 9 )
+			{
+				snprintf( buf, sizeof( buf ), "efw_choose %d\n", slot );
+				gEngfuncs.pfnServerCmd( buf );
+		}
+		}
+	}
+}
+
 int CHudHope::VidInit( void )
 {
 	return 1;
@@ -118,6 +153,8 @@ int CHudHope::Draw( float flTime )
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 		return 1;
+
+	EFW_ClientPump();
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	gHUD.DrawHudString( 8, 8, 80, "EFW", r, g, b );

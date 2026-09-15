@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay18`;
+    return `${url}?v=efw-overlay19`;
   return url;
 }
 
@@ -119,7 +119,6 @@ function pokeGameInput(slot: number) {
     log('poke: WASM FS unavailable');
   }
   runEngineCmd('pausable 0');
-  runEngineCmd('unpause');
   runEngineCmd(`set efw_pick ${slot}`);
   runEngineCmd(`efw_pick ${slot}`);
   runEngineCmd(`efw_choose ${slot}`);
@@ -626,7 +625,7 @@ async function boot() {
         print: (text: string) => log(text),
         printErr: (text: string) => log(`ERR: ${text}`),
         // Emscripten only auto-locks the pointer on click when this is set.
-        elementPointerLock: true,
+        elementPointerLock: false,
       },
     });
     log('boot: init()');
@@ -711,12 +710,10 @@ async function boot() {
     // on-screen but every later map/console button as a no-op.
     setTimeout(() => {
       runEngineCmd('pausable 0');
-      runEngineCmd('unpause');
       runEngineCmd('map efw_prototype_level1');
     }, 4000);
     setInterval(() => {
       runEngineCmd('pausable 0');
-      runEngineCmd('unpause');
     }, 1000);
   } catch (err) {
     const msg = formatErr(err);
@@ -766,14 +763,14 @@ document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (E / efw_Talk)');
   if (document.pointerLockElement)
     document.exitPointerLock();
-  runEngineCmd('unpause');
+  runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
   log('> diary (I / efw_diary)');
   if (document.pointerLockElement)
     document.exitPointerLock();
-  runEngineCmd('unpause');
+  runEngineCmd('pausable 0');
   pokeGameInput(199);
 });
 document.querySelectorAll<HTMLButtonElement>('button[data-talk]').forEach((btn) => {

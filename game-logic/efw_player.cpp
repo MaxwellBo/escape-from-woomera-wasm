@@ -622,7 +622,7 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	st->hudPulses = 40;
 	st->autoTalkAt = gpGlobals->time + 1.0f;
 	CVAR_SET_FLOAT( "pausable", 0 );
-	SERVER_COMMAND( "pausable 0\nunpause\n" );
+	SERVER_COMMAND( "pausable 0\n" );
 }
 
 static const char *kPackageText =
@@ -1246,7 +1246,7 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 				if( pNear )
 					EFW_StartTalk( pPlayer, pNear );
 			}
-			SERVER_COMMAND( "pausable 0\nunpause\n" );
+			SERVER_COMMAND( "pausable 0\n" );
 		}
 
 		if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
