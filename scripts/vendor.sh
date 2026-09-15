@@ -1,9 +1,9 @@
 #!/bin/bash
 # Re-vendor third-party binaries. Provenance:
 # - Engine WASM: xash3d-fwgs@1.2.2 on npm (tarball is immutable upstream)
-# - Game-logic WASM: hlsdk-portable@0.1.3 via the npmmirror registry mirror
-#   (upstream npm unlisted it 2026-09-08; the FWGS source fallback is
-#   https://github.com/FWGS/hlsdk-portable built with Emscripten)
+# - Game-logic WASM: rebuilt from FWGS/hlsdk-portable plus game-logic/ via
+#   scripts/build-hlsdk.sh (do not overwrite public/hlsdk/{client,server}.wasm
+#   here — those are the EFW overlay modules).
 # - Mod: EscapeFromWoomera_v084.zip from the archived official site
 #   http://www.ljudmila.org/~selectparks/archive/escapefromwoomera/
 # - Base-game valve/: official Half-Life: Uplink demo (Valve/Sierra, 1999),
@@ -27,13 +27,9 @@ cp "$D/xash.wasm" "$D/filesystem_stdio.wasm" "$D/libmenu.wasm" \
    "$D/libref_webgl2.wasm" "$D/libref_soft.wasm" "$ROOT/public/engine/"
 cp "$D/valve/extras.pk3" "$ROOT/public/engine/"
 
-curl -sSL -o hlsdk.tgz \
-  "https://registry.npmmirror.com/hlsdk-portable/download/hlsdk-portable-0.1.3.tgz"
-tar xzf hlsdk.tgz
-cp package/dist/valve/dlls/hl_emscripten_wasm32.wasm "$ROOT/public/hlsdk/server.wasm"
-cp package/dist/valve/cl_dlls/client_emscripten_wasm32.wasm "$ROOT/public/hlsdk/client.wasm"
 cp "$ROOT/scripts/hlsdk-files/delta.lst" "$ROOT/public/hlsdk/delta.lst"
 cp "$ROOT/scripts/hlsdk-files/LICENSE" "$ROOT/public/hlsdk/LICENSE"
+# client.wasm / server.wasm are produced by scripts/build-hlsdk.sh (EFW overlay).
 
 curl -sSL -o "$ROOT/public/woomera.zip" \
   "http://www.ljudmila.org/~selectparks/archive/escapefromwoomera/EscapeFromWoomera_v084.zip"

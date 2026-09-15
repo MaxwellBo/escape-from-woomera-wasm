@@ -141,3 +141,7 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# HLSDK / Emscripten trees used to rebuild public/hlsdk/*.wasm
+third_party/emsdk/
+third_party/hlsdk-portable/

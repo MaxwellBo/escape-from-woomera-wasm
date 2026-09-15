@@ -28,12 +28,11 @@ const MOD_ZIP_URL = publicAsset('woomera.zip');
 const VALVE_ZIP_URL = publicAsset('valve.zip');
 const MOD_ZIP_ROOT = 'EscapeFromWoomera_v084/';
 const GAME_DIR = 'woomera';
-// Win32-only binaries and unused bulk: never staged into the WASM filesystem.
+// Win32-only binaries: never staged into the WASM filesystem.
 const SKIP_PREFIXES = [
   'cl_dlls/',
   'dlls/',
   'SAVE/',
-  'Storyboard/',
 ];
 const SKIP_SUFFIXES = ['.dll'];
 
