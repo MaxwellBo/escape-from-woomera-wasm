@@ -131,10 +131,25 @@ def main() -> None:
     once(
         player_cpp,
         "\tg_pGameRules->PlayerSpawn( this );\n"
+        f"\tEFW_PlayerSpawn( this ); {MARKER}\n"
         "}\n",
         "\tg_pGameRules->PlayerSpawn( this );\n"
         f"\tEFW_PlayerSpawn( this ); {MARKER}\n"
         "}\n",
+    )
+    once(
+        player_cpp,
+        "void CBasePlayer::UpdateClientData( void )\n"
+        "{\n"
+        "	if( m_fInitHUD )\n"
+        "	{\n"
+        "		m_fInitHUD = FALSE;\n",
+        "void CBasePlayer::UpdateClientData( void )\n"
+        "{\n"
+        f"	EFW_PlayerPreThink( this ); {MARKER}\n"
+        "	if( m_fInitHUD )\n"
+        "	{\n"
+        "		m_fInitHUD = FALSE;\n",
     )
 
     game_cpp = dlls / "game.cpp"

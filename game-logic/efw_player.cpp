@@ -192,6 +192,36 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 		}
 		CVAR_SET_STRING( "efw_hud", flat );
 		EFW_WriteShare( "efw_hud.txt", flat );
+		{
+			hudtextparms_t hp;
+			memset( &hp, 0, sizeof( hp ) );
+			hp.x = -1;
+			hp.y = 0.28f;
+			hp.r1 = 255;
+			hp.g1 = 180;
+			hp.b1 = 40;
+			hp.a1 = 255;
+			hp.r2 = 255;
+			hp.g2 = 180;
+			hp.b2 = 40;
+			hp.a2 = 255;
+			hp.fadeinTime = 0;
+			hp.fadeoutTime = 0.2f;
+			hp.holdTime = 12.0f;
+			hp.channel = 2;
+			{
+				char msg[192];
+				int i;
+				strncpy( msg, st->hint, sizeof( msg ) - 1 );
+				msg[sizeof( msg ) - 1] = '\0';
+				for( i = 0; msg[i]; i++ )
+				{
+					if( msg[i] == '|' )
+						msg[i] = '\n';
+				}
+				UTIL_HudMessage( pPlayer, hp, msg );
+			}
+		}
 	}
 	if( gmsgEfwHint )
 	{
