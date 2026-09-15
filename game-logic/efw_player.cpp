@@ -225,8 +225,9 @@ static const char *EFW_CmdWhere( void )
 		a = CMD_ARGV( i );
 		if( !a )
 			continue;
-		if( !strcmp( a, "pliers" ) || !strcmp( a, "bin" ) || !strcmp( a, "hide" )
-			|| !strcmp( a, "id" ) || !strcmp( a, "amir" ) || !strcmp( a, "hassan" ) )
+		if( !strcmp( a, "pliers" ) || !strcmp( a, "bin" ) || !strcmp( a, "kitchen" )
+			|| !strcmp( a, "hide" ) || !strcmp( a, "id" ) || !strcmp( a, "amir" )
+			|| !strcmp( a, "hassan" ) )
 			return a;
 	}
 	if( CMD_ARGC() > 1 )
@@ -239,7 +240,6 @@ static void EFW_HostGoto( void )
 	CBasePlayer *pPlayer = EFW_ListenPlayer();
 	const char *where;
 	Vector dest;
-	CBaseEntity *pMark;
 
 	if( !pPlayer )
 		return;
@@ -249,31 +249,27 @@ static void EFW_HostGoto( void )
 		dest = Vector( 2080, -1297, 48 );
 	else if( !strcmp( where, "hassan" ) )
 		dest = Vector( 928, -2192, 48 );
+	else if( !strcmp( where, "pliers" ) )
+		dest = Vector( -580, -1380, 72 );
+	else if( !strcmp( where, "bin" ) || !strcmp( where, "kitchen" ) )
+		dest = Vector( -300, -1788, 56 );
+	else if( !strcmp( where, "hide" ) )
+		dest = Vector( -960, -354, 48 );
+	else if( !strcmp( where, "id" ) )
+		dest = Vector( 280, -524, 64 );
 	else
-	{
-		pMark = NULL;
-		while( ( pMark = UTIL_FindEntityByClassname( pMark, "efw_Marker" ) ) != NULL )
-		{
-			const char *name = STRING( pMark->pev->targetname );
-			if( ( !strcmp( where, "pliers" ) && !strcmp( name, "efw_PliersMarker" ) )
-				|| ( !strcmp( where, "bin" ) && !strcmp( name, "efw_kitchen_bin" ) )
-				|| ( !strcmp( where, "hide" ) && !strcmp( name, "efw_hiding_place" ) )
-				|| ( !strcmp( where, "id" ) && !strcmp( name, "efw_IDTag_Position" ) ) )
-			{
-				dest = EFW_Place( pMark );
-				dest.z = pMark->pev->absmax.z + 36.0f;
-				if( dest.x > 0 )
-					dest.x -= 48.0f;
-				else
-					dest.x += 48.0f;
-				break;
-			}
-		}
-	}
+		dest = pPlayer->pev->origin;
+	pPlayer->pev->movetype = MOVETYPE_NOCLIP;
 	pPlayer->pev->origin = dest;
 	pPlayer->pev->velocity = g_vecZero;
 	pPlayer->pev->flags &= ~FL_ONGROUND;
 	UTIL_SetOrigin( pPlayer->pev, dest );
+	pPlayer->pev->movetype = MOVETYPE_WALK;
+	{
+		char msg[96];
+		snprintf( msg, sizeof( msg ), "Moved to %s (%.0f %.0f).", where, dest.x, dest.y );
+		EFW_Narrate( pPlayer, msg );
+	}
 }
 
 static void EFW_HostDiaryPrev( void )
