@@ -297,6 +297,8 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_LinkUserMessages();
 	EFW_SendHope( pPlayer );
 	EFW_SendDiary( pPlayer );
+	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\n" );
+	EFW_Print( pPlayer, "Objectives: talk to the others, keep hope alive, find a way out. Press I for the diary, E or click to talk." );
 }
 
 static const char *kPackageText =

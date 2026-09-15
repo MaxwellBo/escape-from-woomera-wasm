@@ -129,6 +129,8 @@ void CRefugee::Spawn( void )
 	pev->view_ofs = Vector( 0, 0, 50 );
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
+	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
+		( tn && tn[0] ) ? tn : "(unnamed)", model, pev->origin.x, pev->origin.y, pev->origin.z );
 	MonsterInit();
 	SetUse( &CRefugee::TalkUse );
 }
