@@ -60,7 +60,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc );
 void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 const char *EFW_ScriptNameForNpc( CBaseEntity *pNpc );
-int EFW_LoadScript( const char *scriptName, EfwScript *out );
+const EfwScript *EFW_LoadScript( const char *scriptName );
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName );
 int EFW_WeaponToItem( const char *classname );
 void EFW_RunAction( CBasePlayer *pPlayer, const char *action );

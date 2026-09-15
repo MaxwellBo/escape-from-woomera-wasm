@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #define EFW_SCRIPT_CACHE 24
 
@@ -18,31 +19,41 @@ struct EfwScriptCache
 	int loaded;
 };
 
-static EfwScriptCache g_scripts[EFW_SCRIPT_CACHE];
+// Heap-backed so the 24 parsed trees (~7MB of BSS) are not baked into the
+// SIDE_MODULE data section. Browsers refuse to sync-compile wasm > 8MB.
+static EfwScriptCache *g_scripts;
 
-int EFW_LoadScript( const char *scriptName, EfwScript *out )
+static EfwScriptCache *EFW_ScriptSlots( void )
+{
+	if( !g_scripts )
+		g_scripts = (EfwScriptCache *)calloc( EFW_SCRIPT_CACHE, sizeof( EfwScriptCache ) );
+	return g_scripts;
+}
+
+const EfwScript *EFW_LoadScript( const char *scriptName )
 {
 	int i;
 	int length = 0;
 	char path[128];
 	char *buf;
+	EfwScriptCache *slots;
 	EfwScriptCache *slot = NULL;
 
-	if( !scriptName || !scriptName[0] || !out )
-		return 0;
+	if( !scriptName || !scriptName[0] )
+		return NULL;
+	slots = EFW_ScriptSlots();
+	if( !slots )
+		return NULL;
 
 	for( i = 0; i < EFW_SCRIPT_CACHE; i++ )
 	{
-		if( g_scripts[i].loaded && !strcmp( g_scripts[i].name, scriptName ) )
-		{
-			*out = g_scripts[i].script;
-			return 1;
-		}
-		if( !g_scripts[i].loaded && !slot )
-			slot = &g_scripts[i];
+		if( slots[i].loaded && !strcmp( slots[i].name, scriptName ) )
+			return &slots[i].script;
+		if( !slots[i].loaded && !slot )
+			slot = &slots[i];
 	}
 	if( !slot )
-		slot = &g_scripts[0];
+		slot = &slots[0];
 
 	snprintf( path, sizeof( path ), "Conversations/%s.txt", scriptName );
 	buf = (char *)LOAD_FILE_FOR_ME( path, &length );
@@ -54,15 +65,14 @@ int EFW_LoadScript( const char *scriptName, EfwScript *out )
 	if( !buf )
 	{
 		ALERT( at_console, "WARNING -- efwConversation::Squark -- character (%s) is not found\n", scriptName );
-		return 0;
+		return NULL;
 	}
 	EfwScript_Parse( &slot->script, scriptName, buf, length );
 	FREE_FILE( buf );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
-	*out = slot->script;
-	return 1;
+	return &slot->script;
 }
 
 static int EFW_Ieq( const char *a, const char *b )
@@ -201,14 +211,15 @@ static void EFW_WrapLine( char *dst, int dstSize, const char *src, int width )
 static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
 	EfwState *st = EFW_GetState( pPlayer );
-	EfwScript script;
+	const EfwScript *script;
 	const char *npc = EFW_ScriptNameForNpc( pNpc );
 	char menu[512];
 	int bits = 0;
 	int i;
 	int slot;
 
-	if( !EFW_LoadScript( npc, &script ) )
+	script = EFW_LoadScript( npc );
+	if( !script )
 	{
 		EFW_Print( pPlayer, "They have nothing to say." );
 		return;
@@ -220,9 +231,9 @@ static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	snprintf( menu, sizeof( menu ), "Talk to %s\n", npc );
 
 	slot = 0;
-	for( i = 0; i < script.questionCount && slot < 8; i++ )
+	for( i = 0; i < script->questionCount && slot < 8; i++ )
 	{
-		EfwQuestion *q = &script.questions[i];
+		const EfwQuestion *q = &script->questions[i];
 		char line[80];
 		if( !EFW_QuestionVisible( pPlayer, npc, q ) )
 			continue;
@@ -284,9 +295,9 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 {
 	EfwState *st = EFW_GetState( pPlayer );
 	CBaseEntity *pNpc;
-	EfwScript script;
+	const EfwScript *script;
 	const char *npc;
-	EfwQuestion *q;
+	const EfwQuestion *q;
 	const EfwReply *r;
 	char body[512];
 	int qi;
@@ -303,12 +314,13 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 		return;
 	}
 	npc = EFW_ScriptNameForNpc( pNpc );
-	if( !EFW_LoadScript( npc, &script ) )
+	script = EFW_LoadScript( npc );
+	if( !script )
 		return;
 	qi = st->menuChoices[slot - 1];
-	if( qi < 0 || qi >= script.questionCount )
+	if( qi < 0 || qi >= script->questionCount )
 		return;
-	q = &script.questions[qi];
+	q = &script->questions[qi];
 	r = EFW_PickReply( pPlayer, npc, q );
 	EFW_MarkSeen( pPlayer, npc, q->topic );
 

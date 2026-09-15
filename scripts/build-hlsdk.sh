@@ -63,5 +63,13 @@ if [[ -z "$client" || -z "$server" ]]; then
 fi
 cp "$client" "$OUT/client.wasm"
 cp "$server" "$OUT/server.wasm"
+# Firefox (and some Chromium builds) refuse sync WebAssembly.Module compile
+# of buffers > 8MB on the main thread. xash3d-fwgs@1.2.2 loads SIDE_MODULEs
+# that way, so keep the server module under the limit.
+server_bytes="$(wc -c < "$OUT/server.wasm")"
+if [[ "$server_bytes" -gt 8000000 ]]; then
+  echo "server.wasm is ${server_bytes} bytes; must be <= 8MB for in-browser dylink" >&2
+  exit 1
+fi
 echo "installed:"
 ls -la "$OUT/client.wasm" "$OUT/server.wasm"

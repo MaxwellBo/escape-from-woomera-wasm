@@ -539,7 +539,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
 	EfwState *st = EFW_GetState( pPlayer );
 	const char *npc;
-	EfwScript script;
+	const EfwScript *script;
 
 	if( !pNpc )
 		return;
@@ -572,17 +572,18 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	}
 
-	if( EFW_LoadScript( npc, &script ) )
+	script = EFW_LoadScript( npc );
+	if( script )
 	{
-		int qi = EfwScript_FindQuestion( &script, "UNWANTED_ITEM" );
+		int qi = EfwScript_FindQuestion( script, "UNWANTED_ITEM" );
 		if( qi >= 0 )
 		{
-			EfwQuestion *q = &script.questions[qi];
+			const EfwQuestion *q = &script->questions[qi];
 			int first = !EFW_HasSeen( pPlayer, npc, "UNWANTED_ITEM" );
 			int i;
 			for( i = 0; i < q->replyCount; i++ )
 			{
-				EfwReply *r = &q->replies[i];
+				const EfwReply *r = &q->replies[i];
 				int ok = 1;
 				if( EfwFlags_Has( r->flags, "FirstTime" ) && !first )
 					ok = 0;
