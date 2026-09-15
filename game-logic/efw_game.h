@@ -38,6 +38,7 @@ struct EfwState
 	int failCount;
 	int packageGot;
 	int rosterOn;
+	float hudRetry;
 };
 
 EfwState *EFW_GetState( CBasePlayer *pPlayer );
@@ -49,6 +50,7 @@ void EFW_MarkSeen( CBasePlayer *pPlayer, const char *npc, const char *topic );
 void EFW_AddDiary( CBasePlayer *pPlayer, int page );
 void EFW_AdjustHope( CBasePlayer *pPlayer, int delta );
 void EFW_SendHope( CBasePlayer *pPlayer );
+void EFW_SendHint( CBasePlayer *pPlayer, const char *text );
 void EFW_SendDiary( CBasePlayer *pPlayer );
 void EFW_ShowMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text );
 void EFW_Print( CBasePlayer *pPlayer, const char *text );

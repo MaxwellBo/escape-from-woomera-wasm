@@ -137,6 +137,26 @@ def main() -> None:
         "}\n",
     )
 
+    gamerules = dlls / "gamerules.cpp"
+    once(
+        gamerules,
+        "	if( !gpGlobals->deathmatch )\n",
+        "	if( 1 || !gpGlobals->deathmatch ) /* EFW_OVERLAY: documentary SP */\n",
+    )
+
+    multiplay = dlls / "multiplay_gamerules.cpp"
+    once(
+        multiplay,
+        "BOOL CHalfLifeMultiplay::FAllowMonsters( void )\n"
+        "{\n"
+        "	return ( allowmonsters.value != 0 );\n"
+        "}\n",
+        "BOOL CHalfLifeMultiplay::FAllowMonsters( void )\n"
+        "{\n"
+        "	return TRUE; /* EFW_OVERLAY */\n"
+        "}\n",
+    )
+
     barney = dlls / "barney.cpp"
     once(
         barney,

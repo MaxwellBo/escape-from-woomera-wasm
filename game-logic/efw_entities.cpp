@@ -17,20 +17,45 @@ int EFW_RefugeeCount( void )
 	return g_refugeeCount;
 }
 
-// Do not call MonsterInit(): listen-server deathmatch defaults mp_allowmonsters
-// to 0 and that path sets FL_KILLME on every monster_refugee.
 static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
 {
 	pMonster->pev->takedamage = DAMAGE_NO;
 	pMonster->pev->solid = SOLID_SLIDEBOX;
 	pMonster->pev->movetype = MOVETYPE_STEP;
 	pMonster->pev->flags |= FL_MONSTER;
+	pMonster->pev->flags &= ~FL_KILLME;
 	pMonster->pev->deadflag = DEAD_NO;
 	pMonster->pev->effects = 0;
 	pMonster->m_MonsterState = MONSTERSTATE_IDLE;
 	pMonster->ResetSequenceInfo();
-	pMonster->SetThink( NULL );
-	pMonster->pev->nextthink = 0;
+	if( pMonster->pev->nextthink <= 0 )
+	{
+		pMonster->pev->origin.z += 1;
+		DROP_TO_FLOOR( ENT( pMonster->pev ) );
+		pMonster->SetThink( &CBaseMonster::CallMonsterThink );
+		pMonster->pev->nextthink = gpGlobals->time + 0.1f;
+	}
+}
+
+static void EFW_SetVisibleModel( CBaseEntity *pEntity, const char *preferred )
+{
+	const char *choices[4];
+	int n = 0;
+	int i;
+
+	if( preferred && preferred[0] )
+		choices[n++] = preferred;
+	choices[n++] = "models/player.mdl";
+	choices[n++] = "models/barney.mdl";
+	choices[n++] = "models/scientist.mdl";
+
+	for( i = 0; i < n; i++ )
+	{
+		PRECACHE_MODEL( (char *)choices[i] );
+		SET_MODEL( ENT( pEntity->pev ), choices[i] );
+		if( pEntity->pev->modelindex > 0 )
+			return;
+	}
 }
 
 static int EFW_NameIs( const char *tn, const char *a )
@@ -120,6 +145,8 @@ void CRefugee::Spawn( void )
 	int variant;
 
 	Precache();
+	PRECACHE_MODEL( "models/player.mdl" );
+	PRECACHE_MODEL( "models/barney.mdl" );
 	tn = STRING( pev->targetname );
 	variant = ENTINDEX( edict() );
 	if( EFW_IsFemale( tn ) )
@@ -142,7 +169,7 @@ void CRefugee::Spawn( void )
 		model = male[variant % 4];
 	}
 
-	SET_MODEL( ENT( pev ), model );
+	EFW_SetVisibleModel( this, model );
 	UTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
 	pev->solid = SOLID_SLIDEBOX;
 	pev->movetype = MOVETYPE_STEP;
@@ -154,7 +181,8 @@ void CRefugee::Spawn( void )
 	m_MonsterState = MONSTERSTATE_NONE;
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
-		( tn && tn[0] ) ? tn : "(unnamed)", model, pev->origin.x, pev->origin.y, pev->origin.z );
+		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
+	MonsterInit();
 	EFW_FinishTalkNpc( this );
 	SetUse( &CRefugee::TalkUse );
 }
@@ -235,6 +263,7 @@ void CPatrolGuard::Spawn( void )
 	pev->view_ofs = Vector( 0, 0, 50 );
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
+	MonsterInit();
 	EFW_FinishTalkNpc( this );
 	SetUse( &CPatrolGuard::TalkUse );
 	if( !FStringNull( pev->target ) )

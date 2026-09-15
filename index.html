@@ -92,10 +92,10 @@
           <section class="panel muted">
             <h3>Fair warning</h3>
             <p>
-              The mod's custom game code only ever shipped as Windows DLLs, so the
-              browser runs its maps, models, textures and sounds on stock Half-Life
-              game logic. You can walk the real Woomera compound, but scripted
-              systems (hope meter, conversations) will be degraded or missing.
+              Custom Windows DLLs are not used. An overlay on the open Half-Life
+              SDK (compiled to WASM) drives the hope meter, conversation scripts
+              from <code>Conversations/*.txt</code>, diary, and map markers.
+              Press <strong>E</strong> or click a person to talk, <strong>I</strong> for the diary.
             </p>
           </section>
           <section class="panel muted">
@@ -118,7 +118,7 @@
             This page boots the <strong>original mod files</strong> — its three
             <code>efw_prototype_level*</code> maps and shipped assets — inside the
             open-source Xash3D-FWGS engine cross-compiled to WebAssembly, with
-            stock Half-Life game logic likewise compiled to WASM.
+            overlay game logic compiled to WASM from the open Half-Life SDK.
           </p>
           <div class="cols">
             <div>
@@ -152,7 +152,7 @@
           <ol class="how">
             <li>Wait for steps 1–2 (mod zip + vendored Uplink <code>valve/</code> data). The engine then boots on its own.</li>
             <li>If boot did not start, click <strong>Boot Woomera in WASM</strong>. It runs with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
-            <li>Click the game view once to capture the mouse (pointer lock) and send keyboard to the engine. Esc releases the mouse. A keyboard and mouse are required, as with the original.</li>
+            <li>Click the game view once to capture the mouse (pointer lock) and send keyboard to the engine. Esc releases the mouse. A keyboard and mouse are required, as with the original. Press <strong>E</strong> or click a person to talk, <strong>I</strong> for the diary, <strong>[</strong>/<strong>]</strong> to turn pages.</li>
             <li>If the screen stays black, open the engine log below the game and the browser console.</li>
           </ol>
           <div class="row">

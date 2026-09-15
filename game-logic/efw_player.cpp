@@ -17,6 +17,7 @@ extern int gmsgTextMsg;
 
 static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
+static int gmsgEfwHint = 0;
 
 static EfwState g_efw[33];
 
@@ -41,6 +42,9 @@ EfwState *EFW_GetState( CBasePlayer *pPlayer )
 
 static void EFW_HostClientCmd( void )
 {
+	if( g_engfuncs.pfnServerPrint )
+		g_engfuncs.pfnServerPrint( "efw: host command received\n" );
+	ALERT( at_console, "efw: host cmd argc=%d argv0=%s\n", CMD_ARGC(), CMD_ARGV( 0 ) ? CMD_ARGV( 0 ) : "?" );
 	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
 	if( !ed || !ed->pvPrivateData )
 		return;
@@ -53,6 +57,8 @@ void EFW_LinkUserMessages( void )
 		gmsgHope = REG_USER_MSG( "Hope", 1 );
 	if( !gmsgEfwDiary )
 		gmsgEfwDiary = REG_USER_MSG( "EfwDiary", 6 );
+	if( !gmsgEfwHint )
+		gmsgEfwHint = REG_USER_MSG( "EfwHint", -1 );
 	if( g_engfuncs.pfnAddServerCommand )
 	{
 		static int registered;
@@ -107,6 +113,17 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 		hope = 100;
 	MESSAGE_BEGIN( MSG_ONE, gmsgHope, NULL, pPlayer->pev );
 		WRITE_BYTE( hope );
+	MESSAGE_END();
+}
+
+void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
+{
+	if( !gmsgEfwHint )
+		EFW_LinkUserMessages();
+	if( !pPlayer || !gmsgEfwHint || !text )
+		return;
+	MESSAGE_BEGIN( MSG_ONE, gmsgEfwHint, NULL, pPlayer->pev );
+		WRITE_STRING( text );
 	MESSAGE_END();
 }
 
@@ -319,13 +336,40 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_LinkUserMessages();
 	EFW_SendHope( pPlayer );
 	EFW_SendDiary( pPlayer );
-	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\n" );
+	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\nbind e +use\n" );
 	{
-		char buf[96];
-		snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
+		char buf[180];
+		CBaseEntity *pScan = NULL;
+		CBaseEntity *pBest = NULL;
+		float best = 1e30f;
+		while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, 4096.0f ) ) != NULL )
+		{
+			float d;
+			if( pScan == pPlayer || !EFW_IsTalkNpc( pScan ) )
+				continue;
+			d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
+			if( d < best )
+			{
+				best = d;
+				pBest = pScan;
+			}
+		}
+		if( pBest )
+		{
+			Vector dir = pBest->pev->origin - pPlayer->pev->origin;
+			pPlayer->pev->angles.y = UTIL_VecToYaw( dir );
+			pPlayer->pev->v_angle.y = pPlayer->pev->angles.y;
+			pPlayer->pev->fixangle = 1;
+			snprintf( buf, sizeof( buf ), "People nearby: %d. Facing %s (%.0fu). E or click to talk, I for diary.",
+				EFW_RefugeeCount(), EFW_ScriptNameForNpc( pBest ), best );
+		}
+		else
+			snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
 		ClientPrint( pPlayer->pev, HUD_PRINTCENTER, buf );
 		EFW_Print( pPlayer, buf );
+		EFW_SendHint( pPlayer, buf );
 	}
+	st->hudRetry = gpGlobals->time + 1.0f;
 }
 
 static const char *kPackageText =
@@ -814,14 +858,21 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
-	if( pPlayer->m_afButtonPressed & IN_USE )
+	if( st->hudRetry && gpGlobals->time >= st->hudRetry )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 96.0f );
+		st->hudRetry = 0;
+		EFW_SendHope( pPlayer );
+		EFW_SendDiary( pPlayer );
+	}
+
+	if( ( pPlayer->m_afButtonPressed & IN_USE ) || ( pPlayer->m_afButtonPressed & IN_ATTACK ) )
+	{
+		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
 		if( pEnt && ( EFW_IsTalkNpc( pEnt ) || !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
 		{
 			EFW_Spider( pPlayer );
-			pPlayer->m_afButtonPressed &= ~IN_USE;
-			pPlayer->pev->button &= ~IN_USE;
+			pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
+			pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
 		}
 	}
 

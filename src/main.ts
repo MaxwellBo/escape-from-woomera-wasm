@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay4`;
+    return `${url}?v=efw-overlay5`;
   return url;
 }
 
@@ -676,7 +676,11 @@ consoleForm.addEventListener('submit', (e) => {
   const cmd = consoleInput.value.trim();
   if (!cmd) return;
   log(`> ${cmd}`);
-  runEngineCmd(cmd);
+  // Game-DLL ClientCommand names are not host commands. Prefix with cmd
+  // so the listen server forwards them to EFW_ClientCommand.
+  const forwarded =
+    /^(efw_|menuselect\b)/i.test(cmd) && !/^cmd\s/i.test(cmd) ? `cmd ${cmd}` : cmd;
+  runEngineCmd(forwarded);
   consoleInput.value = '';
 });
 

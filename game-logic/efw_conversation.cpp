@@ -253,6 +253,8 @@ static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	}
 
+	EFW_Print( pPlayer, menu );
+	EFW_SendHint( pPlayer, menu );
 	EFW_ShowMenu( pPlayer, bits, 45, menu );
 }
 
@@ -350,6 +352,8 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	EFW_ShowMenu( pPlayer, 1, 45, body );
 	if( r && r->text[0] )
 		EFW_Print( pPlayer, r->text );
+	if( body[0] )
+		EFW_SendHint( pPlayer, body );
 }
 
 #endif
