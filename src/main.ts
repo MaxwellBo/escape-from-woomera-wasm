@@ -353,10 +353,18 @@ function writeTree(
   onProgress?.(entries.length, entries.length);
 }
 
-/** Match the WebGL backing store to the on-screen 4:3 box (not window.innerWidth). */
-function sizeGameCanvas() {
+/**
+ * Xash MainUI lays out in 1024×768 and scales by ScreenHeight/768.
+ * That only fits when ScreenWidth >= ScreenHeight * 4/3.
+ *
+ * SDL2's Emscripten port reads window.innerWidth/innerHeight as the drawable
+ * size — the whole browser, not the canvas. The menu is rasterised for that
+ * large screen and the CSS box then clips the right-hand hint column (and
+ * originally the top of the menu: GL's origin is bottom-left).
+ */
+function viewBox() {
   const wrap = canvas.parentElement;
-  const fallback = { width: canvas.width || 960, height: canvas.height || 720 };
+  const fallback = { width: 960, height: 720 };
   if (!wrap) return fallback;
   let width = Math.round(wrap.clientWidth);
   let height = Math.round(wrap.clientHeight);
@@ -364,11 +372,40 @@ function sizeGameCanvas() {
     width = Math.max(640, width);
     height = Math.round((width * 3) / 4);
   }
-  width -= width % 2;
-  height -= height % 2;
+  return { width: width - (width % 2), height: height - (height % 2) };
+}
+
+function sizeGameCanvas() {
+  const { width, height } = viewBox();
   canvas.width = width;
   canvas.height = height;
   return { width, height };
+}
+
+function logViewMetrics(tag: string) {
+  const wrap = canvas.parentElement;
+  const r = canvas.getBoundingClientRect();
+  log(
+    `${tag}: inner=${window.innerWidth}x${window.innerHeight} wrap=${wrap?.clientWidth ?? 0}x${wrap?.clientHeight ?? 0} ` +
+      `attr=${canvas.width}x${canvas.height} css=${Math.round(r.width)}x${Math.round(r.height)} ` +
+      `style=${canvas.style.width || '-'}x${canvas.style.height || '-'}`,
+  );
+}
+
+let windowSizePinned = false;
+function pinWindowSizeToView() {
+  if (windowSizePinned) return;
+  windowSizePinned = true;
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    enumerable: true,
+    get: () => viewBox().width,
+  });
+  Object.defineProperty(window, 'innerHeight', {
+    configurable: true,
+    enumerable: true,
+    get: () => viewBox().height,
+  });
 }
 
 function inputCaptured() {
@@ -420,8 +457,10 @@ async function boot() {
     }
 
     setVeil('Starting engine…', 'Initializing Xash3D WebAssembly runtime.', 0.7);
+    pinWindowSizeToView();
     const view = sizeGameCanvas();
     log(`boot: creating Xash3D (${view.width}x${view.height})`);
+    logViewMetrics('pre-init');
     engine = new Xash3D({
       canvas,
       arguments: [
@@ -510,7 +549,11 @@ async function boot() {
     log('filesystem staged: woomera + valve + WASM game logic');
     setVeil('Running…', 'Main loop starting.', 0.95);
     log('boot: main()');
+    logViewMetrics('pre-main');
     engine.main();
+    canvas.style.setProperty('width', '100%', 'important');
+    canvas.style.setProperty('height', '100%', 'important');
+    setTimeout(() => logViewMetrics('post-main'), 800);
     veil.classList.add('hidden');
     mapsPanel.classList.remove('hidden');
     markDone('step-launch');
