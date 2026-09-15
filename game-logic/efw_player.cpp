@@ -64,6 +64,7 @@ static int gmsgEfwHint = 0;
 static cvar_t efw_hope_cvar = { "efw_hope", "0", FCVAR_SERVER };
 static cvar_t efw_hud_cvar = { "efw_hud", "", FCVAR_SERVER };
 static cvar_t efw_diary_cvar = { "efw_diary_state", "0", FCVAR_SERVER };
+static cvar_t efw_pick_cvar = { "efw_pick", "0", 0 };
 
 static EfwState g_efw[33];
 
@@ -177,6 +178,7 @@ void EFW_LinkUserMessages( void )
 			CVAR_REGISTER( &efw_hope_cvar );
 			CVAR_REGISTER( &efw_hud_cvar );
 			CVAR_REGISTER( &efw_diary_cvar );
+			CVAR_REGISTER( &efw_pick_cvar );
 		}
 		if( !cmds_registered && g_engfuncs.pfnAddServerCommand )
 		{
@@ -1112,6 +1114,48 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_pause" ) || FStrEq( pcmd, "efw_set_state" ) || FStrEq( pcmd, "efw_changelevel" ) )
 		return 1;
 	return 0;
+}
+
+void EFW_PlayerHudPulse( CBasePlayer *pPlayer )
+{
+	EfwState *st;
+	int pick;
+	char trace[96];
+
+	if( !pPlayer )
+		return;
+	st = EFW_GetState( pPlayer );
+	pick = (int)CVAR_GET_FLOAT( "efw_pick" );
+	if( !pick )
+		return;
+	CVAR_SET_FLOAT( "efw_pick", 0 );
+	snprintf( trace, sizeof( trace ), "cvar-pick %d talking=%d mode=%d", pick, st->talking, st->menuMode );
+	EFW_WriteShare( "efw_pick.txt", trace );
+	ALERT( at_console, "efw: %s\n", trace );
+	if( pick == 199 )
+	{
+		EFW_ToggleDiary( pPlayer );
+		return;
+	}
+	if( pick == 198 )
+	{
+		EFW_StepDiary( pPlayer, 1 );
+		return;
+	}
+	if( pick == 197 )
+	{
+		EFW_StepDiary( pPlayer, -1 );
+		return;
+	}
+	if( pick < 1 || pick > 9 )
+		return;
+	if( !st->talking )
+	{
+		CBaseEntity *pNear = EFW_NearestTalkNpc( pPlayer, 512.0f );
+		if( pNear )
+			EFW_StartTalk( pPlayer, pNear );
+	}
+	EFW_ApplyTalkInputForce( pPlayer, pick, 1 );
 }
 
 void EFW_PlayerPreThink( CBasePlayer *pPlayer )

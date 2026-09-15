@@ -83,6 +83,7 @@ int CHudHope::Init( void )
 	gEngfuncs.pfnAddCommand( "efw_spider", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_HelpScreen", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_Give", EFW_FwdServer );
+	gEngfuncs.pfnRegisterVariable( "efw_pick", "0", 0 );
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
 	return 1;

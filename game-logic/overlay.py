@@ -148,6 +148,17 @@ def main() -> None:
         "{\n",
         1,
     )
+    if "EFW_PlayerHudPulse" not in player_text:
+        player_text = player_text.replace(
+            "void CBasePlayer::UpdateClientData( void )\n"
+            "{\n"
+            "	if( m_fInitHUD )\n",
+            "void CBasePlayer::UpdateClientData( void )\n"
+            "{\n"
+            "	EFW_PlayerHudPulse( this ); /* EFW_OVERLAY */\n"
+            "	if( m_fInitHUD )\n",
+            1,
+        )
     player_cpp.write_text(player_text, encoding="utf-8")
 
     game_cpp = dlls / "game.cpp"

@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay16`;
+    return `${url}?v=efw-overlay17`;
   return url;
 }
 
@@ -103,8 +103,8 @@ function chooseTalkSlot(slot: number) {
   canvas.focus();
   runEngineCmd('pausable 0');
   runEngineCmd('unpause');
+  runEngineCmd(`efw_pick ${slot}`);
   runEngineCmd(`efw_choose ${slot}`);
-  runEngineCmd(`menuselect ${slot}`);
   runGameCmd(`efw_choose ${slot}`);
 }
 
@@ -752,6 +752,7 @@ document.getElementById('btn-diary')?.addEventListener('click', () => {
   if (document.pointerLockElement)
     document.exitPointerLock();
   runEngineCmd('unpause');
+  runEngineCmd('efw_pick 199');
   runEngineCmd('efw_diary');
   runGameCmd('efw_diary');
 });

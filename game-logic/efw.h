@@ -11,6 +11,7 @@ typedef struct edict_s edict_t;
 int EFW_ClientCommand( edict_t *pEntity );
 void EFW_PlayerSpawn( CBasePlayer *pPlayer );
 void EFW_PlayerPreThink( CBasePlayer *pPlayer );
+void EFW_PlayerHudPulse( CBasePlayer *pPlayer );
 void EFW_LinkUserMessages( void );
 void EFW_OverrideNpcModel( CBaseEntity *pEntity );
 int EFW_RefugeeCount( void );
