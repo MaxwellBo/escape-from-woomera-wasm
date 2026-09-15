@@ -702,11 +702,15 @@ int EFW_ClientCommand( edict_t *pEntity )
 		if( CMD_ARGC() > 1 )
 		{
 			CBaseEntity *named = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( 1 ) );
+			ALERT( at_console, "efw: talk lookup '%s' -> %s\n", CMD_ARGV( 1 ),
+				named ? STRING( named->pev->classname ) : "(not found)" );
 			if( named )
 				pEnt = named;
 		}
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_StartTalk( pPlayer, pEnt );
+		else
+			EFW_Print( pPlayer, "No one to talk to." );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_spider" ) || FStrEq( pcmd, "pickup" ) )

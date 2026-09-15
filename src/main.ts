@@ -21,7 +21,10 @@ const logEl = document.getElementById('log') as HTMLPreElement;
 const logCount = document.getElementById('log-count') as HTMLSpanElement;
 
 function publicAsset(path: string): string {
-  return `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+  const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
+  if (/\.wasm$/i.test(path))
+    return `${url}?v=efw-overlay`;
+  return url;
 }
 
 const MOD_ZIP_URL = publicAsset('woomera.zip');
