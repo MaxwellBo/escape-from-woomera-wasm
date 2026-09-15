@@ -4,7 +4,7 @@ Ghidra 12.1.3 headless + Capstone. Image base `0x10000000`. Compiled Mon Jan 19 
 
 Decompiled C is in `decompile/out/*_ghidra_efw.c`. Recovered names are in `decompile/recovered/NAMES.md`. This is **not** a drop-in translation yet: Ghidra C uses `FUN_*` / `DAT_*`, MSVC thiscall, and GoldSrc engine callbacks.
 
-The playable port in `game-logic/` follows these recovered functions (hope, talk range, `EFWData`, refugee IdleThink, ClientCommand names) and is compiled into `public/hlsdk/{client,server}.wasm`. Raw Ghidra C is not a drop-in compile.
+The playable port in `game-logic/` follows these recovered functions (hope, talk range, `EFWData`, `EFW_Cntxt` scan slots, gate FSM, FailOrNarrate, refugee IdleThink, ClientCommand names) and is compiled into `public/hlsdk/{client,server}.wasm`. Raw Ghidra C is not a drop-in compile.
 
 ## Server `EscapeFromWoomera.dll`
 
@@ -70,9 +70,9 @@ Client issues `efw_Talk %c` / `efw_Give %d %c` / `efw_UseWithMarker %d %c` as `C
 
 ## Next port (not in this change)
 
-Recompile these C dumps against hlsdk-portable with:
+Remaining DLL surfaces still thinner than Win32:
 
-- `thiscall` → explicit `this` (already the Ghidra calling convention on MSVC)
-- engine callbacks (`DAT_10121e*` / `DAT_100a4ff0`) → `g_engfuncs` / `gEngfuncs`
-- `FindFirstFileA(Conversations\\*.txt)` → `LOAD_FILE_FOR_ME` / packaged `public/Conversations/`
-- user messages `EFWData` / `EFW_Menu` / `EFW_CtPrv` (the playable port no longer uses `efw_js_pick`)
+- CRefugee IdleThink schedules (`queue`, `mad_scientist_entity`) beyond walk-to-player
+- PA / ambient audio hooks
+- Per-weapon touch extras beyond LINK + Give bit
+- VGUI button widgets (WASM draws sprites + HUD strings; clicks go through `efw_Talk` / HTML)

@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll8`;
+    return `${url}?v=efw-dll9`;
   return url;
 }
 

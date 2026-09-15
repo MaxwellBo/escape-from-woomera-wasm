@@ -24,6 +24,7 @@ void EFW_Spider( CBasePlayer *pPlayer );
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc );
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
+int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 #endif
 
 #define WEAPON_EFW_PLIERS			16

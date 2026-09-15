@@ -109,8 +109,33 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
 	EfwDllState *st = EFW_Dll();
+	const char *tn;
 	if( !pPlayer || !pNpc )
 		return;
+	tn = STRING( pNpc->pev->targetname );
+	if( EFW_FStrEq( tn, "Amir" ) )
+	{
+		st->items &= ~EFW_ITEM_PLIERS;
+		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
+		EFW_AddDiary( 2, 2 );
+		EFW_FailOrNarrate( pPlayer, 0x4c );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Fashid" ) )
+	{
+		EFW_Squark( "Fashid", "Thanks, but I don't want them. A word of warning though, my friend. The guard outside often searches us, so you should find a way to hide them or smuggle them out.", 8 );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Nasir" ) )
+	{
+		EFW_Squark( "Nasir", "Well done, but you'll have to hide them in here somewhere, or the guard will find them when you leave the kitchen.", 8 );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Mouhtaz" ) )
+	{
+		EFW_Squark( "Mouhtaz", "Are you crazy? Whatever you do, don't try to leave with them. The guard outside may search you!", 8 );
+		return;
+	}
 	if( st->items & EFW_ITEM_PLIERS )
 	{
 		st->items &= ~EFW_ITEM_PLIERS;
@@ -131,13 +156,23 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 
 	if( !strcmp( name, "efw_PliersMarker" ) )
 	{
+		if( EFW_ElectricianSees( pPlayer ) )
+		{
+			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+			return;
+		}
 		if( !( st->items & EFW_ITEM_PLIERS ) )
 		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+			EFW_AddKeyword( "PLIERS", 0 );
 			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			EFW_AddKeyword( "ELECTRICIAN", 0 );
 		}
-		EFW_ShowGoldMenu( pPlayer, 0, 12,
-			"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
+		if( EFW_MapLevel() == 0 )
+			EFW_FailOrNarrate( pPlayer, 0x3d );
+		else
+			EFW_ShowGoldMenu( pPlayer, 0, 12,
+				"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
 		return;
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
@@ -145,30 +180,25 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 		if( st->items & EFW_ITEM_PLIERS )
 		{
 			st->items &= ~EFW_ITEM_PLIERS;
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound." );
+			EFW_FailOrNarrate( pPlayer, 0x3e );
 		}
 		else
 		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes." );
+			EFW_FailOrNarrate( pPlayer, 0x44 );
 		}
 		return;
 	}
 	if( !strcmp( name, "efw_hiding_place" ) )
 	{
-		if( st->items & EFW_ITEM_PLIERS )
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You return to the hiding place, with the pliers safely tucked away underneath your shirt." );
-		else
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You could hide again, but you haven't got the pliers yet." );
+		EFW_HideUnderBuilding( pPlayer );
 		return;
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
 		EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+		EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+		EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
 		return;
 	}
 }
@@ -304,17 +334,33 @@ int EFW_ClientCommand( edict_t *pEntity )
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_HideUnderBuilding" ) )
+	{
+		EFW_HideUnderBuilding( pPlayer );
 		return 1;
+	}
 	if( FStrEq( pcmd, "efw_PickupPliers" ) )
 	{
-		EFW_Squark( "efw_electrician" );
-		EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		if( EFW_ElectricianSees( pPlayer ) )
+			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+		else
+		{
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+			EFW_AddKeyword( "PLIERS", 0 );
+			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			EFW_AddKeyword( "ELECTRICIAN", 0 );
+			if( EFW_MapLevel() == 0 )
+				EFW_FailOrNarrate( pPlayer, 0x3d );
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )
 	{
-		int on = EFW_GetHudInt( 6 ) ? 0 : 1;
-		EFW_SetHudInt( 6, on );
+		int on = 1;
+		if( CMD_ARGC() > arg0 + 1 )
+			on = atoi( CMD_ARGV( arg0 + 1 ) ) != 0;
+		else
+			on = EFW_GetHudInt( 6 ) ? 0 : 1;
+		EFW_SetPause( on );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_set_state" ) )
@@ -324,7 +370,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_changelevel" ) )
+	{
+		if( CMD_ARGC() > arg0 + 1 )
+			EFW_ChangeLevel( CMD_ARGV( arg0 + 1 ) );
 		return 1;
+	}
 	return 0;
 }
 

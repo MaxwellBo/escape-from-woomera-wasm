@@ -25,6 +25,8 @@ int gmsgEFWCtPrv = 0;
 
 static EfwDllState g_efw;
 
+typedef char EFW_SCAN_SIZE_CHECK[( sizeof( EfwScanSlot ) == EFW_SCAN_BYTES ) ? 1 : -1];
+
 EfwDllState *EFW_Dll( void )
 {
 	return &g_efw;
@@ -129,12 +131,24 @@ void EFW_ThinkDt( void )
 	g_efw.lastTime = now;
 }
 
+void EFW_AdjustHope( float delta )
+{
+	float hope = EFW_GetHudFloat( 1 ) + delta;
+	if( hope < 0.0f )
+		hope = 0.0f;
+	if( hope > 100.0f )
+		hope = 100.0f;
+	EFW_SetHudFloat( 1, hope );
+}
+
 void EFW_ThinkHope( void )
 {
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
 
+	if( EFW_GetHudInt( 6 ) )
+		return;
 	if( g_efw.hopeClock <= 0.0f )
 		g_efw.hopeClock = now;
 	elapsed = now - g_efw.hopeClock;
@@ -150,8 +164,9 @@ void EFW_ThinkHope( void )
 	if( hope > 100.0f )
 		hope = 100.0f;
 	EFW_SetHudFloat( 1, hope );
-	if( hope <= 0.0f && g_efw.player )
+	if( hope <= 0.0f && g_efw.player && !g_efw.hopeFailed )
 	{
+		g_efw.hopeFailed = 1;
 		EFW_FailOrNarrate( g_efw.player, 0x4d );
 		EFW_DebugPrint( "Run out of hope!" );
 	}
@@ -186,12 +201,39 @@ void EFW_SendHudState( void )
 	EFW_ThinkConversation();
 }
 
+/* FUN_100c81d0: 0x3f/0x43 hope+15 then EFW_Menu; 0x3c-0x45 (not those) ShowMenu string; else EFW_Menu. */
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 {
-	if( !pPlayer || !gmsgEFWMenu )
+	static const char *kNarrate[] = {
+		/* 0x3c */ "You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.",
+		/* 0x3d */ "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir.",
+		/* 0x3e */ "Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.",
+		/* 0x3f */ NULL, /* Hiding_Day storyboard */
+		/* 0x40 */ "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.",
+		/* 0x41 */ "You return to the hiding place, with the pliers safely tucked away underneath your shirt.",
+		/* 0x42 */ "You could hide again, but you haven't got the pliers yet.",
+		/* 0x43 */ NULL, /* Hiding_Night storyboard */
+		/* 0x44 */ "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.",
+		/* 0x45 */ "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed."
+	};
+	int idx;
+
+	if( !pPlayer )
+		return;
+	if( code == 0x3f || code == 0x43 )
+		EFW_AdjustHope( 15.0f );
+	idx = code - 0x3c;
+	if( idx >= 0 && idx < (int)( sizeof( kNarrate ) / sizeof( kNarrate[0] ) ) && kNarrate[idx] )
+	{
+		EFW_ShowDllMenu( pPlayer, kNarrate[idx], NULL, 0 );
+		return;
+	}
+	if( code != 0x47 )
+		EFW_CloseTalk();
+	if( !gmsgEFWMenu )
 		return;
 	MESSAGE_BEGIN( MSG_ONE, gmsgEFWMenu, NULL, pPlayer->pev );
-		WRITE_BYTE( code );
+		WRITE_BYTE( code & 0xff );
 	MESSAGE_END();
 }
 
@@ -219,14 +261,22 @@ void EFW_AddDiary( int page, int mode )
 
 void EFW_AddKeyword( const char *word, int unlocked )
 {
-	if( !word || !word[0] || !unlocked )
+	int i;
+	if( !word || !word[0] )
 		return;
-	if( EFW_HasKeyword( word ) )
-		return;
+	for( i = 0; i < g_efw.keywordCount; i++ )
+	{
+		if( !strcmp( g_efw.keywords[i], word ) )
+		{
+			g_efw.keywordUnlocked[i] = unlocked ? 1 : 0;
+			return;
+		}
+	}
 	if( g_efw.keywordCount >= EFW_MAX_KEYWORDS )
 		return;
 	strncpy( g_efw.keywords[g_efw.keywordCount], word, EFW_TOPIC_LEN - 1 );
 	g_efw.keywords[g_efw.keywordCount][EFW_TOPIC_LEN - 1] = '\0';
+	g_efw.keywordUnlocked[g_efw.keywordCount] = unlocked ? 1 : 0;
 	g_efw.keywordCount++;
 }
 
@@ -238,9 +288,40 @@ int EFW_HasKeyword( const char *word )
 	for( i = 0; i < g_efw.keywordCount; i++ )
 	{
 		if( !strcmp( g_efw.keywords[i], word ) )
-			return 1;
+			return g_efw.keywordUnlocked[i];
 	}
 	return 0;
+}
+
+int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
+{
+	if( !pPlayer || !classname )
+		return 0;
+	if( pPlayer->HasNamedPlayerItem( classname ) )
+		return 1;
+	if( !strcmp( classname, "weapon_efw_Pliers" ) && ( g_efw.items & EFW_ITEM_PLIERS ) )
+		return 1;
+	if( !strcmp( classname, "weapon_efw_IDTag" ) && ( g_efw.items & EFW_ITEM_IDTAG ) )
+		return 1;
+	return 0;
+}
+
+int EFW_WeaponTypeId( const char *classname )
+{
+	static const char *kNames[] = {
+		"weapon_efw_Pliers", "weapon_efw_Pilers", "weapon_efw_Lever", "weapon_efw_Branch",
+		"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_BluePhoneCard",
+		"weapon_efw_GreenPhoneCard", "weapon_efw_RedPhoneCard", "weapon_efw_WashingPowder"
+	};
+	unsigned i;
+	if( !classname )
+		return -1;
+	for( i = 0; i < sizeof( kNames ) / sizeof( kNames[0] ); i++ )
+	{
+		if( !strcmp( classname, kNames[i] ) )
+			return (int)i + 0x10;
+	}
+	return -1;
 }
 
 int EFW_HasSeen( const char *npc, const char *topic )
@@ -501,6 +582,8 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		EFW_InitFromSpawn( pPlayer );
 	if( g_efw.lastTime > 1.0f && gpGlobals->time + 0.5f < g_efw.lastTime )
 		EFW_InitFromSpawn( pPlayer );
+	if( EFW_GetHudInt( 6 ) )
+		pPlayer->pev->movetype = MOVETYPE_NONE;
 	if( g_efw.talkActive )
 	{
 		int slot = pPlayer->pev->impulse;
