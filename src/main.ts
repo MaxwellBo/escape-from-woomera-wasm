@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay8`;
+    return `${url}?v=efw-overlay9`;
   return url;
 }
 
@@ -71,6 +71,25 @@ function markDone(id: string) {
 
 function fmtMB(bytes: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+function pressGameKey(key: string, keyCode: number) {
+  canvas.focus();
+  const fire = (type: string) => {
+    const ev = new KeyboardEvent(type, {
+      key,
+      code: key === 'e' ? 'KeyE' : key === 'i' ? 'KeyI' : `Key${key.toUpperCase()}`,
+      keyCode,
+      which: keyCode,
+      bubbles: true,
+      cancelable: true,
+    });
+    canvas.dispatchEvent(ev);
+    window.dispatchEvent(ev);
+    document.dispatchEvent(ev);
+  };
+  fire('keydown');
+  setTimeout(() => fire('keyup'), 120);
 }
 
 function runEngineCmd(cmd: string) {
@@ -695,17 +714,19 @@ consoleForm.addEventListener('submit', (e) => {
 });
 
 document.getElementById('btn-talk')?.addEventListener('click', () => {
-  log('> +use (talk)');
+  log('> talk (E / efw_Talk)');
+  void captureInput();
+  pressGameKey('e', 69);
   runEngineCmd('+use');
   runGameCmd('efw_Talk');
   runEngineCmd('efw_spider');
   setTimeout(() => runEngineCmd('-use'), 200);
-  void captureInput();
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
-  log('> efw_diary');
-  runGameCmd('efw_diary');
+  log('> diary (I / efw_diary)');
   void captureInput();
+  pressGameKey('i', 73);
+  runGameCmd('efw_diary');
 });
 
 document.getElementById('btn-about')?.addEventListener('click', () => {

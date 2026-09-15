@@ -424,6 +424,7 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	}
 	st->hudRetry = gpGlobals->time + 2.5f;
 	st->hudPulses = 8;
+	st->autoTalkAt = gpGlobals->time + 3.5f;
 }
 
 static const char *kPackageText =
@@ -959,9 +960,18 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		st->hudRetry = gpGlobals->time + 1.0f;
 		EFW_SendHope( pPlayer );
 		EFW_SendDiary( pPlayer );
-		if( st->hint[0] )
+		if( st->hint[0] && !st->talking )
 			EFW_SendHint( pPlayer, st->hint );
 		pPlayer->pev->armorvalue = st->hope;
+	}
+
+	if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
+	{
+		CBaseEntity *pNear;
+		st->autoTalkAt = 0;
+		pNear = EFW_NearestTalkNpc( pPlayer, 200.0f );
+		if( pNear )
+			EFW_StartTalk( pPlayer, pNear );
 	}
 
 	if( ( pPlayer->m_afButtonPressed & IN_USE ) || ( pPlayer->m_afButtonPressed & IN_ATTACK ) )
