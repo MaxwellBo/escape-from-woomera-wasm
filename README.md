@@ -46,7 +46,7 @@ demo’s own maps omitted; SDK `delta.lst` added). A full Steam install can
 still be selected as an override.
 
 1. Wait for steps 1–2 (mod zip + Uplink `valve/`). The engine boots itself.
-2. Click the game view to capture mouse/keyboard.
+2. Click the game view to capture the mouse (pointer lock) and keyboard. Esc releases the mouse.
 3. Optional: **Override with your install** if you have retail Half-Life.
 
 ## Honest limitation: stock game logic, not the mod's custom code

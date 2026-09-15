@@ -4,7 +4,7 @@ import { unzipSync } from 'fflate';
 
 type XashInstance = InstanceType<typeof Xash3D>;
 
-const canvas = document.getElementById('game') as HTMLCanvasElement;
+const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const veil = document.getElementById('veil') as HTMLDivElement;
 const veilTitle = document.getElementById('veil-title') as HTMLHeadingElement;
 const veilSub = document.getElementById('veil-sub') as HTMLParagraphElement;
@@ -353,6 +353,47 @@ function writeTree(
   onProgress?.(entries.length, entries.length);
 }
 
+/** Match the WebGL backing store to the on-screen 4:3 box (not window.innerWidth). */
+function sizeGameCanvas() {
+  const wrap = canvas.parentElement;
+  const fallback = { width: canvas.width || 960, height: canvas.height || 720 };
+  if (!wrap) return fallback;
+  let width = Math.round(wrap.clientWidth);
+  let height = Math.round(wrap.clientHeight);
+  if (width < 640 || height < 480) {
+    width = Math.max(640, width);
+    height = Math.round((width * 3) / 4);
+  }
+  width -= width % 2;
+  height -= height % 2;
+  canvas.width = width;
+  canvas.height = height;
+  return { width, height };
+}
+
+function inputCaptured() {
+  return document.pointerLockElement === canvas;
+}
+
+function syncCaptureUi() {
+  canvas.parentElement?.classList.toggle('captured', inputCaptured());
+  if (!engine) return;
+  launchStatus.textContent = inputCaptured()
+    ? 'running — mouse captured (Esc to release)'
+    : 'running — click the game view to capture mouse and keyboard';
+}
+
+async function captureInput() {
+  canvas.focus();
+  if (inputCaptured()) return;
+  try {
+    const pending = canvas.requestPointerLock();
+    if (pending) await pending;
+  } catch (err) {
+    log(`pointer lock failed: ${formatErr(err)}`);
+  }
+}
+
 // ---- boot ------------------------------------------------------------------
 
 async function boot() {
@@ -379,10 +420,19 @@ async function boot() {
     }
 
     setVeil('Starting engine…', 'Initializing Xash3D WebAssembly runtime.', 0.7);
-    log('boot: creating Xash3D');
+    const view = sizeGameCanvas();
+    log(`boot: creating Xash3D (${view.width}x${view.height})`);
     engine = new Xash3D({
       canvas,
-      arguments: ['-game', GAME_DIR],
+      arguments: [
+        '-windowed',
+        '-width',
+        String(view.width),
+        '-height',
+        String(view.height),
+        '-game',
+        GAME_DIR,
+      ],
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -395,6 +445,9 @@ async function boot() {
       module: {
         print: (text: string) => log(text),
         printErr: (text: string) => log(`ERR: ${text}`),
+        // Emscripten only auto-locks the pointer on click when this is set.
+        elementPointerLock: true,
+        keyboardListeningElement: canvas,
       },
     });
     log('boot: init()');
@@ -462,9 +515,12 @@ async function boot() {
     veil.classList.add('hidden');
     mapsPanel.classList.remove('hidden');
     markDone('step-launch');
-    launchStatus.textContent = 'running — click the game view to capture input';
+    launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
     engineStatus.textContent = 'running';
     log('engine main loop started; auto-loading efw_prototype_level1…');
+    canvas.focus();
+    engine.Cmd_ExecuteString('in_mouse 1');
+    engine.Cmd_ExecuteString('m_rawinput 1');
     setTimeout(() => {
       try {
         engine?.Cmd_ExecuteString('map efw_prototype_level1');
@@ -489,13 +545,17 @@ async function boot() {
 btnFolder.addEventListener('click', () => void pickFolderNative());
 dirInput.addEventListener('change', () => pickFolderFallback(dirInput.files));
 btnLaunch.addEventListener('click', () => void boot());
+canvas.addEventListener('click', () => void captureInput());
+canvas.addEventListener('pointerdown', () => canvas.focus());
+document.addEventListener('pointerlockchange', syncCaptureUi);
+document.addEventListener('pointerlockerror', () => log('pointer lock error'));
 
 mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
     log(`> map ${map}`);
     engine?.Cmd_ExecuteString(`map ${map}`);
-    canvas.focus();
+    void captureInput();
   });
 });
 
@@ -524,7 +584,7 @@ document.getElementById('btn-close-help')?.addEventListener('click', () => {
 void (async () => {
   await stageModZip();
   await stageValveZip();
-  setVeil('Ready', 'Click the game view after boot to capture mouse/keyboard.', 0.62);
+  setVeil('Ready', 'Click the game view after boot to capture mouse and keyboard.', 0.62);
   const params = new URLSearchParams(location.search);
   if (params.get('noboot') === '1') {
     log('noboot: assets ready, waiting for manual launch');
