@@ -158,6 +158,13 @@ int CHudHope::Draw( float flTime )
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	gHUD.DrawHudString( 8, 8, 80, "EFW", r, g, b );
+	{
+		static int cdraw;
+		char cd[24];
+		cdraw++;
+		snprintf( cd, sizeof( cd ), "cdraw %d", cdraw );
+		gHUD.DrawHudString( 48, 8, 220, cd, r, g, b );
+	}
 
 	if( m_iHope < 0 )
 	{

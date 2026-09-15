@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay20`;
+    return `${url}?v=efw-overlay21`;
   return url;
 }
 
@@ -701,22 +701,14 @@ async function boot() {
     markDone('step-launch');
     launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
-    log('engine main loop started; auto-loading efw_prototype_level1…');
+    log('engine main loop started with +map efw_prototype_level1');
     canvas.focus();
-    // Host command buffer is not ready at this instant; calling into it can
-    // abort the runtime with `throw Infinity` (`_Mem_Alloc: pool == NULL`).
-    // That used to hit boot()'s catch and null `engine`, leaving the menu
-    // on-screen but every later map/console button as a no-op.
     setTimeout(() => {
       runEngineCmd('pausable 0');
-      runEngineCmd('map efw_prototype_level1');
     }, 4000);
     setInterval(() => {
       runEngineCmd('pausable 0');
-    }, 1000);
-    setInterval(() => {
-      void captureInput();
-    }, 2500);
+    }, 2000);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
