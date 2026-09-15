@@ -134,13 +134,23 @@ int CHudHope::Draw( float flTime )
 		const char *hud = gEngfuncs.pfnGetCvarString( "efw_hud" );
 		if( hud && hud[0] )
 		{
-			char line[84];
-			int n = 0;
-			while( hud[n] && hud[n] != '\n' && n < 80 )
-				n++;
-			memcpy( line, hud, (size_t)n );
-			line[n] = '\0';
-			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, line, r, g, b );
+			while( *hud && hy < ScreenHeight - 20 )
+			{
+				char line[84];
+				int n = 0;
+				while( hud[n] && hud[n] != '\n' && hud[n] != '|' && n < 80 )
+					n++;
+				memcpy( line, hud, (size_t)n );
+				line[n] = '\0';
+				if( line[0] )
+				{
+					gHUD.DrawHudString( 12, hy, ScreenWidth - 12, line, r, g, b );
+					hy += 14;
+				}
+				hud += n;
+				if( *hud == '\n' || *hud == '|' )
+					hud++;
+			}
 		}
 	}
 	return 1;

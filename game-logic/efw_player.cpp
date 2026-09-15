@@ -15,6 +15,8 @@
 extern int gmsgShowMenu;
 extern int gmsgTextMsg;
 
+static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist );
+
 static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
 static int gmsgEfwHint = 0;
@@ -65,22 +67,24 @@ void EFW_LinkUserMessages( void )
 	if( !gmsgEfwHint )
 		gmsgEfwHint = REG_USER_MSG( "EfwHint", -1 );
 	{
-		static int registered;
-		if( !registered )
+		static int cvars_registered;
+		static int cmds_registered;
+		if( !cvars_registered )
 		{
-			registered = 1;
+			cvars_registered = 1;
 			CVAR_REGISTER( &efw_hope_cvar );
 			CVAR_REGISTER( &efw_hud_cvar );
 			CVAR_REGISTER( &efw_diary_cvar );
-			if( g_engfuncs.pfnAddServerCommand )
-			{
-				g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
-				g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
-				g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
-				g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
-				g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
-				g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
-			}
+		}
+		if( !cmds_registered && g_engfuncs.pfnAddServerCommand )
+		{
+			cmds_registered = 1;
+			g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
 		}
 	}
 }
@@ -141,7 +145,18 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 	st = EFW_GetState( pPlayer );
 	strncpy( st->hint, text, sizeof( st->hint ) - 1 );
 	st->hint[sizeof( st->hint ) - 1] = '\0';
-	CVAR_SET_STRING( "efw_hud", st->hint );
+	{
+		char flat[180];
+		int i;
+		strncpy( flat, st->hint, sizeof( flat ) - 1 );
+		flat[sizeof( flat ) - 1] = '\0';
+		for( i = 0; flat[i]; i++ )
+		{
+			if( flat[i] == '\n' )
+				flat[i] = '|';
+		}
+		CVAR_SET_STRING( "efw_hud", flat );
+	}
 	if( gmsgEfwHint )
 	{
 		MESSAGE_BEGIN( MSG_ONE, gmsgEfwHint, NULL, pPlayer->pev );
@@ -721,7 +736,13 @@ void EFW_Spider( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
-	pEnt = EFW_AimEntity( pPlayer, 110.0f );
+	pEnt = EFW_AimEntity( pPlayer, 160.0f );
+	if( !pEnt || ( !EFW_IsTalkNpc( pEnt ) && strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
+	{
+		CBaseEntity *nearNpc = EFW_NearestTalkNpc( pPlayer, 160.0f );
+		if( nearNpc )
+			pEnt = nearNpc;
+	}
 	if( !pEnt )
 	{
 		ALERT( at_aiconsole, "Ignoring spider\n" );
@@ -784,6 +805,28 @@ static void EFW_HelpScreen( CBasePlayer *pPlayer )
 	EFW_Print( pPlayer, "Objectives: talk to the others, keep hope alive, find a way out. Press I for the diary, E or click to talk." );
 }
 
+static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist )
+{
+	CBaseEntity *pScan = NULL;
+	CBaseEntity *pBest = NULL;
+	float best = dist;
+	if( !pPlayer )
+		return NULL;
+	while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, dist ) ) != NULL )
+	{
+		float d;
+		if( pScan == pPlayer || !EFW_IsTalkNpc( pScan ) )
+			continue;
+		d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
+		if( d < best )
+		{
+			best = d;
+			pBest = pScan;
+		}
+	}
+	return pBest;
+}
+
 int EFW_ClientCommand( edict_t *pEntity )
 {
 	CBasePlayer *pPlayer;
@@ -792,14 +835,20 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( !pEntity || !pEntity->pvPrivateData )
 		return 0;
 	pPlayer = GetClassPtr( (CBasePlayer *)&pEntity->v );
+	int arg0 = 0;
 	pcmd = CMD_ARGV( 0 );
 	if( !pcmd )
 		return 0;
+	if( FStrEq( pcmd, "cmd" ) && CMD_ARGC() > 1 )
+	{
+		arg0 = 1;
+		pcmd = CMD_ARGV( 1 );
+	}
 
 	if( FStrEq( pcmd, "menuselect" ) )
 	{
 		EfwState *st = EFW_GetState( pPlayer );
-		int slot = atoi( CMD_ARGV( 1 ) );
+		int slot = atoi( CMD_ARGV( arg0 + 1 ) );
 		if( st->menuMode == EFW_MENU_TOPICS )
 			EFW_ChooseTalk( pPlayer, slot );
 		else if( st->menuMode == EFW_MENU_CONTINUE || st->menuMode == EFW_MENU_TEXT )
@@ -808,7 +857,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_Talk" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		CBaseEntity *pEnt = NULL;
 		if( CMD_ARGC() > 1 )
 		{
 			CBaseEntity *named = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( 1 ) );
@@ -817,10 +866,17 @@ int EFW_ClientCommand( edict_t *pEntity )
 			if( named )
 				pEnt = named;
 		}
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 256.0f );
+		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
+			pEnt = EFW_NearestTalkNpc( pPlayer, 256.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_StartTalk( pPlayer, pEnt );
 		else
+		{
 			EFW_Print( pPlayer, "No one to talk to." );
+			EFW_SendHint( pPlayer, "No one to talk to." );
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_spider" ) || FStrEq( pcmd, "pickup" ) )
@@ -910,7 +966,9 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 
 	if( ( pPlayer->m_afButtonPressed & IN_USE ) || ( pPlayer->m_afButtonPressed & IN_ATTACK ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
+		if( !pEnt || ( !EFW_IsTalkNpc( pEnt ) && strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
+			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && ( EFW_IsTalkNpc( pEnt ) || !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
 		{
 			EFW_Spider( pPlayer );
