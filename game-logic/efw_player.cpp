@@ -57,6 +57,63 @@ static void EFW_WriteShare( const char *name, const char *text )
 	}
 }
 
+static int g_lastPickSeq;
+static int g_hudPulses;
+
+static int EFW_MailPick( void )
+{
+	int length = 0;
+	char *buf;
+	int seq = 0;
+	int slot = 0;
+	int cvar;
+	const char *paths[] = {
+		"/woomera/efw_cmd.txt",
+		"/rwdir/woomera/efw_cmd.txt",
+		NULL
+	};
+	int i;
+
+	buf = (char *)LOAD_FILE_FOR_ME( "efw_cmd.txt", &length );
+	if( buf && length > 0 )
+	{
+		char tmp[32];
+		int n = length < 31 ? length : 31;
+		memcpy( tmp, buf, (size_t)n );
+		tmp[n] = '\0';
+		FREE_FILE( buf );
+		sscanf( tmp, "%d %d", &seq, &slot );
+	}
+	if( !slot )
+	{
+		for( i = 0; paths[i]; i++ )
+		{
+			FILE *f = fopen( paths[i], "r" );
+			if( !f )
+				continue;
+			if( fscanf( f, "%d %d", &seq, &slot ) < 1 )
+			{
+				seq = 0;
+				slot = 0;
+			}
+			fclose( f );
+			if( slot )
+				break;
+		}
+	}
+	if( seq > g_lastPickSeq && slot )
+	{
+		g_lastPickSeq = seq;
+		return slot;
+	}
+	cvar = (int)CVAR_GET_FLOAT( "efw_pick" );
+	if( cvar )
+	{
+		CVAR_SET_FLOAT( "efw_pick", 0 );
+		return cvar;
+	}
+	return 0;
+}
 static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
 static int gmsgEfwHint = 0;
@@ -1125,13 +1182,17 @@ void EFW_PlayerHudPulse( CBasePlayer *pPlayer )
 	if( !pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
-	pick = (int)CVAR_GET_FLOAT( "efw_pick" );
+	g_hudPulses++;
+	pick = EFW_MailPick();
+	if( pick || ( g_hudPulses % 20 ) == 1 )
+	{
+		snprintf( trace, sizeof( trace ), "pulse %d pick=%d talk=%d t=%.0f",
+			g_hudPulses, pick, st->talking, gpGlobals->time );
+		EFW_WriteShare( "efw_pick.txt", trace );
+	}
 	if( !pick )
 		return;
-	CVAR_SET_FLOAT( "efw_pick", 0 );
-	snprintf( trace, sizeof( trace ), "cvar-pick %d talking=%d mode=%d", pick, st->talking, st->menuMode );
-	EFW_WriteShare( "efw_pick.txt", trace );
-	ALERT( at_console, "efw: %s\n", trace );
+	ALERT( at_console, "efw: mail pick %d talking=%d\n", pick, st->talking );
 	if( pick == 199 )
 	{
 		EFW_ToggleDiary( pPlayer );

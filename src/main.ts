@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay17`;
+    return `${url}?v=efw-overlay18`;
   return url;
 }
 
@@ -96,16 +96,38 @@ function pressGameKey(key: string, keyCode: number) {
   setTimeout(() => fire('keyup'), 120);
 }
 
-function chooseTalkSlot(slot: number) {
-  log(`> talk choice ${slot}`);
+let pickSeq = 0;
+
+function pokeGameInput(slot: number) {
+  pickSeq += 1;
+  const line = `${pickSeq} ${slot}`;
+  log(`> poke ${line}`);
   if (document.pointerLockElement)
     document.exitPointerLock();
-  canvas.focus();
+  const FS = (engine?.em as unknown as {
+    FS?: { writeFile: (p: string, d: Uint8Array | string) => void };
+  })?.FS;
+  if (FS?.writeFile) {
+    for (const p of [`/${GAME_DIR}/efw_cmd.txt`, `/rwdir/${GAME_DIR}/efw_cmd.txt`]) {
+      try {
+        FS.writeFile(p, line);
+      } catch (err) {
+        log(`fs write ${p} failed: ${formatErr(err)}`);
+      }
+    }
+  } else {
+    log('poke: WASM FS unavailable');
+  }
   runEngineCmd('pausable 0');
   runEngineCmd('unpause');
+  runEngineCmd(`set efw_pick ${slot}`);
   runEngineCmd(`efw_pick ${slot}`);
   runEngineCmd(`efw_choose ${slot}`);
-  runGameCmd(`efw_choose ${slot}`);
+}
+
+function chooseTalkSlot(slot: number) {
+  log(`> talk choice ${slot}`);
+  pokeGameInput(slot);
 }
 
 function runEngineCmd(cmd: string) {
@@ -752,9 +774,7 @@ document.getElementById('btn-diary')?.addEventListener('click', () => {
   if (document.pointerLockElement)
     document.exitPointerLock();
   runEngineCmd('unpause');
-  runEngineCmd('efw_pick 199');
-  runEngineCmd('efw_diary');
-  runGameCmd('efw_diary');
+  pokeGameInput(199);
 });
 document.querySelectorAll<HTMLButtonElement>('button[data-talk]').forEach((btn) => {
   btn.addEventListener('click', () => {
