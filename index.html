@@ -100,9 +100,10 @@
           <section class="panel muted">
             <h3>Fair warning</h3>
             <p>
-              Custom Windows DLLs are not used. An overlay on the open Half-Life
-              SDK (compiled to WASM) drives the hope meter, conversation scripts
-              from <code>Conversations/*.txt</code>, diary, and map markers.
+              Win32 DLLs are not loaded. Their overlay was decompiled and ported
+              into hlsdk-portable WASM: hope starts at 80 and drains at
+              <code>dt/12</code>, conversations from <code>Conversations/*.txt</code>
+              hide past 200 units / 20s, diary, and map markers.
               Press <strong>E</strong> or Talk to speak, <strong>Use</strong> on
               workbenches and bins, <strong>Give</strong> to hand over an item,
               number keys or 1–4 to pick a topic, <strong>I</strong> for the diary.
@@ -128,7 +129,8 @@
             This page boots the <strong>original mod files</strong> — its three
             <code>efw_prototype_level*</code> maps and shipped assets — inside the
             open-source Xash3D-FWGS engine cross-compiled to WebAssembly, with
-            overlay game logic compiled to WASM from the open Half-Life SDK.
+            game logic compiled to WASM from the open Half-Life SDK plus a
+            port of the recovered v0.84 DLL overlay (<code>decompile/</code>).
           </p>
           <div class="cols">
             <div>

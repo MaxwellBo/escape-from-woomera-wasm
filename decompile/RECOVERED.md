@@ -4,7 +4,7 @@ Ghidra 12.1.3 headless + Capstone. Image base `0x10000000`. Compiled Mon Jan 19 
 
 Decompiled C is in `decompile/out/*_ghidra_efw.c`. Recovered names are in `decompile/recovered/NAMES.md`. This is **not** a drop-in translation yet: Ghidra C uses `FUN_*` / `DAT_*`, MSVC thiscall, and GoldSrc engine callbacks.
 
-The from-scratch overlay in `game-logic/` is a separate reconstruction. Use these dumps when porting original logic into hlsdk-portable.
+The playable port in `game-logic/` follows these recovered functions (hope, talk range, `EFWData`, refugee IdleThink, ClientCommand names) and is compiled into `public/hlsdk/{client,server}.wasm`. Raw Ghidra C is not a drop-in compile.
 
 ## Server `EscapeFromWoomera.dll`
 
