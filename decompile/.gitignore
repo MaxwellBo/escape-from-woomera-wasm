@@ -1,0 +1,3 @@
+binaries/
+out/*_strings_all.txt
+out/*_ghidra.c

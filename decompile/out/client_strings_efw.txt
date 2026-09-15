@@ -1,0 +1,102 @@
+?AttemptToMaterialize@CBasePlayerItem@@QAEXXZ
+?CallMonsterThink@CBaseMonster@@QAEXXZ
+?CorpseFallThink@CBaseMonster@@QAEXXZ
+?DefaultTouch@CBasePlayerAmmo@@QAEXPAVCBaseEntity@@@Z
+?DefaultTouch@CBasePlayerItem@@QAEXPAVCBaseEntity@@@Z
+?DestroyItem@CBasePlayerItem@@QAEXXZ
+?DetonateUse@CGrenade@@QAEXPAVCBaseEntity@@0W4USE_TYPE@@M@Z
+?FallThink@CBasePlayerItem@@QAEXXZ
+?Materialize@CBasePlayerAmmo@@QAEXXZ
+?Materialize@CBasePlayerItem@@QAEXXZ
+?MonsterInitThink@CBaseMonster@@QAEXXZ
+?MonsterUse@CBaseMonster@@QAEXPAVCBaseEntity@@0W4USE_TYPE@@M@Z
+?PlayerDeathThink@CBasePlayer@@QAEXXZ
+?SUB_CallUseToggle@CBaseEntity@@QAEXXZ
+?SUB_Remove@CBaseEntity@@QAEXXZ
+?SatchelSlide@CSatchelCharge@@AAEXPAVCBaseEntity@@@Z
+monster_satchel
+weapon_efw_BluePhoneCard
+weapon_efw_Branch
+weapon_efw_GreenPhoneCard
+weapon_efw_IDTag
+weapon_efw_Lever
+weapon_efw_MobilePhone
+weapon_efw_Pliers
+weapon_efw_RedPhoneCard
+weapon_efw_WashingPowder
+models/w_Pliers.mdl
+models/v_Pliers.mdl
+models/p_Pliers.mdl
+PLIERS_GOT_PLIERS
+PLIERS
+PliersInBin
+efw_electrician
+Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.
+efw_kitchen_bin
+efw_cage_door
+weapon_efw_Lever
+efw_compound_gate_guard
+efw_IDTag_Position
+monster_satchel
+monster_snark
+monster_tripmine
+sprites/efw_artslogo.spr
+sprites/efw_diary_%02d%s.spr
+ShowMenu
+efw_textscheme.txt
+EFWData
+EFWShow
+sprites/efw_grey.spr
+Pliers
+weapon_efw_WashingPowder
+weapon_efw_BluePhoneCard
+weapon_efw_GreenPhoneCard
+weapon_efw_RedPhoneCard
+weapon_efw_IDTag
+weapon_efw_MobilePhone
+weapon_efw_Branch
+weapon_efw_Pliers
+efw_prototype_level2
+efw_prototype_level3
+EFW_CtPrv
+EFW_Cntxt
+efw_Pickup %u
+sprites/efw_give_icon.spr
+efw_PickupPliers
+Take pliers
+sprites/efw_item_pliers.spr
+efw_PliersMarker
+efw_HideUnderBuilding
+sprites/efw_hide_icon.spr
+efw_hiding_place
+efw_UseWithMarker %d %c
+efw_Give %d %c
+efw_Talk %c
+sprites/efw_speech_bubble.spr
+The package is from a pen-friend, a member of a refugee support group in Melbourne. The letter accompanying it brings you some hope, knowing that there is someone in this country that cares about your
+You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscr
+You could hide again, but you haven't got the pliers yet.
+You return to the hiding place, with the pliers safely tucked away underneath your shirt.
+You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.
+Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.
+You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them 
+You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.
+efw_ShowMenu %i
+EFW_Menu
+Storyboard\EFW_Sb_Ending_Dep.spr
+Storyboard\EFW_Sb_Ending_Iso.spr
+Storyboard\EFW_Storyboards_Ending_Positive.spr
+efw_changelevel efw_prototype_level1
+Storyboard\EFW_Storyboards_Introduction_3.spr
+Storyboard\EFW_Storyboards_Introduction_2.spr
+Storyboard\EFW_Storyboards_Introduction_1.spr
+Storyboard\EFW_Storyboards_Isolation.spr
+Storyboard\EFW_Storyboards_Help_Screen.spr
+Storyboard\EFW_Storyboards_Dec_Replace.spr
+efw_changelevel efw_prototype_level3
+Storyboard\EFW_Storyboards_Hiding_Night.spr
+Storyboard\EFW_Storyboards_Decoy_Remove.spr
+efw_changelevel efw_prototype_level2
+Storyboard\EFW_Storyboards_Hiding_Day.spr
+efw_pause 1
+efw_pause 0

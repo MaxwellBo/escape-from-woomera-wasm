@@ -1,0 +1,2 @@
+EscapeFromWoomera.dll size=1302621 exports=597 mangled=1 strings=6960
+client.dll size=573440 exports=551 mangled=67 strings=3251
