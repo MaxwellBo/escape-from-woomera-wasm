@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll2`;
+    return `${url}?v=efw-dll3`;
   return url;
 }
 
@@ -100,6 +100,7 @@ function chooseTalkSlot(slot: number) {
   log(`> menuselect ${slot}`);
   runEngineCmd('pausable 0');
   runGameCmd(`menuselect ${slot}`);
+  pressGameKey(String(slot), 48 + slot);
   void captureInput();
 }
 

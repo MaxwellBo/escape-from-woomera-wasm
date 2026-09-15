@@ -119,13 +119,11 @@ void EFW_SendEfwData( void )
 void EFW_ThinkDt( void )
 {
 	float now = gpGlobals->time;
-	float dt = now - g_efw.lastTime;
+	float dt = gpGlobals->frametime;
+	if( dt <= 0.0f )
+		dt = now - g_efw.lastTime;
 	if( dt < 0.0f )
-	{
-		g_efw.dt = 0.0f;
-		g_efw.lastTime = now;
-		return;
-	}
+		dt = 0.0f;
 	if( dt > 0.2f )
 		dt = 0.2f;
 	g_efw.dt = dt;
@@ -156,6 +154,7 @@ void EFW_SendHudState( void )
 	if( !g_efw.player )
 		return;
 
+	EFW_ThinkDt();
 	EFW_ThinkHope();
 	cursor = EFW_GetHudInt( 0 );
 	if( cursor < 0 || cursor >= g_efw.diaryCount )
@@ -165,7 +164,6 @@ void EFW_SendHudState( void )
 	EFW_SetHudInt( 2, ( cursor < EFW_MAX_DIARY ) ? g_efw.diaryFlags[cursor] : 0 );
 	EFW_SetHudInt( 3, EFW_MapLevel() );
 	EFW_SendEfwData();
-	EFW_ThinkDt();
 	if( g_efw.player && g_efw.player->m_pActiveItem )
 		EFW_SetHudInt( 4, g_efw.player->m_pActiveItem->m_iId );
 	else
@@ -367,8 +365,33 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	EFW_SendHudState();
 }
 
+static void EFW_HostFwd( void )
+{
+	edict_t *e = INDEXENT( 1 );
+	if( e && e->pvPrivateData )
+		EFW_ClientCommand( e );
+}
+
+static void EFW_RegisterHostCmds( void )
+{
+	static int done;
+	const char *cmds[] = {
+		"efw_Talk", "efw_Give", "efw_spider", "efw_Pickup", "efw_UseWithMarker",
+		"efw_diary", "efw_diary_next", "efw_diary_prev", "efw_ShowMenu",
+		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
+		"efw_pause", "efw_set_state", "efw_changelevel", "menuselect", NULL
+	};
+	int i;
+	if( done )
+		return;
+	done = 1;
+	for( i = 0; cmds[i]; i++ )
+		g_engfuncs.pfnAddServerCommand( cmds[i], EFW_HostFwd );
+}
+
 void EFW_LinkUserMessages( void )
 {
+	EFW_RegisterHostCmds();
 	if( !gmsgEFWShow )
 		gmsgEFWShow = REG_USER_MSG( "EFWShow", -1 );
 	if( !gmsgEFWData )
@@ -411,9 +434,19 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		EFW_InitFromSpawn( pPlayer );
 	if( g_efw.lastTime > 1.0f && gpGlobals->time + 0.5f < g_efw.lastTime )
 		EFW_InitFromSpawn( pPlayer );
-	if( g_efw.lastTime == gpGlobals->time && g_efw.inited )
-		return;
-	EFW_SendHudState();
+	if( g_efw.talkActive )
+	{
+		int slot = pPlayer->pev->impulse;
+		if( slot >= 1 && slot <= 9 )
+		{
+			EFW_ChooseTalk( pPlayer, slot );
+			pPlayer->pev->impulse = 0;
+		}
+		else if( pPlayer->m_afButtonPressed & ( IN_ATTACK | IN_USE ) )
+			EFW_ChooseTalk( pPlayer, 1 );
+	}
+	if( g_efw.lastTime != gpGlobals->time || !g_efw.inited )
+		EFW_SendHudState();
 }
 
 #endif
