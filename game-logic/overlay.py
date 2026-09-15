@@ -137,20 +137,18 @@ def main() -> None:
         f"\tEFW_PlayerSpawn( this ); {MARKER}\n"
         "}\n",
     )
-    once(
-        player_cpp,
+    # Do not pulse from UpdateClientData: that re-ran talk input in the same
+    # frame as PreThink and immediately continued past reply text.
+    player_text = player_cpp.read_text(encoding="utf-8", errors="replace")
+    player_text = player_text.replace(
         "void CBasePlayer::UpdateClientData( void )\n"
         "{\n"
-        "	if( m_fInitHUD )\n"
-        "	{\n"
-        "		m_fInitHUD = FALSE;\n",
+        "	EFW_PlayerPreThink( this ); /* EFW_OVERLAY */\n",
         "void CBasePlayer::UpdateClientData( void )\n"
-        "{\n"
-        f"	EFW_PlayerPreThink( this ); {MARKER}\n"
-        "	if( m_fInitHUD )\n"
-        "	{\n"
-        "		m_fInitHUD = FALSE;\n",
+        "{\n",
+        1,
     )
+    player_cpp.write_text(player_text, encoding="utf-8")
 
     game_cpp = dlls / "game.cpp"
     once(

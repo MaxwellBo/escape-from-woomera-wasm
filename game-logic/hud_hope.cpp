@@ -145,11 +145,6 @@ int CHudHope::Draw( float flTime )
 			FillRGBA( x, y, fill, 12, 255, 155, 50, 220 );
 
 		snprintf( label, sizeof( label ), "HOPE  %d", m_iHope );
-		{
-			cl_entity_t *lx = gEngfuncs.GetLocalPlayer();
-			if( lx && lx->curstate.iuser1 )
-				snprintf( label, sizeof( label ), "HOPE  %d  t=%d", m_iHope, lx->curstate.iuser1 );
-		}
 		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
 		hy = y + 34;
 	}
@@ -174,8 +169,27 @@ int CHudHope::Draw( float flTime )
 
 	{
 		char fileHud[192];
+		char fileDiary[48];
 		const char *hud = NULL;
-		if( EFW_ReadShare( "efw_hud.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] )
+		if( EFW_ReadShare( "efw_diary.txt", fileDiary, sizeof( fileDiary ) ) && fileDiary[0] )
+		{
+			int open = 0;
+			int page = 1;
+			unsigned mask = 0;
+			char pages[80];
+			int off;
+			int i;
+			sscanf( fileDiary, "%d %d %u", &open, &page, &mask );
+			off = snprintf( pages, sizeof( pages ), "Diary%s  pages", open ? " OPEN" : "" );
+			for( i = 1; i <= 12 && off < (int)sizeof( pages ) - 4; i++ )
+			{
+				if( mask & ( 1u << i ) )
+					off += snprintf( pages + off, sizeof( pages ) - off, " %d", i );
+			}
+			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, pages, r, g, b );
+			hy += 14;
+		}
+		if( !g_efwHint[0] && EFW_ReadShare( "efw_hud.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] && strncmp( fileHud, "t=", 2 ) )
 			hud = fileHud;
 		if( !hud || !hud[0] )
 			hud = gEngfuncs.pfnGetCvarString( "efw_hud" );
@@ -189,7 +203,7 @@ int CHudHope::Draw( float flTime )
 					n++;
 				memcpy( line, hud, (size_t)n );
 				line[n] = '\0';
-				if( line[0] )
+				if( line[0] && strncmp( line, "t=", 2 ) )
 				{
 					gHUD.DrawHudString( 12, hy, ScreenWidth - 12, line, r, g, b );
 					hy += 14;

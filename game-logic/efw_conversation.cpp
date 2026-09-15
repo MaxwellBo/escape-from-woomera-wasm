@@ -293,6 +293,9 @@ static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	}
 
+	if( strlen( menu ) + 40 < sizeof( menu ) )
+		strcat( menu, "Fire or 1-9 to choose" );
+
 	EFW_Print( pPlayer, menu );
 	EFW_SendHint( pPlayer, menu );
 	EFW_ShowMenu( pPlayer, bits, 45, menu );
@@ -309,7 +312,13 @@ void EFW_CloseTalk( CBasePlayer *pPlayer )
 
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
+	EfwState *st;
+	int idx;
 	if( !pPlayer || !pNpc )
+		return;
+	st = EFW_GetState( pPlayer );
+	idx = ENTINDEX( pNpc->edict() );
+	if( st->talking == idx && st->menuMode != EFW_MENU_NONE )
 		return;
 	EFW_ShowTopicMenu( pPlayer, pNpc );
 }
@@ -388,6 +397,12 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 		strcpy( body, "..." );
 	if( strlen( body ) + 16 < sizeof( body ) )
 		strcat( body, "\n1. Continue" );
+	{
+		char tail[32];
+		snprintf( tail, sizeof( tail ), "\nDiary %u hope %d", st->diary, st->hope );
+		if( strlen( body ) + strlen( tail ) < sizeof( body ) )
+			strcat( body, tail );
+	}
 	st->menuMode = EFW_MENU_CONTINUE;
 	EFW_ShowMenu( pPlayer, 1, 45, body );
 	if( r && r->text[0] )

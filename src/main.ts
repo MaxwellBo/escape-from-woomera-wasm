@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay14`;
+    return `${url}?v=efw-overlay15`;
   return url;
 }
 
@@ -75,10 +75,14 @@ function fmtMB(bytes: number) {
 
 function pressGameKey(key: string, keyCode: number) {
   canvas.focus();
+  const code = key === 'e' ? 'KeyE'
+    : key === 'i' ? 'KeyI'
+    : /^\d$/.test(key) ? `Digit${key}`
+    : `Key${key.toUpperCase()}`;
   const fire = (type: string) => {
     const ev = new KeyboardEvent(type, {
       key,
-      code: key === 'e' ? 'KeyE' : key === 'i' ? 'KeyI' : `Key${key.toUpperCase()}`,
+      code,
       keyCode,
       which: keyCode,
       bubbles: true,
@@ -90,6 +94,20 @@ function pressGameKey(key: string, keyCode: number) {
   };
   fire('keydown');
   setTimeout(() => fire('keyup'), 120);
+}
+
+function chooseTalkSlot(slot: number) {
+  log(`> talk choice ${slot}`);
+  void captureInput();
+  pressGameKey(String(slot), 48 + slot);
+  runEngineCmd(`impulse ${slot}`);
+  runEngineCmd(`efw_choose ${slot}`);
+  runEngineCmd(`menuselect ${slot}`);
+  runGameCmd(`menuselect ${slot}`);
+  if (slot === 1) {
+    runEngineCmd('+attack');
+    setTimeout(() => runEngineCmd('-attack'), 180);
+  }
 }
 
 function runEngineCmd(cmd: string) {
@@ -728,14 +746,22 @@ document.getElementById('btn-talk')?.addEventListener('click', () => {
   pressGameKey('e', 69);
   runEngineCmd('+use');
   runGameCmd('efw_Talk');
-  runEngineCmd('efw_spider');
   setTimeout(() => runEngineCmd('-use'), 200);
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
-  log('> diary (I / efw_diary)');
+  log('> diary (I / impulse 199)');
   void captureInput();
   pressGameKey('i', 73);
+  runEngineCmd('impulse 199');
+  runEngineCmd('efw_diary');
   runGameCmd('efw_diary');
+});
+document.querySelectorAll<HTMLButtonElement>('button[data-talk]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const slot = Number(btn.dataset.talk);
+    if (Number.isFinite(slot) && slot > 0)
+      chooseTalkSlot(slot);
+  });
 });
 
 document.getElementById('btn-about')?.addEventListener('click', () => {

@@ -16,6 +16,10 @@ extern int gmsgShowMenu;
 extern int gmsgTextMsg;
 
 static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist );
+static void EFW_ToggleDiary( CBasePlayer *pPlayer );
+static void EFW_StepDiary( CBasePlayer *pPlayer, int dir );
+static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot );
+static CBasePlayer *EFW_ListenPlayer( void );
 
 static void EFW_WriteShare( const char *name, const char *text )
 {
@@ -81,16 +85,63 @@ EfwState *EFW_GetState( CBasePlayer *pPlayer )
 	return &g_efw[i];
 }
 
+static CBasePlayer *EFW_ListenPlayer( void )
+{
+	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
+	if( !ed || !ed->pvPrivateData )
+		return NULL;
+	return GetClassPtr( (CBasePlayer *)&ed->v );
+}
+
 static void EFW_HostClientCmd( void )
 {
 	const char *a0 = CMD_ARGV( 0 );
+	CBasePlayer *pPlayer;
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( "efw: host command received\n" );
 	ALERT( at_console, "efw: host cmd argc=%d argv0=%s\n", CMD_ARGC(), a0 ? a0 : "?" );
-	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
-	if( !ed || !ed->pvPrivateData )
+	pPlayer = EFW_ListenPlayer();
+	if( !pPlayer )
 		return;
-	EFW_ClientCommand( ed );
+	EFW_ClientCommand( pPlayer->edict() );
+}
+
+static void EFW_HostChoose( void )
+{
+	CBasePlayer *pPlayer = EFW_ListenPlayer();
+	EfwState *st;
+	int slot = 1;
+	if( CMD_ARGC() > 1 )
+		slot = atoi( CMD_ARGV( 1 ) );
+	if( slot < 1 )
+		slot = 1;
+	ALERT( at_console, "efw: host choose %d\n", slot );
+	if( !pPlayer )
+		return;
+	st = EFW_GetState( pPlayer );
+	st->pendingChoice = slot;
+	EFW_ApplyTalkInput( pPlayer, slot );
+}
+
+static void EFW_HostDiaryToggle( void )
+{
+	CBasePlayer *pPlayer = EFW_ListenPlayer();
+	if( pPlayer )
+		EFW_ToggleDiary( pPlayer );
+}
+
+static void EFW_HostDiaryNext( void )
+{
+	CBasePlayer *pPlayer = EFW_ListenPlayer();
+	if( pPlayer )
+		EFW_StepDiary( pPlayer, 1 );
+}
+
+static void EFW_HostDiaryPrev( void )
+{
+	CBasePlayer *pPlayer = EFW_ListenPlayer();
+	if( pPlayer )
+		EFW_StepDiary( pPlayer, -1 );
 }
 
 void EFW_LinkUserMessages( void )
@@ -115,9 +166,11 @@ void EFW_LinkUserMessages( void )
 		{
 			cmds_registered = 1;
 			g_engfuncs.pfnAddServerCommand( "efw_Talk", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostClientCmd );
-			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_choose", EFW_HostChoose );
+			g_engfuncs.pfnAddServerCommand( "menuselect", EFW_HostChoose );
+			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostDiaryToggle );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostDiaryNext );
+			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostDiaryPrev );
 			g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
 			g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
 		}
@@ -448,7 +501,8 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_LinkUserMessages();
 	EFW_SendHope( pPlayer );
 	EFW_SendDiary( pPlayer );
-	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\nbind [ efw_diary_prev\nbind ] efw_diary_next\nbind e +use\n" );
+	CLIENT_COMMAND( pPlayer->edict(), "bind i impulse 199\nbind [ impulse 197\nbind ] impulse 198\nbind e +use\nbind 1 impulse 1\nbind 2 impulse 2\nbind 3 impulse 3\nbind 4 impulse 4\nbind 5 impulse 5\nbind 6 impulse 6\nbind 7 impulse 7\nbind 8 impulse 8\nbind 9 impulse 9\n" );
+	SERVER_COMMAND( "bind i impulse 199\nbind 1 impulse 1\nbind 2 impulse 2\nbind 3 impulse 3\n" );
 	{
 		edict_t *pent;
 		Vector spot;
@@ -897,6 +951,27 @@ static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist )
 	return pBest;
 }
 
+static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot )
+{
+	EfwState *st;
+
+	if( !pPlayer )
+		return;
+	st = EFW_GetState( pPlayer );
+	if( !st->talking )
+		return;
+	if( st->choiceLock && gpGlobals->time > 0.0f && gpGlobals->time < st->choiceLock )
+		return;
+	if( slot < 1 )
+		slot = 1;
+	st->choiceLock = gpGlobals->time + 0.28f;
+	st->pendingChoice = 0;
+	if( st->menuMode == EFW_MENU_TOPICS )
+		EFW_ChooseTalk( pPlayer, slot );
+	else if( st->menuMode == EFW_MENU_CONTINUE || st->menuMode == EFW_MENU_TEXT )
+		EFW_ContinueTalk( pPlayer );
+}
+
 int EFW_ClientCommand( edict_t *pEntity )
 {
 	CBasePlayer *pPlayer;
@@ -1018,46 +1093,31 @@ int EFW_ClientCommand( edict_t *pEntity )
 void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 {
 	EfwState *st;
+	int slot;
+	int pressed;
 
 	if( !pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
+	if( st->lastThinkTime == gpGlobals->time && st->thinkFrames > 0 )
+		return;
+	st->lastThinkTime = gpGlobals->time;
 	st->thinkFrames++;
+
 	if( ( st->thinkFrames % 30 ) == 1 )
 	{
 		CBaseEntity *pNear;
-		char beat[192];
-		pPlayer->pev->armorvalue = ( st->thinkFrames & 32 ) ? (float)st->hope : (float)( st->hope ? st->hope - 1 : 0 );
-		pPlayer->pev->iuser1 = (int)( gpGlobals->time * 10.0f );
-		pPlayer->pev->iuser2 = st->talking;
-		{
-			hudtextparms_t hp;
-			memset( &hp, 0, sizeof( hp ) );
-			hp.x = -1;
-			hp.y = 0.45f;
-			hp.r1 = 255;
-			hp.g1 = 255;
-			hp.b1 = 0;
-			hp.a1 = 255;
-			hp.r2 = 255;
-			hp.g2 = 255;
-			hp.b2 = 0;
-			hp.a2 = 255;
-			hp.holdTime = 1.2f;
-			hp.channel = 3;
-			UTIL_HudMessage( pPlayer, hp, "EFW-TALK" );
-		}
+		EFW_SendHope( pPlayer );
+		EFW_SendDiary( pPlayer );
+		if( st->hint[0] )
+			EFW_SendHint( pPlayer, st->hint );
 		if( !st->talking )
 		{
 			pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
 			if( pNear )
 				EFW_StartTalk( pPlayer, pNear );
 		}
-		EFW_SendHope( pPlayer );
-		EFW_SendDiary( pPlayer );
-		snprintf( beat, sizeof( beat ), "t=%.0f talking=%d | %s", gpGlobals->time, st->talking, st->hint );
-		EFW_WriteShare( "efw_hud.txt", beat );
 	}
 
 	if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
@@ -1069,11 +1129,48 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			EFW_StartTalk( pPlayer, pNear );
 	}
 
-	if( ( pPlayer->m_afButtonPressed & IN_USE ) || ( pPlayer->m_afButtonPressed & IN_ATTACK ) )
+	slot = 0;
+	if( st->talking && st->pendingChoice > 0 )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
+		slot = st->pendingChoice;
+		st->pendingChoice = 0;
+	}
+	if( pPlayer->pev->impulse >= 1 && pPlayer->pev->impulse <= 9 )
+		slot = pPlayer->pev->impulse;
+	if( pPlayer->pev->impulse == 199 )
+	{
+		EFW_ToggleDiary( pPlayer );
+		pPlayer->pev->impulse = 0;
+	}
+	else if( pPlayer->pev->impulse == 198 )
+	{
+		EFW_StepDiary( pPlayer, 1 );
+		pPlayer->pev->impulse = 0;
+	}
+	else if( pPlayer->pev->impulse == 197 )
+	{
+		EFW_StepDiary( pPlayer, -1 );
+		pPlayer->pev->impulse = 0;
+	}
+
+	pressed = pPlayer->m_afButtonPressed;
+	if( st->talking )
+	{
+		if( !slot && ( pressed & ( IN_ATTACK | IN_USE ) ) )
+			slot = 1;
+		if( slot )
+		{
+			EFW_ApplyTalkInput( pPlayer, slot );
+			pPlayer->pev->impulse = 0;
+			pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
+			pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
+		}
+	}
+	else if( ( pressed & IN_USE ) || ( pressed & IN_ATTACK ) )
+	{
+		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 256.0f );
 		if( !pEnt || ( !EFW_IsTalkNpc( pEnt ) && strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
-			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
+			pEnt = EFW_NearestTalkNpc( pPlayer, 256.0f );
 		if( pEnt && ( EFW_IsTalkNpc( pEnt ) || !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
 		{
 			EFW_Spider( pPlayer );
@@ -1085,7 +1182,7 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	if( st->talking )
 	{
 		CBaseEntity *pNpc = CBaseEntity::Instance( INDEXENT( st->talking ) );
-		if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 160.0f )
+		if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 512.0f )
 		{
 			EFW_Print( pPlayer, "Conversation hidden, partner too far" );
 			EFW_CloseTalk( pPlayer );

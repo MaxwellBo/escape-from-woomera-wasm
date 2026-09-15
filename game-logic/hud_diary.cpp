@@ -55,10 +55,7 @@ int CHudDiary::MsgFunc_EfwDiary( const char *pszName, int iSize, void *pbuf )
 	m_iOpen = READ_BYTE();
 	m_iPage = READ_BYTE();
 	m_iUnlocked = READ_LONG();
-	if( m_iOpen )
-		m_iFlags |= HUD_ACTIVE;
-	else
-		m_iFlags &= ~HUD_ACTIVE;
+	m_iFlags |= HUD_ACTIVE;
 	m_iLoadedPage = -1;
 	return 1;
 }

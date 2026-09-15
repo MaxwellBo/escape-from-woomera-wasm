@@ -43,6 +43,9 @@ struct EfwState
 	char hint[180];
 	float autoTalkAt;
 	int thinkFrames;
+	int pendingChoice;
+	float choiceLock;
+	float lastThinkTime;
 };
 
 EfwState *EFW_GetState( CBasePlayer *pPlayer );
