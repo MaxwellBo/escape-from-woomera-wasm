@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay5`;
+    return `${url}?v=efw-overlay6`;
   return url;
 }
 
@@ -80,6 +80,15 @@ function runEngineCmd(cmd: string) {
   } catch (err) {
     log(`cmd failed (${cmd}): ${formatErr(err)}`);
   }
+}
+
+/** Host console, ClientCommand, and listen-server `cmd` forwarding. */
+function runGameCmd(cmd: string) {
+  const trimmed = cmd.trim();
+  if (!trimmed) return;
+  runEngineCmd(trimmed);
+  if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b)/i.test(trimmed))
+    runEngineCmd(`cmd ${trimmed}`);
 }
 
 function formatErr(err: unknown): string {
@@ -681,7 +690,22 @@ consoleForm.addEventListener('submit', (e) => {
   const forwarded =
     /^(efw_|menuselect\b)/i.test(cmd) && !/^cmd\s/i.test(cmd) ? `cmd ${cmd}` : cmd;
   runEngineCmd(forwarded);
+  if (forwarded !== cmd) runEngineCmd(cmd);
   consoleInput.value = '';
+});
+
+document.getElementById('btn-talk')?.addEventListener('click', () => {
+  log('> +use (talk)');
+  runEngineCmd('+use');
+  runGameCmd('efw_Talk');
+  runEngineCmd('efw_spider');
+  setTimeout(() => runEngineCmd('-use'), 200);
+  void captureInput();
+});
+document.getElementById('btn-diary')?.addEventListener('click', () => {
+  log('> efw_diary');
+  runGameCmd('efw_diary');
+  void captureInput();
 });
 
 document.getElementById('btn-about')?.addEventListener('click', () => {

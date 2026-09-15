@@ -39,6 +39,8 @@ struct EfwState
 	int packageGot;
 	int rosterOn;
 	float hudRetry;
+	int hudPulses;
+	char hint[180];
 };
 
 EfwState *EFW_GetState( CBasePlayer *pPlayer );

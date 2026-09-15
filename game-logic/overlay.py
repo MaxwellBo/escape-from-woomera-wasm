@@ -137,6 +137,24 @@ def main() -> None:
         "}\n",
     )
 
+    game_cpp = dlls / "game.cpp"
+    once(
+        game_cpp,
+        '#include "game.h"\n'
+        '#include "vcs_info.h"\n',
+        '#include "game.h"\n'
+        '#include "vcs_info.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        game_cpp,
+        '\tSERVER_COMMAND( "exec skill.cfg\\n" );\n'
+        "}\n",
+        '\tSERVER_COMMAND( "exec skill.cfg\\n" );\n'
+        f"\tEFW_LinkUserMessages(); {MARKER}\n"
+        "}\n",
+    )
+
     gamerules = dlls / "gamerules.cpp"
     once(
         gamerules,

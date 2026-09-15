@@ -42,9 +42,10 @@ EfwState *EFW_GetState( CBasePlayer *pPlayer )
 
 static void EFW_HostClientCmd( void )
 {
+	const char *a0 = CMD_ARGV( 0 );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( "efw: host command received\n" );
-	ALERT( at_console, "efw: host cmd argc=%d argv0=%s\n", CMD_ARGC(), CMD_ARGV( 0 ) ? CMD_ARGV( 0 ) : "?" );
+	ALERT( at_console, "efw: host cmd argc=%d argv0=%s\n", CMD_ARGC(), a0 ? a0 : "?" );
 	edict_t *ed = g_engfuncs.pfnPEntityOfEntIndex( 1 );
 	if( !ed || !ed->pvPrivateData )
 		return;
@@ -111,6 +112,7 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 		hope = 0;
 	if( hope > 100 )
 		hope = 100;
+	pPlayer->pev->armorvalue = hope;
 	MESSAGE_BEGIN( MSG_ONE, gmsgHope, NULL, pPlayer->pev );
 		WRITE_BYTE( hope );
 	MESSAGE_END();
@@ -118,13 +120,21 @@ void EFW_SendHope( CBasePlayer *pPlayer )
 
 void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 {
+	EfwState *st;
 	if( !gmsgEfwHint )
 		EFW_LinkUserMessages();
-	if( !pPlayer || !gmsgEfwHint || !text )
+	if( !pPlayer || !text )
 		return;
-	MESSAGE_BEGIN( MSG_ONE, gmsgEfwHint, NULL, pPlayer->pev );
-		WRITE_STRING( text );
-	MESSAGE_END();
+	st = EFW_GetState( pPlayer );
+	strncpy( st->hint, text, sizeof( st->hint ) - 1 );
+	st->hint[sizeof( st->hint ) - 1] = '\0';
+	if( gmsgEfwHint )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgEfwHint, NULL, pPlayer->pev );
+			WRITE_STRING( st->hint );
+		MESSAGE_END();
+	}
+	UTIL_ShowMessage( st->hint, pPlayer );
 }
 
 void EFW_SendDiary( CBasePlayer *pPlayer )
@@ -354,22 +364,21 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 				pBest = pScan;
 			}
 		}
+		pPlayer->pev->angles.y = 270;
+		pPlayer->pev->v_angle.y = 270;
+		pPlayer->pev->fixangle = 1;
 		if( pBest )
-		{
-			Vector dir = pBest->pev->origin - pPlayer->pev->origin;
-			pPlayer->pev->angles.y = UTIL_VecToYaw( dir );
-			pPlayer->pev->v_angle.y = pPlayer->pev->angles.y;
-			pPlayer->pev->fixangle = 1;
-			snprintf( buf, sizeof( buf ), "People nearby: %d. Facing %s (%.0fu). E or click to talk, I for diary.",
+			snprintf( buf, sizeof( buf ), "People nearby: %d. Nearest %s (%.0fu). E or click to talk, I for diary.",
 				EFW_RefugeeCount(), EFW_ScriptNameForNpc( pBest ), best );
-		}
 		else
 			snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
 		ClientPrint( pPlayer->pev, HUD_PRINTCENTER, buf );
+		ClientPrint( pPlayer->pev, HUD_PRINTTALK, buf );
 		EFW_Print( pPlayer, buf );
 		EFW_SendHint( pPlayer, buf );
 	}
-	st->hudRetry = gpGlobals->time + 1.0f;
+	st->hudRetry = gpGlobals->time + 2.5f;
+	st->hudPulses = 8;
 }
 
 static const char *kPackageText =
@@ -858,11 +867,15 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
-	if( st->hudRetry && gpGlobals->time >= st->hudRetry )
+	if( st->hudPulses && st->hudRetry && gpGlobals->time >= st->hudRetry )
 	{
-		st->hudRetry = 0;
+		st->hudPulses--;
+		st->hudRetry = gpGlobals->time + 1.0f;
 		EFW_SendHope( pPlayer );
 		EFW_SendDiary( pPlayer );
+		if( st->hint[0] )
+			EFW_SendHint( pPlayer, st->hint );
+		pPlayer->pev->armorvalue = st->hope;
 	}
 
 	if( ( pPlayer->m_afButtonPressed & IN_USE ) || ( pPlayer->m_afButtonPressed & IN_ATTACK ) )

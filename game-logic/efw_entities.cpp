@@ -26,6 +26,11 @@ static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
 	pMonster->pev->flags &= ~FL_KILLME;
 	pMonster->pev->deadflag = DEAD_NO;
 	pMonster->pev->effects = 0;
+	pMonster->pev->rendermode = kRenderNormal;
+	pMonster->pev->renderamt = 255;
+	pMonster->pev->sequence = 0;
+	pMonster->pev->framerate = 1.0f;
+	pMonster->pev->animtime = gpGlobals->time;
 	pMonster->m_MonsterState = MONSTERSTATE_IDLE;
 	pMonster->ResetSequenceInfo();
 	if( pMonster->pev->nextthink <= 0 )
