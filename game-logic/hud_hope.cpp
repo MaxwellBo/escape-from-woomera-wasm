@@ -56,6 +56,27 @@ static int __MsgFunc_EfwHint( const char *pszName, int iSize, void *pbuf )
 	return 1;
 }
 
+static int g_jsPick;
+
+static void EFW_JsPick( void )
+{
+	int slot = atoi( gEngfuncs.Cmd_Argv( 1 ) );
+	char buf[48];
+	g_jsPick = slot;
+	if( slot == 199 )
+	{
+		gEngfuncs.pfnClientCmd( "menuselect 1\n" );
+		gEngfuncs.pfnServerCmd( "efw_diary\n" );
+		return;
+	}
+	if( slot < 1 || slot > 9 )
+		return;
+	snprintf( buf, sizeof( buf ), "menuselect %d\n", slot );
+	gEngfuncs.pfnClientCmd( buf );
+	snprintf( buf, sizeof( buf ), "efw_choose %d\n", slot );
+	gEngfuncs.pfnServerCmd( buf );
+}
+
 static void EFW_FwdServer( void )
 {
 	char buf[160];
@@ -75,6 +96,7 @@ int CHudHope::Init( void )
 	g_efwHint[0] = '\0';
 	HOOK_MESSAGE( Hope );
 	gEngfuncs.pfnHookUserMsg( "EfwHint", __MsgFunc_EfwHint );
+	gEngfuncs.pfnAddCommand( "efw_js_pick", EFW_JsPick );
 	gEngfuncs.pfnAddCommand( "efw_Talk", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_choose", EFW_FwdServer );
 	gEngfuncs.pfnAddCommand( "efw_diary", EFW_FwdServer );
@@ -196,8 +218,8 @@ int CHudHope::Draw( float flTime )
 		static int cdraw;
 		char cd[24];
 		cdraw++;
-		snprintf( cd, sizeof( cd ), "cdraw %d", cdraw );
-		gHUD.DrawHudString( 48, 8, 220, cd, r, g, b );
+		snprintf( cd, sizeof( cd ), "cdraw %d j%d", cdraw, g_jsPick );
+		gHUD.DrawHudString( 48, 8, 280, cd, r, g, b );
 	}
 
 	if( m_iHope < 0 )

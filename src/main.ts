@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay23`;
+    return `${url}?v=efw-overlay24`;
   return url;
 }
 
@@ -117,9 +117,8 @@ function pokeGameInput(slot: number) {
     log('poke: WASM FS unavailable');
   }
   runEngineCmd('pausable 0');
-  runEngineCmd(`set efw_pick ${slot}`);
+  runEngineCmd(`efw_js_pick ${slot}`);
   runEngineCmd(`efw_pick ${slot}`);
-  runEngineCmd(`efw_choose ${slot}`);
   void captureInput();
 }
 
