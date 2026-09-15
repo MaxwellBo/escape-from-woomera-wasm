@@ -213,14 +213,6 @@ int CHudHope::Draw( float flTime )
 	EFW_ClientPump();
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
-	gHUD.DrawHudString( 8, 8, 80, "EFW", r, g, b );
-	{
-		static int cdraw;
-		char cd[24];
-		cdraw++;
-		snprintf( cd, sizeof( cd ), "cdraw %d j%d", cdraw, g_jsPick );
-		gHUD.DrawHudString( 48, 8, 280, cd, r, g, b );
-	}
 
 	if( m_iHope < 0 )
 	{
@@ -291,9 +283,11 @@ int CHudHope::Draw( float flTime )
 			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, pages, r, g, b );
 			hy += 14;
 		}
-		if( EFW_ReadShare( "efw_pick.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] )
+		if( EFW_ReadShare( "efw_inv.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] && fileHud[0] != '-' )
 		{
-			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, fileHud, r, g, b );
+			char inv[96];
+			snprintf( inv, sizeof( inv ), "Carrying %s", fileHud );
+			gHUD.DrawHudString( 12, hy, ScreenWidth - 12, inv, r, g, b );
 			hy += 14;
 		}
 		if( !g_efwHint[0] && EFW_ReadShare( "efw_hud.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] && strncmp( fileHud, "t=", 2 ) )

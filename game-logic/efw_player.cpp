@@ -16,6 +16,11 @@ extern int gmsgShowMenu;
 extern int gmsgTextMsg;
 
 static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist );
+static CBaseEntity *EFW_NearestMarker( CBasePlayer *pPlayer, float dist );
+static Vector EFW_Place( CBaseEntity *pEnt );
+static const char *EFW_MarkerLabel( CBaseEntity *pMarker );
+static void EFW_InitPlayerState( CBasePlayer *pPlayer );
+static void EFW_SyncInv( CBasePlayer *pPlayer );
 static void EFW_ToggleDiary( CBasePlayer *pPlayer );
 static void EFW_StepDiary( CBasePlayer *pPlayer, int dir );
 static void EFW_ApplyTalkInput( CBasePlayer *pPlayer, int slot );
@@ -211,6 +216,43 @@ static void EFW_HostDiaryNext( void )
 		EFW_StepDiary( pPlayer, 1 );
 }
 
+static void EFW_HostGoto( void )
+{
+	CBasePlayer *pPlayer = EFW_ListenPlayer();
+	const char *where;
+	Vector dest;
+	CBaseEntity *pMark;
+
+	if( !pPlayer )
+		return;
+	where = CMD_ARGC() > 1 ? CMD_ARGV( 1 ) : "";
+	dest = pPlayer->pev->origin;
+	if( !strcmp( where, "amir" ) )
+		dest = Vector( 2127, -1297, 40 );
+	else if( !strcmp( where, "hassan" ) )
+		dest = Vector( 928, -2192, 40 );
+	else
+	{
+		pMark = NULL;
+		while( ( pMark = UTIL_FindEntityByClassname( pMark, "efw_Marker" ) ) != NULL )
+		{
+			const char *name = STRING( pMark->pev->targetname );
+			if( ( !strcmp( where, "pliers" ) && !strcmp( name, "efw_PliersMarker" ) )
+				|| ( !strcmp( where, "bin" ) && !strcmp( name, "efw_kitchen_bin" ) )
+				|| ( !strcmp( where, "hide" ) && !strcmp( name, "efw_hiding_place" ) )
+				|| ( !strcmp( where, "id" ) && !strcmp( name, "efw_IDTag_Position" ) ) )
+			{
+				dest = EFW_Place( pMark );
+				dest.z += 40.0f;
+				break;
+			}
+		}
+	}
+	pPlayer->pev->origin = dest;
+	pPlayer->pev->velocity = g_vecZero;
+	UTIL_SetOrigin( pPlayer->pev, dest );
+}
+
 static void EFW_HostDiaryPrev( void )
 {
 	CBasePlayer *pPlayer = EFW_ListenPlayer();
@@ -246,7 +288,10 @@ void EFW_LinkUserMessages( void )
 			g_engfuncs.pfnAddServerCommand( "efw_diary", EFW_HostDiaryToggle );
 			g_engfuncs.pfnAddServerCommand( "efw_diary_next", EFW_HostDiaryNext );
 			g_engfuncs.pfnAddServerCommand( "efw_diary_prev", EFW_HostDiaryPrev );
+			g_engfuncs.pfnAddServerCommand( "efw_goto", EFW_HostGoto );
 			g_engfuncs.pfnAddServerCommand( "efw_spider", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_Give", EFW_HostClientCmd );
+			g_engfuncs.pfnAddServerCommand( "efw_UseWithMarker", EFW_HostClientCmd );
 			g_engfuncs.pfnAddServerCommand( "efw_HelpScreen", EFW_HostClientCmd );
 		}
 	}
@@ -507,6 +552,12 @@ void EFW_Print( CBasePlayer *pPlayer, const char *text )
 	}
 }
 
+void EFW_Narrate( CBasePlayer *pPlayer, const char *text )
+{
+	EFW_Print( pPlayer, text );
+	EFW_SendHint( pPlayer, text );
+}
+
 void EFW_ShowMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text )
 {
 	char chunk[121];
@@ -553,7 +604,7 @@ static const char *kDefaultTopics[] = {
 	"GREET", "ESCAPE", "GOODBYE", "OFFICE", "KITCHEN", "HIDING", "IDTAG", NULL
 };
 
-void EFW_PlayerSpawn( CBasePlayer *pPlayer )
+static void EFW_InitPlayerState( CBasePlayer *pPlayer )
 {
 	EfwState *st;
 	int i;
@@ -565,62 +616,58 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	st->hope = 72;
 	st->diary = ( 1u << 1 );
 	st->diaryPage = 1;
-	st->nextHopeDrain = gpGlobals->time + 25.0f;
+	st->nextHopeDrain = gpGlobals->time + 45.0f;
+	st->lastThinkTime = gpGlobals->time;
 	for( i = 0; kDefaultTopics[i]; i++ )
 		EFW_AddTopic( pPlayer, kDefaultTopics[i] );
-
 	if( !( pPlayer->pev->weapons & ( 1 << WEAPON_SUIT ) ) )
 		pPlayer->GiveNamedItem( "item_suit" );
-
-	EFW_Precache();
-	EFW_LinkUserMessages();
 	EFW_SendHope( pPlayer );
 	EFW_SendDiary( pPlayer );
+	EFW_SyncInv( pPlayer );
+}
+
+void EFW_PlayerSpawn( CBasePlayer *pPlayer )
+{
+	EfwState *st;
+	char buf[180];
+	CBaseEntity *pScan;
+	CBaseEntity *pBest;
+	float best;
+
+	if( !pPlayer )
+		return;
+	EFW_Precache();
+	EFW_LinkUserMessages();
+	EFW_InitPlayerState( pPlayer );
+	st = EFW_GetState( pPlayer );
 	CLIENT_COMMAND( pPlayer->edict(), "bind i impulse 199\nbind [ impulse 197\nbind ] impulse 198\nbind e +use\nbind 1 impulse 1\nbind 2 impulse 2\nbind 3 impulse 3\nbind 4 impulse 4\nbind 5 impulse 5\nbind 6 impulse 6\nbind 7 impulse 7\nbind 8 impulse 8\nbind 9 impulse 9\n" );
 	SERVER_COMMAND( "bind i impulse 199\nbind 1 impulse 1\nbind 2 impulse 2\nbind 3 impulse 3\n" );
+
+	pScan = NULL;
+	pBest = NULL;
+	best = 1e30f;
+	while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, 4096.0f ) ) != NULL )
 	{
-		edict_t *pent;
-		Vector spot;
-		spot = pPlayer->pev->origin + Vector( 36, 80, 0 );
-		pent = CREATE_NAMED_ENTITY( MAKE_STRING( "monster_refugee" ) );
-		if( !FNullEnt( pent ) )
+		float d;
+		if( pScan == pPlayer || !EFW_IsTalkNpc( pScan ) )
+			continue;
+		d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
+		if( d < best )
 		{
-			pent->v.origin = spot;
-			pent->v.angles = Vector( 0, 270, 0 );
-			pent->v.targetname = MAKE_STRING( "Amir" );
-			DispatchSpawn( pent );
+			best = d;
+			pBest = pScan;
 		}
 	}
-	{
-		char buf[180];
-		CBaseEntity *pScan = NULL;
-		CBaseEntity *pBest = NULL;
-		float best = 1e30f;
-		while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, 4096.0f ) ) != NULL )
-		{
-			float d;
-			if( pScan == pPlayer || !EFW_IsTalkNpc( pScan ) )
-				continue;
-			d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
-			if( d < best )
-			{
-				best = d;
-				pBest = pScan;
-			}
-		}
-		if( pBest )
-			snprintf( buf, sizeof( buf ), "People nearby: %d. Nearest %s (%.0fu). E or click to talk, I for diary.",
-				EFW_RefugeeCount(), EFW_ScriptNameForNpc( pBest ), best );
-		else
-			snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
-		ClientPrint( pPlayer->pev, HUD_PRINTCENTER, buf );
-		ClientPrint( pPlayer->pev, HUD_PRINTTALK, buf );
-		EFW_Print( pPlayer, buf );
-		EFW_SendHint( pPlayer, buf );
-	}
+	if( pBest )
+		snprintf( buf, sizeof( buf ), "Walk the compound. Talk (E) to people, Use on markers, I for diary. Nearest: %s.",
+			EFW_ScriptNameForNpc( pBest ) );
+	else
+		snprintf( buf, sizeof( buf ), "Walk the compound. Talk (E) to people, Use on workbenches and bins, I for the diary." );
+	EFW_Narrate( pPlayer, buf );
 	st->hudRetry = gpGlobals->time + 0.5f;
 	st->hudPulses = 40;
-	st->autoTalkAt = gpGlobals->time + 1.0f;
+	st->autoTalkAt = 0;
 	CVAR_SET_FLOAT( "pausable", 0 );
 	SERVER_COMMAND( "pausable 0\n" );
 }
@@ -631,12 +678,34 @@ static const char *kPackageText =
 	"Inside the package are some chocolate bars, which you give to some children, and a box of washing powder. "
 	"Your suspicions aroused by mysterious rattling sound, you feel inside the box and discover a SIM card for a mobile phone.";
 
+static void EFW_SyncInv( CBasePlayer *pPlayer )
+{
+	EfwState *st = EFW_GetState( pPlayer );
+	char buf[80];
+
+	buf[0] = '\0';
+	if( st->items & EFW_ITEM_PLIERS )
+		strcat( buf, "pliers " );
+	if( st->items & EFW_ITEM_POWDER )
+		strcat( buf, "powder " );
+	if( st->items & EFW_ITEM_SIM )
+		strcat( buf, "SIM " );
+	if( st->items & EFW_ITEM_PHONE )
+		strcat( buf, "phone " );
+	if( st->items & EFW_ITEM_IDTAG )
+		strcat( buf, "ID " );
+	if( !buf[0] )
+		strcpy( buf, "-" );
+	EFW_WriteShare( "efw_inv.txt", buf );
+}
+
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 {
 	EfwState *st = EFW_GetState( pPlayer );
 	st->items |= itemBit;
 	if( weaponName && weaponName[0] )
 		pPlayer->GiveNamedItem( (char *)weaponName );
+	EFW_SyncInv( pPlayer );
 }
 
 int EFW_WeaponToItem( const char *classname )
@@ -727,6 +796,54 @@ void EFW_RunAction( CBasePlayer *pPlayer, const char *action )
 		EFW_ServerCommand( pPlayer, arg );
 }
 
+static Vector EFW_Place( CBaseEntity *pEnt )
+{
+	Vector c;
+	if( !pEnt )
+		return g_vecZero;
+	c = ( pEnt->pev->absmin + pEnt->pev->absmax ) * 0.5f;
+	if( ( pEnt->pev->absmax - pEnt->pev->absmin ).Length() < 1.0f )
+		c = pEnt->pev->origin;
+	return c;
+}
+
+static const char *EFW_MarkerLabel( CBaseEntity *pMarker )
+{
+	const char *name;
+	if( !pMarker )
+		return "marker";
+	name = STRING( pMarker->pev->targetname );
+	if( !strcmp( name, "efw_PliersMarker" ) )
+		return "pliers on the workbench";
+	if( !strcmp( name, "efw_kitchen_bin" ) )
+		return "kitchen bin";
+	if( !strcmp( name, "efw_hiding_place" ) )
+		return "hiding place";
+	if( !strcmp( name, "efw_IDTag_Position" ) )
+		return "ID tag board";
+	return name;
+}
+
+static CBaseEntity *EFW_NearestMarker( CBasePlayer *pPlayer, float dist )
+{
+	CBaseEntity *pScan = NULL;
+	CBaseEntity *pBest = NULL;
+	float best = dist;
+
+	if( !pPlayer )
+		return NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "efw_Marker" ) ) != NULL )
+	{
+		float d = ( EFW_Place( pScan ) - pPlayer->pev->origin ).Length();
+		if( d < best )
+		{
+			best = d;
+			pBest = pScan;
+		}
+	}
+	return pBest;
+}
+
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 {
 	TraceResult tr;
@@ -749,26 +866,28 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 	}
 
 	pBest = NULL;
-	best = dist * dist;
+	best = dist;
 	pScan = NULL;
 	while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, dist ) ) != NULL )
 	{
 		Vector delta;
-		float d2;
+		float d;
 		const char *cn;
 		if( pScan == pPlayer )
 			continue;
 		cn = STRING( pScan->pev->classname );
 		if( strncmp( cn, "monster_", 8 ) && strcmp( cn, "efw_Marker" ) && strncmp( cn, "weapon_efw", 10 ) )
 			continue;
-		delta = pScan->pev->origin - ( pPlayer->pev->origin + pPlayer->pev->view_ofs );
-		d2 = delta.Length();
-		if( d2 < best )
+		delta = EFW_Place( pScan ) - ( pPlayer->pev->origin + pPlayer->pev->view_ofs );
+		d = delta.Length();
+		if( d < best )
 		{
-			best = d2;
+			best = d;
 			pBest = pScan;
 		}
 	}
+	if( !pBest )
+		pBest = EFW_NearestMarker( pPlayer, dist );
 	return pBest;
 }
 
@@ -792,6 +911,7 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 
 	if( !pMarker )
 		return;
+	EFW_CloseTalk( pPlayer );
 	name = STRING( pMarker->pev->targetname );
 	map = STRING( gpGlobals->mapname );
 
@@ -802,8 +922,10 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 			st->pliersState = EFW_PLIERS_STOLEN;
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
 			EFW_AddTopic( pPlayer, "PLIERS_GOT_PLIERS" );
-			EFW_Print( pPlayer, "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
+			EFW_Narrate( pPlayer, "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
 		}
+		else
+			EFW_Narrate( pPlayer, "The workbench is empty. You already took the pliers." );
 		return;
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
@@ -812,34 +934,37 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 		{
 			st->pliersState = EFW_PLIERS_IN_BIN;
 			st->items &= ~EFW_ITEM_PLIERS;
-			EFW_Print( pPlayer, "Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound." );
+			EFW_SyncInv( pPlayer );
+			EFW_Narrate( pPlayer, "Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound." );
 		}
 		else if( st->pliersState == EFW_PLIERS_IN_BIN )
 		{
 			st->pliersState = EFW_PLIERS_RECOVERED;
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_Print( pPlayer, "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters." );
+			EFW_Narrate( pPlayer, "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters." );
 		}
+		else
+			EFW_Narrate( pPlayer, "A kitchen rubbish bin. Nothing useful right now." );
 		return;
 	}
 	if( !strcmp( name, "efw_hiding_place" ) )
 	{
 		if( st->pliersState == EFW_PLIERS_STOLEN )
 		{
-			EFW_Print( pPlayer, "You return to the hiding place, with the pliers safely tucked away underneath your shirt." );
+			EFW_Narrate( pPlayer, "You return to the hiding place, with the pliers safely tucked away underneath your shirt." );
 			st->hidOnce = 1;
 		}
 		else if( !st->idTagOffBoard )
 		{
-			EFW_Print( pPlayer, "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching." );
+			EFW_Narrate( pPlayer, "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching." );
 		}
 		else if( st->pliersState == EFW_PLIERS_NONE )
 		{
-			EFW_Print( pPlayer, "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage." );
+			EFW_Narrate( pPlayer, "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage." );
 		}
 		else
 		{
-			EFW_Print( pPlayer, "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed." );
+			EFW_Narrate( pPlayer, "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed." );
 			st->hidOnce = 1;
 		}
 		return;
@@ -849,12 +974,12 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 		if( st->idTagOffBoard )
 		{
 			st->idTagOffBoard = 0;
-			EFW_Print( pPlayer, "You collect your ID tag from the checkpoint board." );
+			EFW_Narrate( pPlayer, "You collect your ID tag from the checkpoint board." );
 		}
 		else
 		{
 			st->idTagOffBoard = 1;
-			EFW_Print( pPlayer, "You leave your ID tag on the board so the guards know you have entered the compound." );
+			EFW_Narrate( pPlayer, "You leave your ID tag on the board so the guards know you have entered the compound." );
 		}
 		return;
 	}
@@ -879,7 +1004,8 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		EFW_DeleteTopic( pPlayer, "PLIERS_GOT_PLIERS" );
 		EFW_AddDiary( pPlayer, 6 );
 		EFW_AdjustHope( pPlayer, 12 );
-		EFW_Print( pPlayer, "Amir takes the pliers and hides them in his clothes. The escape group can move forward." );
+		EFW_SyncInv( pPlayer );
+		EFW_Narrate( pPlayer, "Amir takes the pliers and hides them in his clothes. The escape group can move forward." );
 		return;
 	}
 	if( ( st->items & EFW_ITEM_SIM ) && !strcmp( npc, "Gholan" ) )
@@ -887,14 +1013,16 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		st->items &= ~EFW_ITEM_SIM;
 		st->idTagOffBoard = 1;
 		EFW_AddTopic( pPlayer, "GotHintAboutHiding" );
-		EFW_Print( pPlayer, "Gholan takes the SIM card. He will remove your ID tag from the checkpoint while you hide." );
+		EFW_SyncInv( pPlayer );
+		EFW_Narrate( pPlayer, "Gholan takes the SIM card. He will remove your ID tag from the checkpoint while you hide." );
 		return;
 	}
 	if( ( st->items & EFW_ITEM_POWDER ) && !strcmp( npc, "Mouhtaz" ) )
 	{
 		st->items &= ~EFW_ITEM_POWDER;
 		EFW_AdjustHope( pPlayer, 6 );
-		EFW_Print( pPlayer, "Mouhtaz thanks you for the washing powder." );
+		EFW_SyncInv( pPlayer );
+		EFW_Narrate( pPlayer, "Mouhtaz thanks you for the washing powder." );
 		return;
 	}
 
@@ -930,32 +1058,42 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 
 void EFW_Spider( CBasePlayer *pPlayer )
 {
+	CBaseEntity *pAim;
+	CBaseEntity *pMark;
+	CBaseEntity *pNpc;
 	CBaseEntity *pEnt;
 	const char *cn;
 
 	if( !pPlayer )
 		return;
-	pEnt = EFW_AimEntity( pPlayer, 160.0f );
-	if( !pEnt || ( !EFW_IsTalkNpc( pEnt ) && strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
-	{
-		CBaseEntity *nearNpc = EFW_NearestTalkNpc( pPlayer, 160.0f );
-		if( nearNpc )
-			pEnt = nearNpc;
-	}
+	pAim = EFW_AimEntity( pPlayer, 192.0f );
+	pMark = EFW_NearestMarker( pPlayer, 112.0f );
+	pNpc = EFW_NearestTalkNpc( pPlayer, 160.0f );
+	pEnt = NULL;
+	if( pAim && !strcmp( STRING( pAim->pev->classname ), "efw_Marker" ) )
+		pEnt = pAim;
+	else if( pMark )
+		pEnt = pMark;
+	else if( pAim && EFW_IsTalkNpc( pAim ) )
+		pEnt = pAim;
+	else if( pNpc )
+		pEnt = pNpc;
+	else if( pAim && !strncmp( STRING( pAim->pev->classname ), "weapon_efw", 10 ) )
+		pEnt = pAim;
 	if( !pEnt )
 	{
-		ALERT( at_aiconsole, "Ignoring spider\n" );
+		EFW_Narrate( pPlayer, "Nothing to use here. Walk to a person, workbench, or bin." );
 		return;
 	}
 	cn = STRING( pEnt->pev->classname );
-	if( EFW_IsTalkNpc( pEnt ) )
-	{
-		EFW_StartTalk( pPlayer, pEnt );
-		return;
-	}
 	if( !strcmp( cn, "efw_Marker" ) )
 	{
 		EFW_UseMarker( pPlayer, pEnt );
+		return;
+	}
+	if( EFW_IsTalkNpc( pEnt ) )
+	{
+		EFW_StartTalk( pPlayer, pEnt );
 		return;
 	}
 	if( !strncmp( cn, "weapon_efw", 10 ) )
@@ -1095,9 +1233,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 				pEnt = named;
 		}
 		if( !pEnt )
-			pEnt = EFW_AimEntity( pPlayer, 256.0f );
+			pEnt = EFW_AimEntity( pPlayer, 384.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
-			pEnt = EFW_NearestTalkNpc( pPlayer, 256.0f );
+			pEnt = EFW_NearestTalkNpc( pPlayer, 384.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_StartTalk( pPlayer, pEnt );
 		else
@@ -1114,9 +1252,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_Give" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 110.0f );
+		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
+		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
+			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_GiveToNpc( pPlayer, pEnt );
+		else
+			EFW_Narrate( pPlayer, "No one close enough to give that to." );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_Pickup" ) )
@@ -1229,33 +1371,36 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	st = EFW_GetState( pPlayer );
 
+	if( st->lastThinkTime > 1.0f && gpGlobals->time + 0.5f < st->lastThinkTime )
+		EFW_InitPlayerState( pPlayer );
+
+	pPlayer->pev->armorvalue = (float)st->hope;
+
 	if( st->lastThinkTime != gpGlobals->time || st->thinkFrames == 0 )
 	{
+		CBaseEntity *pMark;
 		st->lastThinkTime = gpGlobals->time;
 		st->thinkFrames++;
 		if( ( st->thinkFrames % 30 ) == 1 )
 		{
-			CBaseEntity *pNear;
 			EFW_SendHope( pPlayer );
 			EFW_SendDiary( pPlayer );
-			if( st->hint[0] )
-				EFW_SendHint( pPlayer, st->hint );
+			EFW_SyncInv( pPlayer );
 			if( !st->talking )
 			{
-				pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
-				if( pNear )
-					EFW_StartTalk( pPlayer, pNear );
+				pMark = EFW_NearestMarker( pPlayer, 140.0f );
+				if( pMark )
+				{
+					char near[160];
+					snprintf( near, sizeof( near ), "Use: %s", EFW_MarkerLabel( pMark ) );
+					EFW_SendHint( pPlayer, near );
+				}
+				else if( st->hint[0] && strncmp( st->hint, "Use:", 4 ) )
+					EFW_SendHint( pPlayer, st->hint );
 			}
+			else if( st->hint[0] )
+				EFW_SendHint( pPlayer, st->hint );
 			SERVER_COMMAND( "pausable 0\n" );
-		}
-
-		if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
-		{
-			CBaseEntity *pNear;
-			st->autoTalkAt = 0;
-			pNear = EFW_NearestTalkNpc( pPlayer, 200.0f );
-			if( pNear )
-				EFW_StartTalk( pPlayer, pNear );
 		}
 
 		if( st->talking )
@@ -1263,18 +1408,15 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			CBaseEntity *pNpc = CBaseEntity::Instance( INDEXENT( st->talking ) );
 			if( !pNpc || ( pNpc->pev->origin - pPlayer->pev->origin ).Length() > 512.0f )
 			{
-				EFW_Print( pPlayer, "Conversation hidden, partner too far" );
 				EFW_CloseTalk( pPlayer );
 			}
 		}
 
-		if( st->nextHopeDrain && gpGlobals->time >= st->nextHopeDrain )
+		if( !st->talking && st->nextHopeDrain && gpGlobals->time >= st->nextHopeDrain )
 		{
-			st->nextHopeDrain = gpGlobals->time + 28.0f;
-			if( st->hope > 1 )
+			st->nextHopeDrain = gpGlobals->time + 45.0f;
+			if( st->hope > 8 )
 				EFW_AdjustHope( pPlayer, -1 );
-			else
-				EFW_AdjustHope( pPlayer, -st->hope );
 		}
 	}
 
@@ -1303,6 +1445,13 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	}
 
 	pressed = pPlayer->m_afButtonPressed;
+	if( ( pressed & IN_USE ) && EFW_NearestMarker( pPlayer, 112.0f ) )
+	{
+		EFW_Spider( pPlayer );
+		pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
+		pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
+		return;
+	}
 	if( st->talking )
 	{
 		if( !slot && ( pressed & ( IN_ATTACK | IN_USE ) ) )
@@ -1317,15 +1466,9 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	}
 	else if( ( pressed & IN_USE ) || ( pressed & IN_ATTACK ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 256.0f );
-		if( !pEnt || ( !EFW_IsTalkNpc( pEnt ) && strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
-			pEnt = EFW_NearestTalkNpc( pPlayer, 256.0f );
-		if( pEnt && ( EFW_IsTalkNpc( pEnt ) || !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) ) )
-		{
-			EFW_Spider( pPlayer );
-			pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
-			pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
-		}
+		EFW_Spider( pPlayer );
+		pPlayer->m_afButtonPressed &= ~( IN_USE | IN_ATTACK );
+		pPlayer->pev->button &= ~( IN_USE | IN_ATTACK );
 	}
 }
 

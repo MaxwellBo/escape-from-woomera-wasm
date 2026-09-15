@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay24`;
+    return `${url}?v=efw-overlay25`;
   return url;
 }
 
@@ -765,6 +765,18 @@ document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (E / efw_Talk)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
+  void captureInput();
+});
+document.getElementById('btn-use')?.addEventListener('click', () => {
+  log('> use (efw_spider)');
+  runEngineCmd('pausable 0');
+  runGameCmd('efw_spider');
+  void captureInput();
+});
+document.getElementById('btn-give')?.addEventListener('click', () => {
+  log('> give (efw_Give)');
+  runEngineCmd('pausable 0');
+  runGameCmd('efw_Give');
   void captureInput();
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {

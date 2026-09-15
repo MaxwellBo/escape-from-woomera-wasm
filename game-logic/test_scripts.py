@@ -89,7 +89,27 @@ int main(int argc, char **argv) {
             print("Amir should have many questions, got", amir_q, file=sys.stderr)
             failed += 1
         print(f"parsed {count} scripts, failures={failed}")
-        return 1 if failed else 0
+
+    needed = {
+        "efw_PliersMarker",
+        "efw_kitchen_bin",
+        "efw_hiding_place",
+        "efw_IDTag_Position",
+    }
+    import re
+    import struct
+
+    with zipfile.ZipFile(ZIP) as zf:
+        bsp = zf.read("EscapeFromWoomera_v084/maps/efw_prototype_level1.bsp")
+    off, ln = struct.unpack_from("<ii", bsp, 4)
+    ents = bsp[off : off + ln].decode("latin1", errors="replace")
+    found = set(re.findall(r'"targetname"\s+"(efw_[^"]+)"', ents))
+    missing = needed - found
+    if missing:
+        print("level1 missing markers", missing, file=sys.stderr)
+        return 1
+    print("level1 markers", " ".join(sorted(found & needed)))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

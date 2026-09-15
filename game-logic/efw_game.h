@@ -61,6 +61,7 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text );
 void EFW_SendDiary( CBasePlayer *pPlayer );
 void EFW_ShowMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text );
 void EFW_Print( CBasePlayer *pPlayer, const char *text );
+void EFW_Narrate( CBasePlayer *pPlayer, const char *text );
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
 void EFW_ContinueTalk( CBasePlayer *pPlayer );
 void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot );

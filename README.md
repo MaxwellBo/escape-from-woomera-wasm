@@ -56,7 +56,7 @@ those systems on hlsdk-portable so they run in WASM:
 - `monster_refugee` NPCs spawn with detainee models and the `Conversations/*.txt` talk tree (Use / click / `efw_spider`)
 - Hope HUD drains slowly and rises when diary pages unlock
 - Diary (`i`, `[` / `]`) shows the official `EFW_Diary_*.spr` pages
-- `efw_Marker` interactions (pliers, kitchen bin, hiding place, ID tag board)
+- `efw_Marker` interactions (pliers workbench, kitchen bin, hiding place, ID tag board). Walk up and press **Use**.
 - EFW inventory weapons (`weapon_efw_*`) including the mail package / SIM card
 
 Rebuild the WASM modules after changing `game-logic/`:
