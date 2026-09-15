@@ -223,8 +223,8 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	EfwDllState *st = EFW_Dll();
 	const EfwScript *script;
 	const char *npc;
-	char menu[512];
-	int bits = 0;
+	const char *lines[EFW_MENU_LINES];
+	char title[48];
 	int i;
 	int slot;
 
@@ -244,20 +244,16 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	snprintf( menu, sizeof( menu ), "Talk to %s\n", npc );
+	snprintf( title, sizeof( title ), "Talk to %s", npc );
 	slot = 0;
-	for( i = 0; i < script->questionCount && slot < EFW_MENU_LINES; i++ )
+	for( i = 0; i < script->questionCount && slot < 6; i++ )
 	{
 		const EfwQuestion *q = &script->questions[i];
-		char line[96];
 		if( !EFW_QuestionVisible( npc, q ) )
 			continue;
 		st->menuChoices[slot] = i;
+		lines[slot] = q->text[0] ? q->text : q->topic;
 		st->menuCount++;
-		snprintf( line, sizeof( line ), "%d. %.70s\n", slot + 1, q->text[0] ? q->text : q->topic );
-		if( strlen( menu ) + strlen( line ) < sizeof( menu ) - 1 )
-			strcat( menu, line );
-		bits |= ( 1 << slot );
 		slot++;
 	}
 	EFW_DebugPrint( "CONVERSATION   (%d messages)", st->menuCount );
@@ -267,7 +263,7 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		EFW_CloseTalk();
 		return;
 	}
-	EFW_ShowGoldMenu( pPlayer, bits, 20, menu );
+	EFW_ShowDllMenu( pPlayer, title, lines, st->menuCount );
 }
 
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
@@ -295,8 +291,12 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	int qi;
 	int i;
 
+	static float lastPick;
 	if( !pPlayer || slot < 1 || slot > st->menuCount )
 		return;
+	if( gpGlobals->time < lastPick + 0.3f )
+		return;
+	lastPick = gpGlobals->time;
 	pNpc = st->talkNpc;
 	if( !pNpc )
 		return;
@@ -315,10 +315,12 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	q = &script->questions[qi];
 	r = EFW_PickReply( npc, q );
 	EFW_MarkSeen( npc, q->topic );
+	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic );
 	body[0] = '\0';
 	if( r && r->text[0] )
 	{
-		snprintf( body, sizeof( body ), "%s\n1. Continue", r->text );
+		strncpy( body, r->text, sizeof( body ) - 1 );
+		body[sizeof( body ) - 1] = '\0';
 		if( r->actionCount )
 		{
 			for( i = 0; i < r->actionCount; i++ )
@@ -333,12 +335,13 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 			}
 		}
 	}
-	if( !body[0] )
-		strcpy( body, "1. Continue" );
-	st->menuMode = 2;
-	st->menuCount = 1;
-	st->menuChoices[0] = 0;
-	EFW_ShowGoldMenu( pPlayer, 1, 20, body );
+	{
+		const char *cont = "Continue";
+		st->menuMode = 2;
+		st->menuCount = 1;
+		st->menuChoices[0] = 0;
+		EFW_ShowDllMenu( pPlayer, body[0] ? body : q->topic, &cont, 1 );
+	}
 }
 
 void EFW_ThinkConversation( void )

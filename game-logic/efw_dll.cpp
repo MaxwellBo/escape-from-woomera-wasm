@@ -15,7 +15,6 @@
 #include <stdarg.h>
 #include <string.h>
 
-extern int gmsgShowMenu;
 extern int gmsgTextMsg;
 
 int gmsgEFWShow = 0;
@@ -191,8 +190,6 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 {
 	if( !pPlayer || !gmsgEFWMenu )
 		return;
-	if( code == 0x4d )
-		EFW_ShowGoldMenu( pPlayer, 0, 8, "Run out of hope!" );
 	MESSAGE_BEGIN( MSG_ONE, gmsgEFWMenu, NULL, pPlayer->pev );
 		WRITE_BYTE( code );
 	MESSAGE_END();
@@ -272,21 +269,73 @@ void EFW_MarkSeen( const char *npc, const char *topic )
 	g_efw.seenCount++;
 }
 
+/* FUN_100c7380: EFWShow WRITE_BYTE(line) + 30-char chunk. 0xff clears. */
+static void EFW_SendEfwShow( CBasePlayer *pPlayer, int code, const char *chunk )
+{
+	if( !pPlayer || !gmsgEFWShow )
+		return;
+	MESSAGE_BEGIN( MSG_ONE, gmsgEFWShow, NULL, pPlayer->pev );
+		WRITE_BYTE( code & 0xff );
+		if( chunk )
+			WRITE_STRING( chunk );
+	MESSAGE_END();
+}
+
+static void EFW_SendEfwShowChunks( CBasePlayer *pPlayer, int line, const char *text )
+{
+	const char *p;
+	char chunk[31];
+	if( !text )
+		text = "";
+	p = text;
+	if( !*p )
+	{
+		EFW_SendEfwShow( pPlayer, line, "" );
+		return;
+	}
+	while( *p )
+	{
+		int n = 0;
+		while( p[n] && n < 30 )
+		{
+			chunk[n] = ( p[n] == (char)0x92 ) ? '\'' : p[n];
+			n++;
+		}
+		chunk[n] = '\0';
+		EFW_SendEfwShow( pPlayer, line, chunk );
+		p += n;
+	}
+}
+
+void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **lines, int nLines )
+{
+	int i;
+	if( !pPlayer )
+		return;
+	EFW_SendEfwShow( pPlayer, 0xff, NULL );
+	if( ( !title || !title[0] ) && nLines <= 0 )
+		return;
+	EFW_SendEfwShowChunks( pPlayer, 0, title ? title : "" );
+	if( nLines < 0 )
+		nLines = 0;
+	if( nLines > 6 )
+		nLines = 6;
+	for( i = 0; i < nLines; i++ )
+		EFW_SendEfwShowChunks( pPlayer, i + 1, lines[i] ? lines[i] : "" );
+}
+
 void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text )
 {
-	if( !pPlayer || !gmsgShowMenu )
-		return;
-	MESSAGE_BEGIN( MSG_ONE, gmsgShowMenu, NULL, pPlayer->pev );
-		WRITE_SHORT( bits );
-		WRITE_CHAR( seconds );
-		WRITE_BYTE( 0 );
-		WRITE_STRING( text ? text : "" );
-	MESSAGE_END();
+	(void)bits;
+	(void)seconds;
+	EFW_ShowDllMenu( pPlayer, text, NULL, 0 );
 }
 
 void EFW_CloseMenu( CBasePlayer *pPlayer )
 {
-	EFW_ShowGoldMenu( pPlayer, 0, 0, "" );
+	if( !pPlayer )
+		return;
+	EFW_SendEfwShow( pPlayer, 0xff, NULL );
 }
 
 void EFW_Print( CBasePlayer *pPlayer, const char *text )
@@ -457,8 +506,6 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			EFW_ChooseTalk( pPlayer, slot );
 			pPlayer->pev->impulse = 0;
 		}
-		else if( pPlayer->m_afButtonPressed & ( IN_ATTACK | IN_USE ) )
-			EFW_ChooseTalk( pPlayer, 1 );
 	}
 	if( g_efw.lastTime != gpGlobals->time || !g_efw.inited )
 		EFW_SendHudState();

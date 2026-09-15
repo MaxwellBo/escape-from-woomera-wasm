@@ -14,6 +14,8 @@ static int g_talkPrompt;
 static int g_menuCode;
 static HSPRITE g_hDiary;
 static int g_loadedPage = -1;
+static char g_menuLine[7][256];
+static int g_menuOn;
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 {
@@ -30,8 +32,6 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		blob[i] = (unsigned char)READ_BYTE();
 	memcpy( &g_hope, blob + 4, sizeof( float ) );
 	memcpy( &g_diaryPage, blob + 12, sizeof( int ) );
-	g_diaryOpen = ( blob[8 + 5 * 4] != 0 ) || ( blob[8 + 5 * 4 + 1] != 0 )
-		|| ( blob[8 + 5 * 4 + 2] != 0 ) || ( blob[8 + 5 * 4 + 3] != 0 );
 	{
 		int openFlag = 0;
 		memcpy( &openFlag, blob + 8 + 5 * 4, sizeof( int ) );
@@ -40,10 +40,33 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 	return 1;
 }
 
+/* FUN_100c7380 / LAB_10041930: byte 0xff clears; byte 0-6 appends a 30-char chunk. */
 static int __MsgFunc_EFWShow( const char *pszName, int iSize, void *pbuf )
 {
+	int code;
+	const char *chunk;
+	char *dst;
+	int used;
 	BEGIN_READ( pbuf, iSize );
-	READ_BYTE();
+	code = READ_BYTE();
+	if( code == 0xff )
+	{
+		memset( g_menuLine, 0, sizeof( g_menuLine ) );
+		g_menuOn = 0;
+		return 1;
+	}
+	if( code < 0 || code > 6 )
+		return 1;
+	chunk = "";
+	if( iSize > 1 )
+		chunk = READ_STRING();
+	if( !chunk )
+		chunk = "";
+	dst = g_menuLine[code];
+	used = (int)strlen( dst );
+	if( used < (int)sizeof( g_menuLine[0] ) - 1 )
+		strncat( dst, chunk, sizeof( g_menuLine[0] ) - 1 - used );
+	g_menuOn = 1;
 	return 1;
 }
 
@@ -71,12 +94,11 @@ int EFW_ClientKey( int down, int keynum )
 		slot = keynum - '0';
 	else if( keynum >= 1 && keynum <= 9 )
 		slot = keynum;
-	if( slot )
+	if( slot && g_menuOn )
 	{
 		snprintf( buf, sizeof( buf ), "menuselect %d\n", slot );
 		gEngfuncs.pfnServerCmd( buf );
-		if( g_talkPrompt )
-			return 0;
+		return 0;
 	}
 	if( keynum == 'i' || keynum == 'I' )
 	{
@@ -92,6 +114,8 @@ int CHudEfw::Init( void )
 	g_diaryPage = 0;
 	g_diaryOpen = 0;
 	g_talkPrompt = 0;
+	g_menuOn = 0;
+	memset( g_menuLine, 0, sizeof( g_menuLine ) );
 	gEngfuncs.pfnHookUserMsg( "EFWData", __MsgFunc_EFWData );
 	gEngfuncs.pfnHookUserMsg( "EFWShow", __MsgFunc_EFWShow );
 	gEngfuncs.pfnHookUserMsg( "EFW_Menu", __MsgFunc_EFW_Menu );
@@ -112,6 +136,8 @@ void CHudEfw::Reset( void )
 {
 	g_hope = -1;
 	g_talkPrompt = 0;
+	g_menuOn = 0;
+	memset( g_menuLine, 0, sizeof( g_menuLine ) );
 }
 
 static int EFW_LoadDiarySprite( int page, HSPRITE *out )
@@ -167,6 +193,29 @@ int CHudEfw::Draw( float flTime )
 		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
 		if( g_talkPrompt )
 			gHUD.DrawHudString( x + w + 88, y + 16, ScreenWidth - 8, "TALK", r, g, b );
+	}
+
+	if( g_menuCode == 0x4d )
+		gHUD.DrawHudString( 16, 48, ScreenWidth - 16, "Run out of hope!", r, g, b );
+
+	if( g_menuOn )
+	{
+		int row = 48;
+		int li;
+		if( g_menuLine[0][0] )
+		{
+			gHUD.DrawHudString( 16, row, ScreenWidth - 16, g_menuLine[0], r, g, b );
+			row += 16;
+		}
+		for( li = 1; li <= 6; li++ )
+		{
+			char press[280];
+			if( !g_menuLine[li][0] )
+				continue;
+			snprintf( press, sizeof( press ), "Press %d  %s", li, g_menuLine[li] );
+			gHUD.DrawHudString( 16, row, ScreenWidth - 16, press, r, g, b );
+			row += 16;
+		}
 	}
 
 	if( g_diaryOpen && g_diaryPage >= 0 )

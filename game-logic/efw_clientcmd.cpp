@@ -225,6 +225,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "menuselect" ) )
 	{
 		int slot = atoi( CMD_ARGV( arg0 + 1 ) );
+		EFW_DebugPrint( ">>> ClientCommand menuselect %d (talk=%d)", slot, EFW_Dll()->talkActive );
 		if( EFW_Dll()->talkActive )
 			EFW_ChooseTalk( pPlayer, slot );
 		return 1;

@@ -74,6 +74,7 @@ int EFW_HasKeyword( const char *word );
 void EFW_DebugPrint( const char *fmt, ... ); /* 0x100c80d0 */
 int EFW_FStrEq( const char *a, const char *b ); /* 0x100c8160 */
 void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text );
+void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **lines, int nLines );
 void EFW_CloseMenu( CBasePlayer *pPlayer );
 void EFW_Print( CBasePlayer *pPlayer, const char *text );
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName );

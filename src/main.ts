@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll4`;
+    return `${url}?v=efw-dll5`;
   return url;
 }
 
@@ -97,11 +97,11 @@ function pressGameKey(key: string, keyCode: number) {
 }
 
 function chooseTalkSlot(slot: number) {
-  log(`> menuselect ${slot}`);
+  log(`> cmd menuselect ${slot}`);
   runEngineCmd('pausable 0');
-  runGameCmd(`menuselect ${slot}`);
-  pressGameKey(String(slot), 48 + slot);
-  void captureInput();
+  /* Host `cmd` + AddServerCommand menuselect: GetAsyncKeyState stand-in. */
+  runEngineCmd(`cmd menuselect ${slot}`);
+  runEngineCmd(`menuselect ${slot}`);
 }
 
 function runEngineCmd(cmd: string) {
