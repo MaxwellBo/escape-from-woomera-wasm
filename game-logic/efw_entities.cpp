@@ -17,6 +17,22 @@ int EFW_RefugeeCount( void )
 	return g_refugeeCount;
 }
 
+// Do not call MonsterInit(): listen-server deathmatch defaults mp_allowmonsters
+// to 0 and that path sets FL_KILLME on every monster_refugee.
+static void EFW_FinishTalkNpc( CBaseMonster *pMonster )
+{
+	pMonster->pev->takedamage = DAMAGE_NO;
+	pMonster->pev->solid = SOLID_SLIDEBOX;
+	pMonster->pev->movetype = MOVETYPE_STEP;
+	pMonster->pev->flags |= FL_MONSTER;
+	pMonster->pev->deadflag = DEAD_NO;
+	pMonster->pev->effects = 0;
+	pMonster->m_MonsterState = MONSTERSTATE_IDLE;
+	pMonster->ResetSequenceInfo();
+	pMonster->SetThink( NULL );
+	pMonster->pev->nextthink = 0;
+}
+
 static int EFW_NameIs( const char *tn, const char *a )
 {
 	if( !tn || !a )
@@ -139,7 +155,7 @@ void CRefugee::Spawn( void )
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", model, pev->origin.x, pev->origin.y, pev->origin.z );
-	MonsterInit();
+	EFW_FinishTalkNpc( this );
 	SetUse( &CRefugee::TalkUse );
 }
 
@@ -219,7 +235,7 @@ void CPatrolGuard::Spawn( void )
 	pev->view_ofs = Vector( 0, 0, 50 );
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
-	MonsterInit();
+	EFW_FinishTalkNpc( this );
 	SetUse( &CPatrolGuard::TalkUse );
 	if( !FStringNull( pev->target ) )
 	{

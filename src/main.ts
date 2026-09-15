@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-overlay3`;
+    return `${url}?v=efw-overlay4`;
   return url;
 }
 
@@ -524,10 +524,24 @@ async function boot() {
             String(view.height),
             '-game',
             GAME_DIR,
+            '+mp_allowmonsters',
+            '1',
+            '+deathmatch',
+            '0',
             '+map',
             'efw_prototype_level1',
           ]
-        : ['-windowed', '-game', GAME_DIR, '+map', 'efw_prototype_level1'],
+        : [
+            '-windowed',
+            '-game',
+            GAME_DIR,
+            '+mp_allowmonsters',
+            '1',
+            '+deathmatch',
+            '0',
+            '+map',
+            'efw_prototype_level1',
+          ],
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),

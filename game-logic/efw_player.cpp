@@ -323,6 +323,7 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	{
 		char buf[96];
 		snprintf( buf, sizeof( buf ), "People nearby: %d. Press E to talk, I for the diary.", EFW_RefugeeCount() );
+		ClientPrint( pPlayer->pev, HUD_PRINTCENTER, buf );
 		EFW_Print( pPlayer, buf );
 	}
 }
