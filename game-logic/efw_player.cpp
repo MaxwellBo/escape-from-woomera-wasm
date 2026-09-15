@@ -216,6 +216,24 @@ static void EFW_HostDiaryNext( void )
 		EFW_StepDiary( pPlayer, 1 );
 }
 
+static const char *EFW_CmdWhere( void )
+{
+	int i;
+	const char *a;
+	for( i = 0; i < CMD_ARGC(); i++ )
+	{
+		a = CMD_ARGV( i );
+		if( !a )
+			continue;
+		if( !strcmp( a, "pliers" ) || !strcmp( a, "bin" ) || !strcmp( a, "hide" )
+			|| !strcmp( a, "id" ) || !strcmp( a, "amir" ) || !strcmp( a, "hassan" ) )
+			return a;
+	}
+	if( CMD_ARGC() > 1 )
+		return CMD_ARGV( CMD_ARGC() - 1 );
+	return "";
+}
+
 static void EFW_HostGoto( void )
 {
 	CBasePlayer *pPlayer = EFW_ListenPlayer();
@@ -225,12 +243,12 @@ static void EFW_HostGoto( void )
 
 	if( !pPlayer )
 		return;
-	where = CMD_ARGC() > 1 ? CMD_ARGV( 1 ) : "";
+	where = EFW_CmdWhere();
 	dest = pPlayer->pev->origin;
 	if( !strcmp( where, "amir" ) )
-		dest = Vector( 2127, -1297, 40 );
+		dest = Vector( 2080, -1297, 48 );
 	else if( !strcmp( where, "hassan" ) )
-		dest = Vector( 928, -2192, 40 );
+		dest = Vector( 928, -2192, 48 );
 	else
 	{
 		pMark = NULL;
@@ -243,13 +261,18 @@ static void EFW_HostGoto( void )
 				|| ( !strcmp( where, "id" ) && !strcmp( name, "efw_IDTag_Position" ) ) )
 			{
 				dest = EFW_Place( pMark );
-				dest.z += 40.0f;
+				dest.z = pMark->pev->absmax.z + 36.0f;
+				if( dest.x > 0 )
+					dest.x -= 48.0f;
+				else
+					dest.x += 48.0f;
 				break;
 			}
 		}
 	}
 	pPlayer->pev->origin = dest;
 	pPlayer->pev->velocity = g_vecZero;
+	pPlayer->pev->flags &= ~FL_ONGROUND;
 	UTIL_SetOrigin( pPlayer->pev, dest );
 }
 
