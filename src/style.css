@@ -49,8 +49,23 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .canvas-wrap {
   position: relative; border-radius: var(--radius); overflow: hidden;
   border: 1px solid #3a2f22; background: #000;
+  width: 100%;
+  aspect-ratio: 4 / 3;
 }
-canvas#game { display: block; width: 100%; height: auto; background: #000; }
+canvas#canvas {
+  display: block;
+  /* SDL/Emscripten sets inline width/height to window.innerWidth with
+     !important. JS rewrites that to 100% so the wrap does not crop the GL
+     framebuffer (see pinWindowSizeToView / lockCanvasCssToWrap). */
+  width: 100% !important;
+  height: 100% !important;
+  background: #000;
+  cursor: crosshair;
+  outline: none;
+  touch-action: none;
+}
+canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.canvas-wrap.captured canvas#canvas { cursor: none; }
 
 .veil {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -79,8 +94,6 @@ canvas#game { display: block; width: 100%; height: auto; background: #000; }
 .step strong { display: block; font-size: 14px; }
 .step span { font-size: 12.5px; color: var(--dim); }
 .step .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.file-label { font-size: 13px; padding: 8px 14px; }
-.hidden-input { display: none; }
 
 .maps {
   background: #12201d; border: 1px solid #2c4a44; border-radius: 12px;

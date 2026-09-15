@@ -4,7 +4,7 @@ import { unzipSync } from 'fflate';
 
 type XashInstance = InstanceType<typeof Xash3D>;
 
-const canvas = document.getElementById('game') as HTMLCanvasElement;
+const canvas = document.getElementById('canvas') as HTMLCanvasElement;
 const veil = document.getElementById('veil') as HTMLDivElement;
 const veilTitle = document.getElementById('veil-title') as HTMLHeadingElement;
 const veilSub = document.getElementById('veil-sub') as HTMLParagraphElement;
@@ -13,9 +13,7 @@ const assetsStatus = document.getElementById('assets-status') as HTMLSpanElement
 const valveStatus = document.getElementById('valve-status') as HTMLSpanElement;
 const launchStatus = document.getElementById('launch-status') as HTMLSpanElement;
 const engineStatus = document.getElementById('engine-status') as HTMLElement;
-const btnFolder = document.getElementById('btn-folder') as HTMLButtonElement;
 const btnLaunch = document.getElementById('btn-launch') as HTMLButtonElement;
-const dirInput = document.getElementById('dir-input') as HTMLInputElement;
 const mapsPanel = document.getElementById('maps-panel') as HTMLDivElement;
 const consoleForm = document.getElementById('console-form') as HTMLFormElement;
 const consoleInput = document.getElementById('console-input') as HTMLInputElement;
@@ -236,21 +234,6 @@ function patchLibList(original: string): string {
   ].join('\n');
 }
 
-// ---- Half-Life folder intake ----------------------------------------------
-
-async function collectDirectory(handle: unknown, base: string, out: Map<string, Uint8Array>) {
-  const dir = handle as { values: () => AsyncIterable<{ kind: string; name: string; getFile?: () => Promise<File> }> };
-  for await (const entry of dir.values()) {
-    const path = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.kind === 'file') {
-      const file = await entry.getFile!();
-      out.set(path, new Uint8Array(await file.arrayBuffer()));
-    } else if (entry.kind === 'directory') {
-      await collectDirectory(entry, path, out);
-    }
-  }
-}
-
 function summarizeValve() {
   let bytes = 0;
   let pak = 0;
@@ -261,52 +244,6 @@ function summarizeValve() {
     if (/(^|\/)valve\/models\//i.test(p)) models++;
   }
   return { files: staged.valve.size, bytes, pak, models };
-}
-
-async function acceptValveFiles() {
-  seedDeltaLst();
-  const { files, bytes, pak, models } = summarizeValve();
-  if (pak === 0 && models === 0) {
-    valveStatus.textContent = `picked ${files} files but no valve/ models or pak — pick the Half-Life root`;
-    log(`WARNING: valve intake has ${files} files but no pak0.pak / models; boot will likely fail`);
-    btnLaunch.disabled = true;
-    return;
-  }
-  valveStatus.textContent = `${files} files (${fmtMB(bytes)}) incl. ${pak} pak(s), ${models} models — ready`;
-  markDone('step-valve');
-  btnLaunch.disabled = false;
-  log(`valve staged: ${files} files, ${fmtMB(bytes)}, ${pak} pak(s)`);
-}
-
-async function pickFolderNative() {
-  const picker = (window as unknown as { showDirectoryPicker?: () => Promise<unknown> }).showDirectoryPicker;
-  if (!picker) {
-    dirInput.click();
-    return;
-  }
-  try {
-    const root = await picker.call(window);
-    staged.valve.clear();
-    await collectDirectory(root, '', staged.valve);
-    await acceptValveFiles();
-  } catch (err) {
-    if ((err as DOMException)?.name !== 'AbortError') log(`folder pick failed: ${String(err)}`);
-  }
-}
-
-function pickFolderFallback(files: FileList | null) {
-  if (!files || files.length === 0) return;
-  staged.valve.clear();
-  const jobs: Promise<void>[] = [];
-  for (const f of Array.from(files)) {
-    const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-    jobs.push(
-      f.arrayBuffer().then((buf) => {
-        staged.valve.set(rel, new Uint8Array(buf));
-      }),
-    );
-  }
-  void Promise.all(jobs).then(() => acceptValveFiles());
 }
 
 // ---- WASM filesystem -------------------------------------------------------
@@ -353,12 +290,189 @@ function writeTree(
   onProgress?.(entries.length, entries.length);
 }
 
+/**
+ * Root cause of the clipped menu:
+ *
+ * Xash MainUI is authored at 1024×768. When the drawable is ≥ 4:3 it scales
+ * with ScreenHeight/768, so the 1024-wide layout only fits if
+ * ScreenWidth >= ScreenHeight * 4/3.
+ *
+ * SDL2's Emscripten backend does not use the <canvas> box. It treats the
+ * *browser window* as the drawable:
+ *   - wasm imports `window.innerWidth` / `window.innerHeight`
+ *   - `emscripten_get_screen_size` writes `screen.width` / `screen.height`
+ *   - it then sizes the canvas backing store (and often inline CSS
+ *     `width/height: Npx !important`) to that window/screen size
+ *
+ * Our canvas lives in a smaller 4:3 `.canvas-wrap` with `overflow: hidden`.
+ * If the GL backing store is 960×720 while MainUI rasterises for ~1280×window,
+ * WebGL clips to the backing store. GL's origin is bottom-left, so the top of
+ * the menu and the orange QMF_NOTIFY hints on the right are what disappear.
+ *
+ * Fix: report the wrap's pixel size from every metric SDL reads, CSS-lock the
+ * canvas to the wrap, and never shrink the backing store below what the
+ * engine actually allocated (that would clip in GL, which CSS cannot undo).
+ */
+type ViewSize = { width: number; height: number };
+
+function protoGetter<T extends object>(obj: T, prop: string): (() => number) | undefined {
+  const desc =
+    Object.getOwnPropertyDescriptor(obj, prop) ??
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(obj), prop);
+  const get = desc?.get;
+  return get ? () => Number(get.call(obj)) : undefined;
+}
+
+const nativeInnerWidth = protoGetter(window, 'innerWidth');
+const nativeInnerHeight = protoGetter(window, 'innerHeight');
+const nativeScreenWidth = protoGetter(screen, 'width');
+const nativeScreenHeight = protoGetter(screen, 'height');
+
+function nativeWindowSize(): ViewSize {
+  return {
+    width: nativeInnerWidth?.() ?? window.innerWidth,
+    height: nativeInnerHeight?.() ?? window.innerHeight,
+  };
+}
+
+function nativeScreenSize(): ViewSize {
+  return {
+    width: nativeScreenWidth?.() ?? screen.width,
+    height: nativeScreenHeight?.() ?? screen.height,
+  };
+}
+
+function viewBox(): ViewSize {
+  const wrap = canvas.parentElement;
+  const fallback = { width: 960, height: 720 };
+  if (!wrap) return fallback;
+  let width = Math.round(wrap.clientWidth);
+  let height = Math.round(wrap.clientHeight);
+  if (width < 640 || height < 480) {
+    width = Math.max(640, width);
+    height = Math.round((width * 3) / 4);
+  }
+  width += width % 2;
+  height -= height % 2;
+  // MainUI needs width >= height * 4/3. Rounding the wrap can make it a
+  // pixel too narrow and clip the hint column.
+  if (width * 3 < height * 4) width += 2;
+  return { width, height };
+}
+
+function sizeGameCanvas() {
+  const { width, height } = viewBox();
+  if (canvas.width !== width) canvas.width = width;
+  if (canvas.height !== height) canvas.height = height;
+  return { width, height };
+}
+
+function presentCanvasInWrap() {
+  // Inline `width: 1280px !important` from Emscripten beats stylesheet
+  // `width: 100% !important` and overflows `.canvas-wrap`. Rewrite it every
+  // time SDL touches the style attribute.
+  if (canvas.style.getPropertyValue('width') !== '100%' || canvas.style.getPropertyPriority('width') !== 'important') {
+    canvas.style.setProperty('width', '100%', 'important');
+    canvas.style.setProperty('height', '100%', 'important');
+  }
+}
+
+let canvasCssLocked = false;
+function lockCanvasCssToWrap() {
+  if (canvasCssLocked) return;
+  canvasCssLocked = true;
+  presentCanvasInWrap();
+  new MutationObserver(presentCanvasInWrap).observe(canvas, {
+    attributes: true,
+    attributeFilter: ['style'],
+  });
+}
+
+function logViewMetrics(tag: string) {
+  const wrap = canvas.parentElement;
+  const r = canvas.getBoundingClientRect();
+  const native = nativeWindowSize();
+  log(
+    `${tag}: native=${native.width}x${native.height} inner=${window.innerWidth}x${window.innerHeight} ` +
+      `screen=${screen.width}x${screen.height} (nativeScreen=${nativeScreenSize().width}x${nativeScreenSize().height}) ` +
+      `wrap=${wrap?.clientWidth ?? 0}x${wrap?.clientHeight ?? 0} ` +
+      `attr=${canvas.width}x${canvas.height} css=${Math.round(r.width)}x${Math.round(r.height)} ` +
+      `style=${canvas.style.width || '-'}x${canvas.style.height || '-'}`,
+  );
+}
+
+function defineMetric(obj: object, prop: string, getter: () => number) {
+  try {
+    Object.defineProperty(obj, prop, {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+    });
+    return true;
+  } catch (err) {
+    log(`size-shim ${prop} failed: ${formatErr(err)}`);
+    return false;
+  }
+}
+
+let windowSizePinned = false;
+let drawableShimOk = false;
+function pinWindowSizeToView() {
+  if (windowSizePinned) return drawableShimOk;
+  windowSizePinned = true;
+  const widthOf = () => viewBox().width;
+  const heightOf = () => viewBox().height;
+  // innerWidth is what the SDL wasm imports read. screen.* is used by
+  // emscripten_get_screen_size — best-effort, some browsers lock it.
+  const innerOk =
+    defineMetric(window, 'innerWidth', widthOf) && defineMetric(window, 'innerHeight', heightOf);
+  defineMetric(window, 'outerWidth', widthOf);
+  defineMetric(window, 'outerHeight', heightOf);
+  defineMetric(screen, 'width', widthOf);
+  defineMetric(screen, 'height', heightOf);
+  defineMetric(screen, 'availWidth', widthOf);
+  defineMetric(screen, 'availHeight', heightOf);
+  const target = viewBox();
+  drawableShimOk = innerOk && window.innerWidth === target.width && window.innerHeight === target.height;
+  if (window.visualViewport) {
+    defineMetric(window.visualViewport, 'width', widthOf);
+    defineMetric(window.visualViewport, 'height', heightOf);
+  }
+  log(
+    `size-shim: target=${target.width}x${target.height} inner=${window.innerWidth}x${window.innerHeight} ` +
+      `native=${nativeWindowSize().width}x${nativeWindowSize().height} ok=${drawableShimOk}`,
+  );
+  return drawableShimOk;
+}
+
+function inputCaptured() {
+  return document.pointerLockElement === canvas;
+}
+
+function syncCaptureUi() {
+  canvas.parentElement?.classList.toggle('captured', inputCaptured());
+  if (!engine) return;
+  launchStatus.textContent = inputCaptured()
+    ? 'running — mouse captured (Esc to release)'
+    : 'running — click the game view to capture mouse and keyboard';
+}
+
+async function captureInput() {
+  canvas.focus();
+  if (inputCaptured()) return;
+  try {
+    const pending = canvas.requestPointerLock();
+    if (pending) await pending;
+  } catch (err) {
+    log(`pointer lock failed: ${formatErr(err)}`);
+  }
+}
+
 // ---- boot ------------------------------------------------------------------
 
 async function boot() {
   if (engine || btnLaunch.disabled) return;
   btnLaunch.disabled = true;
-  btnFolder.disabled = true;
   launchStatus.textContent = 'starting engine…';
   engineStatus.textContent = 'initializing WASM';
   try {
@@ -379,10 +493,20 @@ async function boot() {
     }
 
     setVeil('Starting engine…', 'Initializing Xash3D WebAssembly runtime.', 0.7);
-    log('boot: creating Xash3D');
+    lockCanvasCssToWrap();
+    const shimOk = pinWindowSizeToView();
+    const view = viewBox();
+    // Only stamp the backing store to the wrap when SDL will agree. If the
+    // size shim failed, leaving canvas.width at the wrap would GL-clip the
+    // window-sized menu (hints on the right, title at the top).
+    if (shimOk) sizeGameCanvas();
+    log(`boot: creating Xash3D (${view.width}x${view.height}) shim=${shimOk}`);
+    logViewMetrics('pre-init');
     engine = new Xash3D({
       canvas,
-      arguments: ['-game', GAME_DIR],
+      arguments: shimOk
+        ? ['-windowed', '-width', String(view.width), '-height', String(view.height), '-game', GAME_DIR]
+        : ['-windowed', '-game', GAME_DIR],
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -395,6 +519,8 @@ async function boot() {
       module: {
         print: (text: string) => log(text),
         printErr: (text: string) => log(`ERR: ${text}`),
+        // Emscripten only auto-locks the pointer on click when this is set.
+        elementPointerLock: true,
       },
     });
     log('boot: init()');
@@ -458,13 +584,23 @@ async function boot() {
     log('filesystem staged: woomera + valve + WASM game logic');
     setVeil('Running…', 'Main loop starting.', 0.95);
     log('boot: main()');
+    logViewMetrics('pre-main');
     engine.main();
+    presentCanvasInWrap();
+    setTimeout(() => {
+      presentCanvasInWrap();
+      logViewMetrics('post-main');
+      engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
+    }, 800);
     veil.classList.add('hidden');
     mapsPanel.classList.remove('hidden');
     markDone('step-launch');
-    launchStatus.textContent = 'running — click the game view to capture input';
-    engineStatus.textContent = 'running';
+    launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
+    engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
     log('engine main loop started; auto-loading efw_prototype_level1…');
+    canvas.focus();
+    engine.Cmd_ExecuteString('in_mouse 1');
+    engine.Cmd_ExecuteString('m_rawinput 1');
     setTimeout(() => {
       try {
         engine?.Cmd_ExecuteString('map efw_prototype_level1');
@@ -480,22 +616,25 @@ async function boot() {
     log(`BOOT FAILED: ${msg}`);
     engine = null;
     btnLaunch.disabled = false;
-    btnFolder.disabled = false;
   }
 }
 
 // ---- wiring -----------------------------------------------------------------
 
-btnFolder.addEventListener('click', () => void pickFolderNative());
-dirInput.addEventListener('change', () => pickFolderFallback(dirInput.files));
 btnLaunch.addEventListener('click', () => void boot());
+canvas.addEventListener('click', () => void captureInput());
+canvas.addEventListener('pointerdown', () => canvas.focus());
+document.addEventListener('pointerlockchange', syncCaptureUi);
+document.addEventListener('pointerlockerror', () => log('pointer lock error'));
+consoleInput.addEventListener('keydown', (e) => e.stopPropagation());
+consoleInput.addEventListener('keyup', (e) => e.stopPropagation());
 
 mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
     log(`> map ${map}`);
     engine?.Cmd_ExecuteString(`map ${map}`);
-    canvas.focus();
+    void captureInput();
   });
 });
 
@@ -524,7 +663,7 @@ document.getElementById('btn-close-help')?.addEventListener('click', () => {
 void (async () => {
   await stageModZip();
   await stageValveZip();
-  setVeil('Ready', 'Click the game view after boot to capture mouse/keyboard.', 0.62);
+  setVeil('Ready', 'Click the game view after boot to capture mouse and keyboard.', 0.62);
   const params = new URLSearchParams(location.search);
   if (params.get('noboot') === '1') {
     log('noboot: assets ready, waiting for manual launch');

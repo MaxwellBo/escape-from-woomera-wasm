@@ -42,12 +42,10 @@ engine binary or the retail `valve/` art. This site uses:
 
 `scripts/vendor.sh` downloads the archived Uplink installer, extracts it,
 and `scripts/pack-valve.py` writes `public/valve.zip` (Win32 DLLs and the
-demo’s own maps omitted; SDK `delta.lst` added). A full Steam install can
-still be selected as an override.
+demo’s own maps omitted; SDK `delta.lst` added).
 
 1. Wait for steps 1–2 (mod zip + Uplink `valve/`). The engine boots itself.
-2. Click the game view to capture mouse/keyboard.
-3. Optional: **Override with your install** if you have retail Half-Life.
+2. Click the game view to capture the mouse (pointer lock) and keyboard. Esc releases the mouse.
 
 ## Honest limitation: stock game logic, not the mod's custom code
 

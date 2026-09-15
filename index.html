@@ -23,7 +23,7 @@
       <main class="layout">
         <section class="stage">
           <div class="canvas-wrap">
-            <canvas id="game" width="960" height="600"></canvas>
+            <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="Game view"></canvas>
             <div id="veil" class="veil">
               <div class="veil-card">
                 <h2 id="veil-title">Preparing…</h2>
@@ -47,11 +47,6 @@
                 <div>
                   <strong>Half-Life data</strong>
                   <span id="valve-status">loading Uplink demo…</span>
-                </div>
-                <div class="row">
-                  <button id="btn-folder" class="ghost" type="button">Override with your install…</button>
-                  <label class="ghost file-label" for="dir-input">…or pick via file dialog</label>
-                  <input id="dir-input" type="file" webkitdirectory class="hidden-input" />
                 </div>
               </div>
               <div class="step" id="step-launch">
@@ -109,8 +104,6 @@
               Step 2 loads Valve’s official <strong>Half-Life: Uplink</strong> demo
               (1999, freely distributed), the open Half-Life 1 SDK game logic
               compiled to WASM, and SDK <code>delta.lst</code> (required to boot).
-              Optional: override with a full Steam <code>valve/</code> folder if you
-              have one.
             </p>
           </section>
         </aside>
@@ -158,9 +151,8 @@
           <h2>Setup guide</h2>
           <ol class="how">
             <li>Wait for steps 1–2 (mod zip + vendored Uplink <code>valve/</code> data). The engine then boots on its own.</li>
-            <li>Optional: click <strong>Override with your install</strong> to use a full Steam Half-Life <code>valve/</code> folder instead of the demo.</li>
             <li>If boot did not start, click <strong>Boot Woomera in WASM</strong>. It runs with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
-            <li>Click the game view to capture mouse/keyboard. A keyboard and mouse are required, as with the original.</li>
+            <li>Click the game view once to capture the mouse (pointer lock) and send keyboard to the engine. Esc releases the mouse. A keyboard and mouse are required, as with the original.</li>
             <li>If the screen stays black, open the engine log below the game and the browser console.</li>
           </ol>
           <div class="row">
