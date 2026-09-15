@@ -193,6 +193,8 @@ int CHudEfw::Draw( float flTime )
 		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
 		if( g_talkPrompt )
 			gHUD.DrawHudString( x + w + 88, y + 16, ScreenWidth - 8, "TALK", r, g, b );
+		if( g_diaryOpen )
+			gHUD.DrawHudString( x + w + 88, y + 32, ScreenWidth - 8, "DIARY", r, g, b );
 	}
 
 	if( g_menuCode == 0x4d )
