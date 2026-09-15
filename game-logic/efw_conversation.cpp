@@ -55,6 +55,7 @@ const EfwScript *EFW_LoadScript( const char *scriptName )
 	if( !slot )
 		slot = &slots[0];
 
+	int fromMalloc = 0;
 	snprintf( path, sizeof( path ), "Conversations/%s.txt", scriptName );
 	buf = (char *)LOAD_FILE_FOR_ME( path, &length );
 	if( !buf )
@@ -64,11 +65,47 @@ const EfwScript *EFW_LoadScript( const char *scriptName )
 	}
 	if( !buf )
 	{
+		const char *tries[] = {
+			"/woomera/Conversations/%s.txt",
+			"/rwdir/woomera/Conversations/%s.txt",
+			NULL
+		};
+		int t;
+		for( t = 0; tries[t] && !buf; t++ )
+		{
+			FILE *f;
+			snprintf( path, sizeof( path ), tries[t], scriptName );
+			f = fopen( path, "r" );
+			if( !f )
+				continue;
+			if( fseek( f, 0, SEEK_END ) == 0 )
+			{
+				length = (int)ftell( f );
+				fseek( f, 0, SEEK_SET );
+				if( length > 0 )
+				{
+					buf = (char *)malloc( (size_t)length + 1 );
+					if( buf )
+					{
+						length = (int)fread( buf, 1, (size_t)length, f );
+						buf[length] = '\0';
+						fromMalloc = 1;
+					}
+				}
+			}
+			fclose( f );
+		}
+	}
+	if( !buf )
+	{
 		ALERT( at_console, "WARNING -- efwConversation::Squark -- character (%s) is not found\n", scriptName );
 		return NULL;
 	}
 	EfwScript_Parse( &slot->script, scriptName, buf, length );
-	FREE_FILE( buf );
+	if( fromMalloc )
+		free( buf );
+	else
+		FREE_FILE( buf );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
@@ -221,7 +258,10 @@ static void EFW_ShowTopicMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	script = EFW_LoadScript( npc );
 	if( !script )
 	{
-		EFW_Print( pPlayer, "They have nothing to say." );
+		char miss[96];
+		snprintf( miss, sizeof( miss ), "No script for %s (Conversations/%s.txt).", npc, npc );
+		EFW_Print( pPlayer, miss );
+		EFW_SendHint( pPlayer, miss );
 		return;
 	}
 

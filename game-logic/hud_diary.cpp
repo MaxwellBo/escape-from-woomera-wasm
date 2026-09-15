@@ -70,7 +70,19 @@ int CHudDiary::Draw( float flTime )
 	char caption[48];
 
 	{
-		const char *st = gEngfuncs.pfnGetCvarString( "efw_diary_state" );
+		char fileSt[48];
+		const char *st = NULL;
+		FILE *f = fopen( "/woomera/efw_diary.txt", "r" );
+		if( !f )
+			f = fopen( "/rwdir/woomera/efw_diary.txt", "r" );
+		if( f )
+		{
+			if( fgets( fileSt, sizeof( fileSt ), f ) )
+				st = fileSt;
+			fclose( f );
+		}
+		if( !st || !st[0] )
+			st = gEngfuncs.pfnGetCvarString( "efw_diary_state" );
 		if( st && st[0] )
 		{
 			int open = 0;

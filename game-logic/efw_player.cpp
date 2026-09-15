@@ -17,6 +17,41 @@ extern int gmsgTextMsg;
 
 static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist );
 
+static void EFW_WriteShare( const char *name, const char *text )
+{
+	char dir[64];
+	char path[160];
+	FILE *f;
+	if( !name || !text )
+		return;
+	dir[0] = '\0';
+	GET_GAME_DIR( dir );
+	if( dir[0] )
+	{
+		snprintf( path, sizeof( path ), "%s/%s", dir, name );
+		f = fopen( path, "w" );
+		if( f )
+		{
+			fputs( text, f );
+			fclose( f );
+		}
+	}
+	snprintf( path, sizeof( path ), "/woomera/%s", name );
+	f = fopen( path, "w" );
+	if( f )
+	{
+		fputs( text, f );
+		fclose( f );
+	}
+	snprintf( path, sizeof( path ), "/rwdir/woomera/%s", name );
+	f = fopen( path, "w" );
+	if( f )
+	{
+		fputs( text, f );
+		fclose( f );
+	}
+}
+
 static int gmsgHope = 0;
 static int gmsgEfwDiary = 0;
 static int gmsgEfwHint = 0;
@@ -156,6 +191,7 @@ void EFW_SendHint( CBasePlayer *pPlayer, const char *text )
 				flat[i] = '|';
 		}
 		CVAR_SET_STRING( "efw_hud", flat );
+		EFW_WriteShare( "efw_hud.txt", flat );
 	}
 	if( gmsgEfwHint )
 	{
@@ -186,6 +222,7 @@ void EFW_SendDiary( CBasePlayer *pPlayer )
 	}
 	snprintf( buf, sizeof( buf ), "%d %d %u", st->diaryOpen ? 1 : 0, st->diaryPage, st->diary );
 	CVAR_SET_STRING( "efw_diary_state", buf );
+	EFW_WriteShare( "efw_diary.txt", buf );
 }
 
 void EFW_AdjustHope( CBasePlayer *pPlayer, int delta )

@@ -9,6 +9,43 @@ DECLARE_MESSAGE( m_Hope, Hope )
 
 static char g_efwHint[192];
 
+static int EFW_ReadShare( const char *name, char *dst, int dstSize )
+{
+	const char *roots[] = { "/woomera/", "/rwdir/woomera/", "", NULL };
+	int i;
+	int len = 0;
+	byte *p;
+	if( !name || !dst || dstSize < 2 )
+		return 0;
+	dst[0] = '\0';
+	for( i = 0; roots[i]; i++ )
+	{
+		char path[160];
+		FILE *f;
+		snprintf( path, sizeof( path ), "%s%s", roots[i], name );
+		f = fopen( path, "r" );
+		if( !f )
+			continue;
+		if( fgets( dst, dstSize, f ) )
+		{
+			fclose( f );
+			return 1;
+		}
+		fclose( f );
+	}
+	p = gEngfuncs.COM_LoadFile( name, 5, &len );
+	if( p && len > 0 )
+	{
+		if( len >= dstSize )
+			len = dstSize - 1;
+		memcpy( dst, p, (size_t)len );
+		dst[len] = '\0';
+		gEngfuncs.COM_FreeFile( p );
+		return 1;
+	}
+	return 0;
+}
+
 static int __MsgFunc_EfwHint( const char *pszName, int iSize, void *pbuf )
 {
 	const char *s;
@@ -131,7 +168,12 @@ int CHudHope::Draw( float flTime )
 	}
 
 	{
-		const char *hud = gEngfuncs.pfnGetCvarString( "efw_hud" );
+		char fileHud[192];
+		const char *hud = NULL;
+		if( EFW_ReadShare( "efw_hud.txt", fileHud, sizeof( fileHud ) ) && fileHud[0] )
+			hud = fileHud;
+		if( !hud || !hud[0] )
+			hud = gEngfuncs.pfnGetCvarString( "efw_hud" );
 		if( hud && hud[0] )
 		{
 			while( *hud && hy < ScreenHeight - 20 )
