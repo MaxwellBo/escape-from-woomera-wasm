@@ -1027,8 +1027,26 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		char beat[192];
 		st->hudPulses--;
 		st->hudRetry = gpGlobals->time + 1.0f;
+		pPlayer->pev->armorvalue = ( st->hudPulses & 1 ) ? (float)st->hope : (float)( st->hope ? st->hope - 1 : 0 );
 		pPlayer->pev->iuser1 = (int)( gpGlobals->time * 10.0f );
 		pPlayer->pev->iuser2 = st->talking;
+		{
+			hudtextparms_t hp;
+			memset( &hp, 0, sizeof( hp ) );
+			hp.x = -1;
+			hp.y = 0.45f;
+			hp.r1 = 255;
+			hp.g1 = 255;
+			hp.b1 = 0;
+			hp.a1 = 255;
+			hp.r2 = 255;
+			hp.g2 = 255;
+			hp.b2 = 0;
+			hp.a2 = 255;
+			hp.holdTime = 1.2f;
+			hp.channel = 3;
+			UTIL_HudMessage( pPlayer, hp, "EFW-TALK" );
+		}
 		if( !st->talking )
 		{
 			pNear = EFW_NearestTalkNpc( pPlayer, 256.0f );
@@ -1039,7 +1057,6 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		EFW_SendDiary( pPlayer );
 		snprintf( beat, sizeof( beat ), "t=%.0f talking=%d | %s", gpGlobals->time, st->talking, st->hint );
 		EFW_WriteShare( "efw_hud.txt", beat );
-		pPlayer->pev->armorvalue = st->hope;
 	}
 
 	if( st->autoTalkAt && gpGlobals->time >= st->autoTalkAt )
