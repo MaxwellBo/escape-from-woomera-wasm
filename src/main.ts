@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll43`;
+    return `${url}?v=efw-dll43b`;
   return url;
 }
 
@@ -224,16 +224,22 @@ function onServerActivateSeen() {
   if (listenReady) return;
   listenReady = true;
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
+  /* host_clientloaded starts the first 3D/overview ClientFrame, which
+     never returned after live ticks=1. Delay it until StartFrame is live. */
+  runEngineCmd('r_drawentities 0');
+  runEngineCmd('pausable 0');
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
-    runEngineCmd('host_clientloaded');
-    runEngineCmd('host_gameloaded');
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
     runEngineCmd('status');
   }, 2000);
+  setTimeout(() => {
+    runEngineCmd('host_clientloaded');
+    runEngineCmd('host_gameloaded');
+  }, 8000);
   setInterval(() => {
     runEngineCmd('pausable 0');
   }, 4000);
