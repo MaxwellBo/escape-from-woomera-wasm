@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll37`;
+    return `${url}?v=efw-dll38`;
   return url;
 }
 
@@ -690,7 +690,7 @@ async function boot() {
       '-game',
       GAME_DIR,
       '+maxplayers',
-      '2',
+      '1',
       '+mp_allowmonsters',
       '1',
       '+deathmatch',
@@ -699,8 +699,6 @@ async function boot() {
       '0',
       '+sv_lan',
       '1',
-      '+map',
-      'efw_prototype_level1',
     ];
     if (shimOk) {
       bootArgs.splice(1, 0, '-width', String(view.width), '-height', String(view.height));
@@ -800,14 +798,11 @@ async function boot() {
     log('engine main loop started; +map is in Host_Init argv');
     canvas.focus();
     resumeEngineLoop();
-    startedMap = 'efw_prototype_level1';
+    startedMap = '';
     listenReady = false;
     setTimeout(() => {
-      if (!listenReady) {
-        startedMap = '';
-        loadMap('efw_prototype_level1', 'fallback if +map did not spawn');
-      }
-    }, 4000);
+      loadMap('efw_prototype_level1', 'deferred after Host_Init');
+    }, 1500);
     setInterval(pollEfwVgui, 250);
     pollEfwVgui();
     document.addEventListener('visibilitychange', () => {
