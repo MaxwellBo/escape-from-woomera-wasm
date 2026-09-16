@@ -171,6 +171,7 @@ def main() -> None:
         "void StartFrame( void )\n"
         "{\n"
         f"	EFW_StartFrame(); {MARKER}\n"
+        f"	EFW_RunQueuedChangeLevel(); {MARKER}\n"
         "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",
     )
 

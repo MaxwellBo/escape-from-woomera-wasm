@@ -40,6 +40,7 @@ void EFW_OnServerActivate( void );
 void EFW_OnServerDeactivate( void );
 int EFW_DeferStudio( void ); /* skip SET_MODEL during ED_LoadFromFile (WASM stall) */
 void EFW_StartFrame( void ); /* apply one deferred studio model per frame */
+void EFW_RunQueuedChangeLevel( void ); /* pfnChangeLevel from engine StartFrame only */
 void EFW_EnableNpcThink( edict_t *pent ); /* restore IdleThink/PatrolThink after SET_MODEL */
 void EFW_EnginePrint( const char *line );
 #endif

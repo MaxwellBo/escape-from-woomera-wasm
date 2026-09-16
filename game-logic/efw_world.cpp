@@ -70,6 +70,9 @@ void EFW_SetPause( int on )
 		EFW_DebugPrint( "efw_pause 1" );
 }
 
+static char s_queuedMap[64];
+static int s_queuedChange;
+
 void EFW_ChangeLevel( const char *map )
 {
 	if( !map || !map[0] )
@@ -79,14 +82,28 @@ void EFW_ChangeLevel( const char *map )
 	   STATE_CHANGELEVEL → SV_ExecChangeLevel on the next COM_Frame. */
 	CVAR_SET_FLOAT( "sv_validate_changelevel", 0.0f );
 	CVAR_SET_FLOAT( "sv_newunit", 1.0f );
-	EFW_DebugPrint( ">>> efw_changelevel %s time=%.2f validate=%.0f newunit=%.0f",
+	strncpy( s_queuedMap, map, sizeof( s_queuedMap ) - 1 );
+	s_queuedMap[sizeof( s_queuedMap ) - 1] = '\0';
+	s_queuedChange = 1;
+	/* Queue until engine StartFrame (inside Host_Frame). HostFwd JS runs
+	   between COM_Frames so COM_ChangeLevel's nextstate is lost before
+	   Host_RunFrame can promote STATE_CHANGELEVEL. */
+	EFW_DebugPrint( ">>> efw_changelevel queued %s time=%.2f validate=%.0f newunit=%.0f",
 		map, gpGlobals->time,
 		CVAR_GET_FLOAT( "sv_validate_changelevel" ),
 		CVAR_GET_FLOAT( "sv_newunit" ) );
+}
+
+void EFW_RunQueuedChangeLevel( void )
+{
+	if( !s_queuedChange )
+		return;
+	s_queuedChange = 0;
+	EFW_DebugPrint( ">>> CHANGE_LEVEL StartFrame %s time=%.2f", s_queuedMap, gpGlobals->time );
 	/* PE ClientCommand: pfnChangeLevel. Xash COM_ChangeLevel sets
 	   Host nextstate = STATE_CHANGELEVEL; Exec runs on the next COM_Frame. */
-	CHANGE_LEVEL( (char *)map, NULL );
-	EFW_DebugPrint( ">>> CHANGE_LEVEL returned %s", map );
+	CHANGE_LEVEL( s_queuedMap, NULL );
+	EFW_DebugPrint( ">>> CHANGE_LEVEL returned %s", s_queuedMap );
 }
 
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer )
