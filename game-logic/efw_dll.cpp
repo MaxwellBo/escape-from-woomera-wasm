@@ -942,6 +942,8 @@ static void EFW_SpawnRemember( edict_t *pent, const char *cn )
 static int s_deferStudio;
 static int s_waitPawn;
 static int s_thinkRestored;
+static int s_studioDelay;
+static int s_liveTicks;
 
 static void EFW_LogLine( const char *line )
 {
@@ -1056,11 +1058,30 @@ void EFW_StartFrame( void )
 				pent->v.solid = SOLID_SLIDEBOX;
 			}
 		}
+		/* Return so ClientFrame/CheckForResend and cmd forwarding run
+		   before the first deferred SET_MODEL. */
+		return;
+	}
+	s_liveTicks++;
+	if( s_liveTicks <= 8 || ( s_liveTicks % 120 ) == 1 )
+	{
+		char line[80];
+		snprintf( line, sizeof( line ), "efw: StartFrame live ticks=%d\n", s_liveTicks );
+		EFW_LogLine( line );
+	}
+	if( s_studioDelay < 10 )
+	{
+		s_studioDelay++;
+		return;
 	}
 	for( i = 1; i < EFW_MaxEnts(); i++ )
 	{
 		edict_t *pent;
 		const char *model;
+		const char *apply;
+		char lower[80];
+		int n;
+		int c;
 
 		pent = INDEXENT( i );
 		if( !pent || pent->free )
@@ -1074,7 +1095,28 @@ void EFW_StartFrame( void )
 			continue;
 		if( !strstr( model, ".mdl" ) )
 			continue;
-		SET_MODEL( pent, model );
+		/* Detainee studios stall the WASM SET_MODEL path. Keep the DLL
+		   name on the edict for logs and bind a studio the engine already
+		   loaded (EFW_SetVisibleModel fallback). */
+		apply = model;
+		n = 0;
+		for( c = 0; model[c] && n < (int)sizeof( lower ) - 1; c++ )
+		{
+			char ch = model[c];
+			if( ch >= 'A' && ch <= 'Z' )
+				ch = (char)( ch + 32 );
+			lower[n++] = ch;
+		}
+		lower[n] = 0;
+		if( strstr( lower, "detainee" ) )
+			apply = "models/player.mdl";
+		{
+			char line[192];
+			snprintf( line, sizeof( line ), "efw: studio begin edict=%d %s %s -> %s\n",
+				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model, apply );
+			EFW_LogLine( line );
+		}
+		SET_MODEL( pent, apply );
 		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
 		pent->v.movetype = MOVETYPE_STEP;
@@ -1082,7 +1124,7 @@ void EFW_StartFrame( void )
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
-				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model );
+				i, pent->v.classname ? STRING( pent->v.classname ) : "?", apply );
 			EFW_LogLine( line );
 		}
 		return;
@@ -1237,6 +1279,8 @@ void EFW_OnServerActivate( void )
 	s_mapLive = 1;
 	s_waitPawn = 0;
 	s_thinkRestored = 0;
+	s_studioDelay = 0;
+	s_liveTicks = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -1255,6 +1299,8 @@ void EFW_OnServerDeactivate( void )
 	s_deferStudio = 0;
 	s_waitPawn = 0;
 	s_thinkRestored = 0;
+	s_studioDelay = 0;
+	s_liveTicks = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
