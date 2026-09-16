@@ -311,6 +311,7 @@ void EFW_ThinkDt( void )
 			s_dt = 1;
 			EFW_DebugPrint( ">>> FUN_100c6a70 dt=%.3f", dt );
 			EFW_DebugPrint( ">>> FUN_100c5b60 t=%.2f", now );
+			EFW_DebugPrint( ">>> FUN_100c5b70 dt=%.3f", dt );
 		}
 	}
 	if( dt <= 0.0f )
@@ -365,6 +366,7 @@ void EFW_ThinkHope( void )
 			s_enter = 1;
 			EFW_DebugPrint( ">>> FUN_100c6ad0 hope=%.1f pause=%d",
 				EFW_GetHudFloat( 1 ), EFW_GetHudInt( 6 ) );
+			EFW_DebugPrint( ">>> FUN_100c5b70 dt=%.3f", g_efw.dt );
 		}
 	}
 
@@ -1223,6 +1225,14 @@ static int EFW_CmdIs( const char *cmd, const char *want )
 void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
 {
 	char buf[64];
+	{
+		static int s_svc;
+		if( !s_svc )
+		{
+			s_svc = 1;
+			EFW_DebugPrint( ">>> FUN_100bfbf0 %s", cmd ? cmd : "-" );
+		}
+	}
 	if( !cmd || !cmd[0] )
 		return;
 	strncpy( buf, cmd, sizeof( buf ) - 1 );
@@ -1688,6 +1698,14 @@ static void EFW_RegisterHostCmds( void )
 
 void EFW_LinkUserMessages( void )
 {
+	{
+		static int s_link;
+		if( !s_link )
+		{
+			s_link = 1;
+			EFW_DebugPrint( ">>> FUN_1007af20 EFWShow EFWData EFW_Menu EFW_Cntxt EFW_CtPrv" );
+		}
+	}
 	EFW_RegisterHostCmds();
 	ALERT( at_error, "efw: GameDLLInit ents=%d max=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities );
@@ -1840,6 +1858,7 @@ void EFW_PollMenuKeys( void )
 		if( !s_poll )
 		{
 			s_poll = 1;
+			EFW_DebugPrint( ">>> FUN_100c6a60 talkActive=%d", g_efw.talkActive );
 			EFW_DebugPrint( ">>> FUN_100c7450 talkActive=%d", g_efw.talkActive );
 			EFW_DebugPrint( ">>> FUN_100c7420 npc=%s",
 				g_efw.talkNpc ? STRING( g_efw.talkNpc->pev->targetname ) : "-" );
@@ -2384,6 +2403,14 @@ void EFW_OnServerDeactivate( void )
 
 void EFW_WPrecache( void )
 {
+	{
+		static int s_wp;
+		if( !s_wp )
+		{
+			s_wp = 1;
+			EFW_DebugPrint( ">>> FUN_100b2f80 weapon_efw_Pliers..WashingPowder" );
+		}
+	}
 	/* FUN_100b2f80 after the HL weapon list: UTIL_PrecacheOtherWeapon
 	   weapon_efw_Pliers @ 101054a4 through weapon_efw_WashingPowder. */
 	static const char *kEfw[] = {

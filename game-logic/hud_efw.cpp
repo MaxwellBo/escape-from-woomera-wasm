@@ -695,6 +695,7 @@ static void EFW_OpenCaption( int code )
 	g_captionAge = 0.0f;
 	g_storyCode = 0;
 	g_hStory = 0;
+	gEngfuncs.Con_Printf( ">>> FUN_10047830 code=0x%x\n", code );
 	gEngfuncs.Con_Printf( ">>> FUN_10048790 n=%d code=0x%x %s\n", g_captionLen, code, g_caption );
 	gEngfuncs.Con_Printf( ">>> FUN_10048a70 Panel 0,0,%d,%d +0xbc=100\n",
 		ScreenWidth, ScreenHeight );
@@ -792,6 +793,7 @@ static void EFW_OpenStoryboard( int code )
 			g_panel48On = 1;
 			g_contextMode = 1;
 			g_contextOpenedAt = now; /* FUN_10046370 DAT_100bc354 */
+			gEngfuncs.Con_Printf( ">>> FUN_10047830 code=0x48\n" );
 			gEngfuncs.Con_Printf(
 				">>> FUN_100483d0 Panel 0,0,%d,%d +0xbc=100\n",
 				ScreenWidth, ScreenHeight );
@@ -1069,6 +1071,8 @@ int CHudEfw::Init( void )
 	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
+	gEngfuncs.Con_Printf( ">>> FUN_10018c00 iface=7\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_10018c60\n" );
 	gEngfuncs.Con_Printf( "efw: HUD_Init\n" );
 	EFW_LoadTextScheme();
 	EFW_ClientRegisterDefaults();
@@ -2254,6 +2258,16 @@ int CHudEfw::Draw( float flTime )
 	}
 	/* FUN_10044f30 leftover unique: quote even if interact / inv HUD
 	   never walks slots (HIDEHUD_ALL / no look-use on boot map). */
+	{
+		static int s_redraw;
+		if( !s_redraw )
+		{
+			s_redraw = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10018c90\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_10044f70\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_100442f0 weapon_efw_Pliers\n" );
+		}
+	}
 	(void)EFW_HasWep( g_weaponId > 0 ? g_weaponId : 16 );
 	if( !g_hBubble )
 		g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );

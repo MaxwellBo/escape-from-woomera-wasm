@@ -87,6 +87,7 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		{
 			s_parse = 1;
 			EFW_DebugPrint( ">>> FUN_100c2660 %s questions=%d", scriptName, slot->script.questionCount );
+			EFW_DebugPrint( ">>> FUN_100c1dc0" );
 		}
 		else
 			EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
@@ -497,6 +498,7 @@ void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 	EFW_DebugPrint( ">>> efw_Give UNWANTED_ITEM %s", tn );
 	EFW_DebugPrint( ">>> FUN_100c4550 FUN_100b95a0 %s", tn ? tn : "?" );
+	EFW_DebugPrint( ">>> FUN_100b95a0 flag=8 %s", tn ? tn : "?" );
 	EFW_CloseTalk();
 	EFW_Squark( tn, text, 8 );
 }

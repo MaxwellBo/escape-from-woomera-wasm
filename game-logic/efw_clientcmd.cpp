@@ -652,6 +652,15 @@ int EFW_ClientCommand( edict_t *pEntity )
 	const char *pcmd;
 	int arg0 = 0;
 
+	{
+		static int s_cc;
+		if( !s_cc )
+		{
+			s_cc = 1;
+			EFW_DebugPrint( ">>> FUN_1001a550 %s",
+				( pEntity && CMD_ARGV( 0 ) ) ? CMD_ARGV( 0 ) : "-" );
+		}
+	}
 	if( !pEntity || !pEntity->pvPrivateData )
 		return 0;
 	pPlayer = GetClassPtr( (CBasePlayer *)&pEntity->v );
