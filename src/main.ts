@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll13`;
+    return `${url}?v=efw-dll14`;
   return url;
 }
 
@@ -49,13 +49,16 @@ let logLines = 0;
 function applyEfwVgui(text: string): boolean {
   const layer = document.getElementById('efw-vgui');
   if (!layer) return false;
-  if (text === 'EFWVGUI CLR') {
+  const idx = text.indexOf('EFWVGUI');
+  if (idx < 0) return false;
+  const msg = text.slice(idx).replace(/\s+$/, '');
+  if (msg === 'EFWVGUI CLR') {
     layer.innerHTML = '';
     layer.hidden = true;
     return true;
   }
-  if (!text.startsWith('EFWVGUI ADD ')) return false;
-  const rest = text.slice('EFWVGUI ADD '.length);
+  if (!msg.startsWith('EFWVGUI ADD ')) return true;
+  const rest = msg.slice('EFWVGUI ADD '.length);
   const tab = rest.indexOf('\t');
   const head = tab >= 0 ? rest.slice(0, tab) : rest;
   const label = tab >= 0 ? rest.slice(tab + 1) : head;
@@ -65,6 +68,7 @@ function applyEfwVgui(text: string): boolean {
   const cmd = cmdParts.join(' ');
   const btn = document.createElement('button');
   btn.type = 'button';
+  btn.dataset.cmd = cmd;
   btn.textContent = label || cmd;
   btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
   btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
@@ -83,7 +87,41 @@ function applyEfwVgui(text: string): boolean {
   });
   layer.appendChild(btn);
   layer.hidden = false;
+  /* Original CommandButtons own the cursor; unlock so the HTML stand-in is clickable. */
+  if (document.pointerLockElement)
+    document.exitPointerLock();
   return true;
+}
+
+type WasmFS = {
+  mkdir: (p: string) => void;
+  writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
+  unlink: (p: string) => void;
+  readFile?: (p: string, opts?: { encoding?: string }) => string | Uint8Array;
+};
+let wasmFS: WasmFS | null = null;
+let lastVguiFile = '';
+
+function ingestVguiFile(raw: string) {
+  if (raw === lastVguiFile) return;
+  lastVguiFile = raw;
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) applyEfwVgui(trimmed);
+  }
+}
+
+function pollEfwVgui() {
+  if (!wasmFS?.readFile) return;
+  for (const path of ['/efwvgui.txt', '/woomera/efwvgui.txt', '/rwdir/efwvgui.txt']) {
+    try {
+      const data = wasmFS.readFile(path, { encoding: 'utf8' });
+      ingestVguiFile(typeof data === 'string' ? data : new TextDecoder().decode(data));
+      return;
+    } catch {
+      /* path missing */
+    }
+  }
 }
 
 function log(text: string) {
@@ -649,14 +687,9 @@ async function boot() {
     await engine.init();
     log('boot: init ok');
 
-    const FS = (engine.em as unknown as { FS?: unknown })?.FS as
-      | {
-          mkdir: (p: string) => void;
-          writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
-          unlink: (p: string) => void;
-        }
-      | undefined;
+    const FS = (engine.em as unknown as { FS?: WasmFS })?.FS;
     if (!FS) throw new Error('WASM filesystem unavailable after init');
+    wasmFS = FS;
     log(`boot: writing ${staged.valve.size} valve files + ${staged.woomera.size} woomera files`);
 
     setVeil('Installing game files…', 'Writing woomera/ + valve/ into WASM memory.', 0.8);
@@ -727,6 +760,8 @@ async function boot() {
     setInterval(() => {
       runEngineCmd('pausable 0');
     }, 2000);
+    setInterval(pollEfwVgui, 250);
+    pollEfwVgui();
     const resumeLoop = () => {
       const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
       try {

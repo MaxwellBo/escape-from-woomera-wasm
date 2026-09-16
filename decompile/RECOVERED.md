@@ -70,4 +70,4 @@ Client issues `efw_Talk %c` / `efw_Give %d %c` / `efw_UseWithMarker %d %c` as `C
 
 Remaining thinner surfaces are CRT/STL helpers and Spirit-of-HL stock AI, not EFW overlay gameplay.
 
-Client VGUI CommandButtons (`FUN_10044f70`) are ported as HUD widgets plus an HTML overlay that issues the original `efw_Talk` / `efw_Give %d` / `efw_UseWithMarker %d` ClientCmds. Patrol `FUN_100c54e0` + `FUN_100c5480` chase-all-guards is in `CPatrolGuard::PatrolThink`.
+Client VGUI CommandButtons (`FUN_10044f70`) are ported as HUD widgets plus an HTML overlay. The client writes `EFWVGUI` lines to MEMFS `/efwvgui.txt` (and stdout/stderr) so the browser can click the original `efw_Talk` / `efw_Give %d` / `efw_UseWithMarker %d` ClientCmds. Patrol `FUN_100c54e0` + `FUN_100c5480` chase-all-guards is in `CPatrolGuard::PatrolThink`.

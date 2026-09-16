@@ -465,8 +465,6 @@ static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRI
 	int h = 28;
 	if( g_vguiN >= EFW_VGUI_MAX )
 		return;
-	if( x < 90 || y < 90 || x > ScreenWidth - 90 || y > ScreenHeight - 90 )
-		return;
 	if( x < 180 )
 		x = 180;
 	if( y < 180 )
@@ -487,11 +485,22 @@ static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRI
 	b->cmd[sizeof( b->cmd ) - 1] = '\0';
 }
 
+static void EFW_VguiEmit( FILE *fp, const char *line )
+{
+	gEngfuncs.Con_Printf( "%s\n", line );
+	printf( "%s\n", line );
+	fprintf( stderr, "%s\n", line );
+	if( fp )
+		fprintf( fp, "%s\n", line );
+}
+
 static void EFW_VguiSync( void )
 {
 	char sig[512];
+	char line[384];
 	int i;
 	int n;
+	FILE *fp;
 	sig[0] = '\0';
 	n = 0;
 	for( i = 0; i < g_vguiN; i++ )
@@ -504,17 +513,27 @@ static void EFW_VguiSync( void )
 		return;
 	strncpy( g_vguiSig, sig, sizeof( g_vguiSig ) - 1 );
 	g_vguiSig[sizeof( g_vguiSig ) - 1] = '\0';
-	gEngfuncs.Con_Printf( "EFWVGUI CLR\n" );
+	/* WASM HTML overlay reads this MEMFS file; Win32 used VGUI CommandButtons. */
+	fp = fopen( "/efwvgui.txt", "w" );
+	EFW_VguiEmit( fp, "EFWVGUI CLR" );
 	for( i = 0; i < g_vguiN; i++ )
 	{
 		EfwVguiBtn *b = &g_vgui[i];
-		gEngfuncs.Con_Printf( "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
+		snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s",
 			(float)b->x / (float)ScreenWidth,
 			(float)b->y / (float)ScreenHeight,
 			(float)b->w / (float)ScreenWidth,
 			(float)b->h / (float)ScreenHeight,
 			b->cmd, b->label );
+		EFW_VguiEmit( fp, line );
 	}
+	if( fp )
+	{
+		fflush( fp );
+		fclose( fp );
+	}
+	fflush( stdout );
+	fflush( stderr );
 }
 
 static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )

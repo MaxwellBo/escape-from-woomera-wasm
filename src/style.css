@@ -67,7 +67,7 @@ canvas#canvas {
 canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .canvas-wrap.captured canvas#canvas { cursor: none; }
 .efw-vgui {
-  position: absolute; inset: 0; z-index: 4; pointer-events: none;
+  position: absolute; inset: 0; z-index: 6; pointer-events: none;
 }
 .efw-vgui button {
   position: absolute; pointer-events: auto;
