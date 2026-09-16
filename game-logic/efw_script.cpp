@@ -148,6 +148,7 @@ static int EfwFlex_GetNextBuffer( EfwYyScan *yy )
 				EfwFlexFatal( "fatal error - scanner input buffer overflow" );
 				return 0;
 			}
+			EfwFlexMsg( ">>> FUN_100c2560" ); /* yy_flex_realloc */
 			num_to_read = yy->buf_size - number_to_move;
 		}
 		if( num_to_read > EFW_YY_READ_BUF )
@@ -242,6 +243,82 @@ static int EfwFlex_Input( EfwYyScan *yy )
 	return 0;
 }
 
+/* FUN_100c2550 yy_flex_alloc. PE yy_buffer_state is 0x28. */
+static void *EfwFlex_Alloc( size_t n )
+{
+	char log[48];
+
+	snprintf( log, sizeof( log ), ">>> FUN_100c2550 size=%d", (int)n );
+	EfwFlexMsg( log );
+	return malloc( n );
+}
+
+/* FUN_100c2580 yy_flex_free. */
+static void EfwFlex_Free( void *p )
+{
+	EfwFlexMsg( ">>> FUN_100c2580" );
+	free( p );
+}
+
+/* FUN_100c24f0 yy_init_buffer: n_chars=0, EOB bytes, c_buf_p=ch_buf, fill=1. */
+static void EfwFlex_InitBuffer( EfwYyScan *yy )
+{
+	if( !yy || !yy->ch_buf )
+		return;
+	yy->n_chars = 0;
+	yy->ch_buf[0] = 0;
+	yy->ch_buf[1] = 0;
+	yy->c_buf_p = yy->ch_buf;
+	yy->fill_ok = 1;
+	yy->buf_status = 0;
+	EfwFlexMsg( ">>> FUN_100c24f0" );
+}
+
+/* FUN_100c24c0: yy_init_buffer then yy_is_interactive=1, yyin, yy_fill=0. */
+static void EfwFlex_InitAndAssign( EfwYyScan *yy )
+{
+	if( !yy )
+		return;
+	EfwFlex_InitBuffer( yy );
+	yy->fill_ok = 1;
+	EfwFlexMsg( ">>> FUN_100c24c0" );
+}
+
+/* FUN_100c23f0 yy_load_buffer_state: copy n_chars / c_buf_p / hold into scanner. */
+static void EfwFlex_LoadBufferState( unsigned char *scanner, EfwYyScan *yy )
+{
+	if( !yy )
+		return;
+	if( scanner )
+	{
+		*(void **)( scanner + 0x2c ) = yy;
+		*(int *)( scanner + 0x34 ) = yy->n_chars;
+		*(char **)( scanner + 0x38 ) = yy->c_buf_p;
+		*(char **)( scanner + 4 ) = yy->c_buf_p;
+		if( yy->c_buf_p )
+			scanner[0x30] = *yy->c_buf_p;
+	}
+	EfwFlexMsg( ">>> FUN_100c23f0" );
+}
+
+/* FUN_100c23a0 yy_switch_to_buffer if current != param. */
+static void EfwFlex_SwitchToBuffer( unsigned char *scanner, EfwYyScan *yy )
+{
+	EfwYyScan *cur;
+
+	if( !scanner || !yy )
+		return;
+	cur = *(EfwYyScan **)( scanner + 0x2c );
+	if( cur == yy )
+		return;
+	if( cur && cur->c_buf_p && cur->ch_buf )
+		cur->c_buf_p[0] = scanner[0x30];
+	*(EfwYyScan **)( scanner + 0x2c ) = yy;
+	EfwFlex_LoadBufferState( scanner, yy );
+	*(int *)( scanner + 0x44 ) = 1;
+	EfwFlexMsg( ">>> FUN_100c23a0" );
+}
+
 /* FUN_100c2410 yy_create_buffer: malloc 0x28 state + size+2. */
 static int s_yyCreateFail;
 
@@ -256,15 +333,19 @@ static EfwYyScan *EfwFlex_CreateBuffer( int size )
 		EfwFlexMsg( ">>> FUN_100c2410" );
 		return NULL;
 	}
-	yy = (EfwYyScan *)malloc( sizeof( *yy ) ); /* PE yy_buffer_state is 0x28 */
+	yy = (EfwYyScan *)calloc( 1, sizeof( *yy ) );
 	if( !yy )
 	{
 		EfwFlexMsg( "out of dynamic memory in yy_create_buffer()" );
 		EfwFlexMsg( ">>> FUN_100c2410" );
 		return NULL;
 	}
-	memset( yy, 0, sizeof( *yy ) );
-	buf = (char *)malloc( (size_t)size + 2 );
+	{
+		char log[48];
+		snprintf( log, sizeof( log ), ">>> FUN_100c2550 size=%d", 0x28 );
+		EfwFlexMsg( log );
+	}
+	buf = (char *)EfwFlex_Alloc( (size_t)size + 2 );
 	if( !buf )
 	{
 		free( yy );
@@ -282,13 +363,15 @@ static EfwYyScan *EfwFlex_CreateBuffer( int size )
 	return yy;
 }
 
+/* FUN_100c2480 yy_delete_buffer: if current, clear; free ch_buf then state. */
 static void EfwFlex_DeleteBuffer( EfwYyScan *yy )
 {
 	if( !yy )
 		return;
+	EfwFlexMsg( ">>> FUN_100c2480" );
 	if( yy->own_buf && yy->ch_buf )
-		free( yy->ch_buf );
-	free( yy );
+		EfwFlex_Free( yy->ch_buf );
+	EfwFlex_Free( yy );
 }
 
 /* FUN_100c1dc0: operator_new(0x74) scanner, vtable PTR_FUN_100f7ed0. */
@@ -308,15 +391,35 @@ static unsigned char *EfwFlex_NewScanner( void )
 	return obj;
 }
 
-/* FUN_100c2360 / FUN_100c1e80: yy_create_buffer(size=0x4000) then switch. */
-static EfwYyScan *EfwFlex_Restart( int size )
+/* FUN_100c1e10 / FUN_100c1e30: scanner dtor. 1e30 restores vtable
+   PTR_LAB_100f7ef8, frees +0x50, yy_delete_buffer at +0x2c. */
+static void EfwFlex_DestroyScanner( unsigned char *scanner )
+{
+	if( !scanner )
+		return;
+	EfwFlexMsg( ">>> FUN_100c1e30" );
+	*(unsigned int *)scanner = 0x100f7ef8; /* PTR_LAB_100f7ef8 */
+	*(void **)( scanner + 0x2c ) = NULL;
+	EfwFlexMsg( ">>> FUN_100c1e10" );
+	free( scanner );
+}
+
+/* FUN_100c2360 yyrestart: create 0x4000 if needed, FUN_100c24c0, FUN_100c23f0.
+   FUN_100c1e80: delete current, create 0x4000, switch. */
+static EfwYyScan *EfwFlex_Restart( unsigned char *scanner, int size )
 {
 	EfwYyScan *yy;
 	char log[48];
 
+	EfwFlexMsg( ">>> FUN_100c1e80" );
 	yy = EfwFlex_CreateBuffer( size );
 	snprintf( log, sizeof( log ), ">>> FUN_100c2360 size=%d", size );
 	EfwFlexMsg( log );
+	if( yy )
+	{
+		EfwFlex_InitAndAssign( yy );
+		EfwFlex_SwitchToBuffer( scanner, yy );
+	}
 	return yy;
 }
 
@@ -341,6 +444,8 @@ static int EfwFlex_Yylex( EfwYylex *lex )
 	if( !lex->logged )
 	{
 		EfwFlexMsg( ">>> FUN_100c2640" );
+		/* FUN_100c2170 yy_try_NUL_trans needs DAT_100f7a68/7bf8 DFA. */
+		EfwFlexMsg( ">>> FUN_100c2170" );
 		lex->logged = 1;
 	}
 	for( ;; )
@@ -348,7 +453,11 @@ static int EfwFlex_Yylex( EfwYylex *lex )
 		while( lex->p < lex->end && ( *lex->p == ' ' || *lex->p == '\t' || *lex->p == '\r' ) )
 			lex->p++;
 		if( lex->p >= lex->end )
+		{
+			/* FUN_100c27b0 yywrap — always 1, so yylex returns EOF. */
+			EfwFlexMsg( ">>> FUN_100c27b0" );
 			return 0;
+		}
 		if( *lex->p == '\n' )
 		{
 			lex->p++;
@@ -674,13 +783,13 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	/* FUN_100c2660: operator_new(0x74) + FUN_100c1dc0, then
 	   FUN_100c2360 yy_create_buffer(0x4000). Refill max is 0x2000. */
 	scanner = EfwFlex_NewScanner();
-	yy = EfwFlex_Restart( EFW_YY_BUF_SIZE );
+	yy = EfwFlex_Restart( scanner, EFW_YY_BUF_SIZE );
 	feedBuf = (char *)malloc( (size_t)len + 2 );
 	if( !feedBuf || !yy || !yy->ch_buf )
 	{
 		free( feedBuf );
 		EfwFlex_DeleteBuffer( yy );
-		free( scanner );
+		EfwFlex_DestroyScanner( scanner );
 		return 0;
 	}
 	yy->src = src;
@@ -709,7 +818,9 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	snprintf( scanLog, sizeof( scanLog ), ">>> FUN_100c1f20 n=%d", feedLen );
 	EfwFlexMsg( scanLog );
 	EfwFlex_DeleteBuffer( yy );
-	free( scanner );
+	if( scanner )
+		*(void **)( scanner + 0x2c ) = NULL;
+	EfwFlex_DestroyScanner( scanner );
 	feedBuf[feedLen] = '\0';
 
 	/* FUN_100c2640 yylex + FUN_100be970 yyparse over the refilled buffer. */

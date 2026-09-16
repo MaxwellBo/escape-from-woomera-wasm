@@ -47,7 +47,7 @@ void EfwScript_SetFlexFn( EfwScript_FlexFn fn ); /* FUN_100c1dc0/2360/1f20..2640
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );
-void EfwScript_FlexProbe( void ); /* FUN_100c1f20/2220/22b0/2410/20a0 flex fatals */
+void EfwScript_FlexProbe( void ); /* FUN_100c1f20/2220/22b0/2410/20a0/2550..27b0 flex */
 
 #ifdef __cplusplus
 }
