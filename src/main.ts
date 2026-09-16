@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll56`;
+    return `${url}?v=efw-dll57`;
   return url;
 }
 
@@ -224,6 +224,7 @@ let startedMap = '';
 let listenReady = false;
 let pumpTimer: ReturnType<typeof setInterval> | null = null;
 let pausableTimer: ReturnType<typeof setInterval> | null = null;
+let changeWatch: ReturnType<typeof setTimeout> | null = null;
 
 function startHostPumps() {
   if (pumpTimer) {
@@ -252,11 +253,28 @@ function loadMap(name: string, reason: string) {
   startedMap = name;
   log(`> map ${name} (${reason})`);
   /* Extra `map` is a no-op while Host is in RUNFRAME. CHANGE_LEVEL (the
-     PE ClientCommand) is what actually loads chapter 2/3. */
-  if (prev)
-    runEngineCmd(`efw_changelevel ${name}`);
-  else
+     PE ClientCommand pfnChangeLevel) queues Host STATE_CHANGELEVEL. */
+  if (!prev) {
     runEngineCmd(`map ${name}`);
+    return;
+  }
+  listenReady = false;
+  lastActivateMs = 0;
+  resumedAfterClientFrame = false;
+  runEngineCmd(`efw_changelevel ${name}`);
+  resumeEngineLoop();
+  startHostPumps();
+  if (changeWatch)
+    clearTimeout(changeWatch);
+  changeWatch = setTimeout(() => {
+    if (listenReady)
+      return;
+    log(`listen: CHANGE_LEVEL stalled, killserver+map ${name}`);
+    startedMap = '';
+    runEngineCmd('killserver');
+    resumeEngineLoop();
+    setTimeout(() => loadMap(name, 'after killserver'), 500);
+  }, 8000);
 }
 
 let lastActivateMs = 0;
@@ -267,6 +285,10 @@ function onServerActivateSeen() {
   lastActivateMs = now;
   listenReady = true;
   resumedAfterClientFrame = false;
+  if (changeWatch) {
+    clearTimeout(changeWatch);
+    changeWatch = null;
+  }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
   /* host_clientloaded starts the first 3D/overview ClientFrame, which
      never returned after live ticks=1. Delay it until StartFrame is live. */

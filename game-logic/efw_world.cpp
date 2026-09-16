@@ -75,7 +75,11 @@ void EFW_ChangeLevel( const char *map )
 	if( !map || !map[0] )
 		return;
 	EFW_DebugPrint( ">>> efw_changelevel %s", map );
+	/* pfnChangeLevel → Host STATE_CHANGELEVEL. Reset the lump-spawn
+	   tracker so the next map is not rejected as a live duplicate. */
+	EFW_OnServerDeactivate();
 	CHANGE_LEVEL( (char *)map, NULL );
+	EFW_DebugPrint( ">>> CHANGE_LEVEL returned %s", map );
 }
 
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer )

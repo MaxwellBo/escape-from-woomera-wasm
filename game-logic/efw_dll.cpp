@@ -536,8 +536,13 @@ void EFW_Print( CBasePlayer *pPlayer, const char *text )
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 {
 	g_efw.items |= itemBit;
-	if( pPlayer && weaponName )
+	if( !pPlayer || !weaponName || !weaponName[0] )
+		return;
+	/* After ServerActivate, s_mapLive used to reject every DispatchSpawn, so
+	   GiveNamedItem never created the edict. FUN_100c2f70 is HasNamedPlayerItem. */
+	if( !pPlayer->HasNamedPlayerItem( weaponName ) )
 		pPlayer->GiveNamedItem( weaponName );
+	pPlayer->SelectItem( weaponName );
 }
 
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
@@ -1270,11 +1275,6 @@ int EFW_ShouldSpawn( edict_t *pent )
 		cn = "";
 	if( !strcmp( cn, "player" ) )
 		return 1;
-	if( s_mapLive )
-	{
-		s_skipThis = 1;
-		return 0;
-	}
 	if( !strcmp( cn, "worldspawn" ) )
 	{
 		if( s_worldPrecache )
@@ -1339,10 +1339,18 @@ int EFW_RejectSpawn( edict_t *pent )
 void EFW_OnServerActivate( void )
 {
 	char line[192];
-	if( s_mapLive )
+	const char *map;
+
+	map = ( gpGlobals && gpGlobals->mapname ) ? STRING( gpGlobals->mapname ) : "";
+	if( s_mapLive && s_precacheMap[0] && map[0] && !strcmp( s_precacheMap, map ) )
 	{
 		EFW_LogLine( "efw: ServerActivate already live\n" );
 		return;
+	}
+	if( s_mapLive )
+	{
+		EFW_LogLine( "efw: ServerActivate new map — reset spawn state\n" );
+		EFW_OnServerDeactivate();
 	}
 	s_mapLive = 1;
 	s_waitPawn = 0;
@@ -1359,6 +1367,7 @@ void EFW_OnServerActivate( void )
 
 void EFW_OnServerDeactivate( void )
 {
+	EFW_LogLine( "efw: ServerDeactivate\n" );
 	s_worldPrecache = 0;
 	s_worldPrecacheDone = 0;
 	s_worldPasses = 0;

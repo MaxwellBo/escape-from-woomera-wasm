@@ -574,14 +574,47 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "drop" ) )
 	{
-		/* ClientCommand 0x1001ad87: stock drop + FUN_100c8388. */
+		/* ClientCommand 0x1001ad87: CBasePlayer::DropPlayerItem (FUN_10081f40)
+		   then FUN_100c8388 (MSVC string of the classname). */
 		CBasePlayerItem *pItem = pPlayer->m_pActiveItem;
-		const char *cn;
+		int slot;
+		int bit = 0;
+		if( !pItem )
+		{
+			for( slot = 0; slot < MAX_ITEM_TYPES && !pItem; slot++ )
+			{
+				CBasePlayerItem *pWalk = pPlayer->m_rgpPlayerItems[slot];
+				while( pWalk )
+				{
+					if( !strncmp( STRING( pWalk->pev->classname ), "weapon_efw", 10 ) )
+					{
+						pItem = pWalk;
+						break;
+					}
+					pWalk = pWalk->m_pNext;
+				}
+			}
+		}
 		if( pItem )
 		{
-			cn = STRING( pItem->pev->classname );
-			EFW_StripWeapon( pPlayer, cn, 0 );
-			EFW_DebugPrint( ">>> drop %s", cn );
+			char name[64];
+			strncpy( name, STRING( pItem->pev->classname ), sizeof( name ) - 1 );
+			name[sizeof( name ) - 1] = 0;
+			if( strstr( name, "Pliers" ) || strstr( name, "Pilers" ) )
+				bit = EFW_ITEM_PLIERS;
+			else if( strstr( name, "Lever" ) )
+				bit = EFW_ITEM_LEVER;
+			else if( strstr( name, "Branch" ) )
+				bit = EFW_ITEM_BRANCH;
+			else if( strstr( name, "MobilePhone" ) )
+				bit = EFW_ITEM_PHONE;
+			else if( strstr( name, "IDTag" ) )
+				bit = EFW_ITEM_IDTAG;
+			else if( strstr( name, "WashingPowder" ) )
+				bit = EFW_ITEM_POWDER;
+			pPlayer->DropPlayerItem( name );
+			EFW_StripWeapon( pPlayer, name, bit );
+			EFW_DebugPrint( ">>> drop %s", name );
 		}
 		else
 			EFW_DebugPrint( ">>> drop (none)" );

@@ -455,6 +455,18 @@ static int EFW_HasWep( int id )
 	return g_weaponId == id;
 }
 
+/* FUN_100c43b0 table 0x100f81e0, ids 16..24 */
+static const char *EFW_WepLabel( int id )
+{
+	static const char *kNames[] = {
+		"pliers", "lever", "branch", "phone", "ID tag",
+		"red card", "green card", "blue card", "powder"
+	};
+	if( id < 16 || id > 24 )
+		return "item";
+	return kNames[id - 16];
+}
+
 static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRITE icon )
 {
 	EfwVguiBtn *b;
@@ -554,7 +566,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		{
 			if( !EFW_HasWep( id ) )
 				continue;
-			snprintf( label, sizeof( label ), "Give %d to %s", id, s->name[0] ? s->name : "them" );
+			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), s->name[0] ? s->name : "them" );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
 			EFW_VguiAdd( x, y + 30, label, cmd, g_hGive );
 		}
@@ -566,7 +578,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		{
 			if( EFW_HasWep( 20 ) )
 			{
-				snprintf( label, sizeof( label ), "Place %d on fence", 20 );
+				snprintf( label, sizeof( label ), "Place %s on fence", EFW_WepLabel( 20 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
 				EFW_VguiAdd( x, y, label, cmd, 0 );
 			}
@@ -580,7 +592,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		{
 			if( EFW_HasWep( 16 ) )
 			{
-				snprintf( label, sizeof( label ), "Hide %d in bin", 16 );
+				snprintf( label, sizeof( label ), "Hide %s in bin", EFW_WepLabel( 16 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
 				EFW_VguiAdd( x, y, label, cmd, 0 );
 			}
@@ -597,7 +609,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		{
 			if( EFW_HasWep( 17 ) )
 			{
-				snprintf( label, sizeof( label ), "Force open cage door with %d", 17 );
+				snprintf( label, sizeof( label ), "Force open cage door with %s", EFW_WepLabel( 17 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
 				EFW_VguiAdd( x, y, label, cmd, 0 );
 			}
@@ -612,7 +624,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 	if( s->type >= 100 )
 	{
 		int id = s->type - 100;
-		snprintf( label, sizeof( label ), "Pick up %d", id );
+		snprintf( label, sizeof( label ), "Pick up %s", EFW_WepLabel( id ) );
 		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
 		EFW_VguiAdd( x, y, label, cmd, g_hPliers );
 	}
