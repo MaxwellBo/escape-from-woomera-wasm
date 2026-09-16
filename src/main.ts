@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll70`;
+    return `${url}?v=efw-dll71`;
   return url;
 }
 
@@ -386,6 +386,7 @@ function loadMap(name: string, reason: string) {
 }
 
 let lastActivateMs = 0;
+let menuDismissed = false;
 function onServerActivateSeen() {
   const now = Date.now();
   if (now - lastActivateMs < 800)
@@ -411,11 +412,13 @@ function onServerActivateSeen() {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
-    /* Boot leaves libmenu painted over the world (New game / Configuration).
-       One togglemenu hides it so ServerFrame runs and the BSP can present.
-       pausable 0 so hiding the menu does not freeze StartFrame. */
-    runEngineCmd('togglemenu');
-    log('listen: togglemenu after ServerActivate (dismiss libmenu)');
+    /* Boot leaves libmenu painted over the world. One togglemenu hides
+       it; a second toggle after CHANGE_LEVEL would show it again. */
+    if (!menuDismissed) {
+      runEngineCmd('togglemenu');
+      menuDismissed = true;
+      log('listen: togglemenu after ServerActivate (dismiss libmenu)');
+    }
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
@@ -1051,6 +1054,7 @@ async function boot() {
     canvas.focus();
     startedMap = '';
     listenReady = false;
+    menuDismissed = false;
     setTimeout(() => {
       const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
       loadMap(bootMap, 'deferred after Host_Init');
