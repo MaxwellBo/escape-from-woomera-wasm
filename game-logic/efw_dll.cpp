@@ -929,7 +929,7 @@ int EFW_ShouldSpawn( edict_t *pent )
 	if( cn && !strcmp( cn, "worldspawn" ) && !s_worldPrecache )
 	{
 		s_worldPasses++;
-		if( s_mapLive )
+		if( s_worldPasses > 1 || s_mapLive )
 		{
 			char line[160];
 			s_dropPass = 1;
