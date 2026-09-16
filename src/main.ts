@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll89`;
+    return `${url}?v=efw-dll90`;
   return url;
 }
 
@@ -72,9 +72,19 @@ function applyEfwVgui(text: string): boolean {
   if (parts.length < 5) return true;
   const [nx, ny, nw, nh, ...cmdParts] = parts;
   const cmd = cmdParts.join(' ');
-  if ([...layer.querySelectorAll('button')].some((b) => b.dataset.cmd === cmd
-    && b.style.left === `${(Number(nx) * 100).toFixed(2)}%`
-    && b.style.top === `${(Number(ny) * 100).toFixed(2)}%`))
+  /* FUN_100c6d70: six Panel* slots. Replace an existing cmd instead of
+     stacking HUD Con_Printf + MEMFS ingest duplicates. */
+  const buttons = [...layer.querySelectorAll('button')];
+  const existing = buttons.find((b) => b.dataset.cmd === cmd);
+  if (existing) {
+    existing.textContent = label || cmd;
+    existing.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+    existing.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+    existing.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+    existing.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    return true;
+  }
+  if (buttons.length >= 6)
     return true;
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -172,9 +182,15 @@ function showEfwStory(code: number, fallback?: string) {
   storyNext = spec?.next || '';
   layer.hidden = false;
   if (storyboardPauses(code)) {
-    storyPaused = true;
-    runEngineCmd('pausable 0');
-    runGameCmd('efw_pause 1');
+    /* FUN_10048590: ClientCmd efw_pause 1 once per Panel show, not every
+       FailOrNarrate log reprint. */
+    if (!storyPaused) {
+      storyPaused = true;
+      runEngineCmd('pausable 0');
+      runGameCmd('efw_pause 1');
+    } else {
+      storyPaused = true;
+    }
   }
   if (document.pointerLockElement)
     document.exitPointerLock();

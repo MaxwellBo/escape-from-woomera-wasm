@@ -53,7 +53,12 @@ void EFW_SetPause( int on )
 {
 	CBasePlayer *pPlayer = EFW_Player();
 	CBaseEntity *pGuard;
-	EFW_SetHudInt( 6, on ? 1 : 0 );
+	int want = on ? 1 : 0;
+	/* FUN_10048590 ctor / FUN_100485d0 dismiss each fire once. HTML stand-in
+	   plus HUD ClientCmd would otherwise HostFwd the same pause in a storm. */
+	if( EFW_GetHudInt( 6 ) == want )
+		return;
+	EFW_SetHudInt( 6, want );
 	if( !pPlayer )
 		return;
 	pPlayer->pev->movetype = on ? MOVETYPE_NONE : MOVETYPE_WALK;

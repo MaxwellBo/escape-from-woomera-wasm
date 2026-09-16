@@ -42,6 +42,7 @@ static HSPRITE g_hPliers;
 static HSPRITE g_hGive;
 static HSPRITE g_hStory;
 static int g_storyCode;
+static int g_storyPauseSent;
 static char g_storyChange[64];
 static int g_weaponMask;
 
@@ -201,9 +202,15 @@ static void EFW_OpenStoryboard( int code )
 		g_hStory = 0;
 		return;
 	}
+	/* FUN_10048590: ClientCmd efw_pause 1 once per Panel show. Send
+	   before SPR_Load so a blocking storyboard sprite cannot starve the
+	   pause command on the WASM main thread. */
+	if( g_storyPauseSent != code )
+	{
+		g_storyPauseSent = code;
+		gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
+	}
 	g_hStory = EFW_LoadSpr( spr );
-	/* FUN_10048590: storyboard Panel ctor ClientCmd efw_pause 1. */
-	gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
 }
 
 static void EFW_DismissStoryboard( void )
@@ -218,6 +225,7 @@ static void EFW_DismissStoryboard( void )
 		gEngfuncs.pfnServerCmd( buf );
 	}
 	g_storyCode = 0;
+	g_storyPauseSent = 0;
 	g_hStory = 0;
 	g_menuCode = 0;
 	g_storyChange[0] = '\0';
