@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll45`;
+    return `${url}?v=efw-dll46`;
   return url;
 }
 
@@ -227,6 +227,10 @@ function onServerActivateSeen() {
   /* host_clientloaded starts the first 3D/overview ClientFrame, which
      never returned after live ticks=1. Delay it until StartFrame is live. */
   runEngineCmd('r_drawentities 0');
+  runEngineCmd('r_drawworld 0');
+  runEngineCmd('r_drawviewmodel 0');
+  runEngineCmd('r_drawparticles 0');
+  runEngineCmd('r_norefresh 1');
   runEngineCmd('pausable 0');
   setTimeout(() => {
     runEngineCmd('developer 1');
@@ -707,6 +711,12 @@ async function boot() {
       '0',
       '+r_drawworld',
       '0',
+      '+r_drawviewmodel',
+      '0',
+      '+r_drawparticles',
+      '0',
+      '+r_norefresh',
+      '1',
       '+r_fullbright',
       '1',
       '+cl_himodels',

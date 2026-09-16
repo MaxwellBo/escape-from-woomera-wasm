@@ -328,11 +328,13 @@ int CHudEfw::VidInit( void )
 	gEngfuncs.Con_Printf( "efw: HUD_VidInit\n" );
 	g_hDiary = 0;
 	g_loadedPage = -1;
-	g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );
-	g_hHide = EFW_LoadSpr( "sprites/efw_hide_icon.spr" );
-	g_hPliers = EFW_LoadSpr( "sprites/efw_item_pliers.spr" );
-	g_hGive = EFW_LoadSpr( "sprites/efw_give_icon.spr" );
 	g_hStory = 0;
+	/* SPR_Load on the software renderer can stall the first ClientFrame.
+	   Defer bubble/hide/give icons until Draw has returned a few times. */
+	g_hBubble = 0;
+	g_hHide = 0;
+	g_hPliers = 0;
+	g_hGive = 0;
 	return 1;
 }
 
@@ -652,6 +654,21 @@ int CHudEfw::Draw( float flTime )
 	s_drawN++;
 	if( s_drawN <= 8 || ( s_drawN % 120 ) == 1 )
 		gEngfuncs.Con_Printf( "efw: HUD_Draw n=%d\n", s_drawN );
+	/* First ClientFrame never returned after this log under software
+	   rasterize. Skip FillRGBA/SPR until a few frames have completed. */
+	if( s_drawN <= 8 )
+	{
+		gEngfuncs.Con_Printf( "efw: HUD_Draw skip n=%d\n", s_drawN );
+		return 1;
+	}
+	if( !g_hBubble )
+		g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );
+	if( !g_hHide )
+		g_hHide = EFW_LoadSpr( "sprites/efw_hide_icon.spr" );
+	if( !g_hPliers )
+		g_hPliers = EFW_LoadSpr( "sprites/efw_item_pliers.spr" );
+	if( !g_hGive )
+		g_hGive = EFW_LoadSpr( "sprites/efw_give_icon.spr" );
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 		return 1;
