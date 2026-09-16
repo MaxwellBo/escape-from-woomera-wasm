@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll77`;
+    return `${url}?v=efw-dll78`;
   return url;
 }
 
@@ -490,8 +490,8 @@ function onServerActivateSeen() {
     if (changeWatch) return;
     if (consoleForPlaque)
       releaseConsoleToGame();
-    else
-      dismissBootMenu();
+    /* First-map key_game still stops the software present even after
+       HUD n=361 (dll77). Leave libmenu + ui_renderworld on the boot map. */
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
