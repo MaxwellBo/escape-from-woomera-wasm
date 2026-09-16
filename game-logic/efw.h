@@ -19,9 +19,10 @@ void EFW_OverrideNpcModel( CBaseEntity *pEntity );
 int EFW_RefugeeCount( void );
 void EFW_Precache( void );
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
-void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker );
-void EFW_Spider( CBasePlayer *pPlayer );
-void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc );
+void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId = 0 );
+void EFW_Spider( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b450 */
+void EFW_Pickup( CBasePlayer *pPlayer, const char *arg ); /* ClientCommand 0x1001b5d7 */
+void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId = 0 );
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480 */
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );

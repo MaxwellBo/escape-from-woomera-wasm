@@ -327,6 +327,14 @@ int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
 		return 1;
 	if( !strcmp( classname, "weapon_efw_IDTag" ) && ( g_efw.items & EFW_ITEM_IDTAG ) )
 		return 1;
+	if( !strcmp( classname, "weapon_efw_Lever" ) && ( g_efw.items & EFW_ITEM_LEVER ) )
+		return 1;
+	if( !strcmp( classname, "weapon_efw_Branch" ) && ( g_efw.items & EFW_ITEM_BRANCH ) )
+		return 1;
+	if( !strcmp( classname, "weapon_efw_MobilePhone" ) && ( g_efw.items & EFW_ITEM_PHONE ) )
+		return 1;
+	if( !strcmp( classname, "weapon_efw_WashingPowder" ) && ( g_efw.items & EFW_ITEM_POWDER ) )
+		return 1;
 	return 0;
 }
 
@@ -349,6 +357,18 @@ int EFW_WeaponTypeId( const char *classname )
 			return (int)i + 0x10;
 	}
 	return -1;
+}
+
+const char *EFW_WeaponClassname( int id )
+{
+	static const char *kNames[] = {
+		"weapon_efw_Pliers", "weapon_efw_Lever", "weapon_efw_Branch",
+		"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_RedPhoneCard",
+		"weapon_efw_GreenPhoneCard", "weapon_efw_BluePhoneCard", "weapon_efw_WashingPowder"
+	};
+	if( id < 0x10 || id > 0x18 )
+		return NULL;
+	return kNames[id - 0x10];
 }
 
 int EFW_WeaponMask( CBasePlayer *pPlayer )

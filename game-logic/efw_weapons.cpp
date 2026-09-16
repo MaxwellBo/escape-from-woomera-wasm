@@ -145,10 +145,7 @@ void CEfwWeapon::Holster( int skiplocal )
 
 void CEfwWeapon::PrimaryAttack()
 {
-#ifndef CLIENT_DLL
-	if( m_pPlayer )
-		EFW_Spider( m_pPlayer );
-#endif
+	/* Overlay weapons have no PrimaryAttack fire; UseWithMarker / Give are VGUI ClientCmds. */
 	m_flNextPrimaryAttack = UTIL_WeaponTimeBase() + 0.35f;
 }
 
@@ -159,7 +156,7 @@ void CEfwWeapon::SecondaryAttack()
 	{
 		CBaseEntity *pEnt = EFW_AimEntity( m_pPlayer, 110.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
-			EFW_GiveToNpc( m_pPlayer, pEnt );
+			EFW_GiveToNpc( m_pPlayer, pEnt, m_iId );
 	}
 #endif
 	m_flNextSecondaryAttack = UTIL_WeaponTimeBase() + 0.4f;

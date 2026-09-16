@@ -245,6 +245,7 @@ public:
 	float m_flAlertTime; /* this+0x3a8 */
 	float m_flStateTime; /* this+0x3ac */
 	int m_iCaught;
+	int m_iHearLatch; /* FUN_100c5e30 this+0x2e4 == 8 consume-once */
 };
 
 LINK_ENTITY_TO_CLASS( monster_patrol_guard, CPatrolGuard )
@@ -311,16 +312,26 @@ int CPatrolGuard::CanSeePlayer( CBasePlayer *pPlayer )
 
 int CPatrolGuard::CanHearPlayer( CBasePlayer *pPlayer )
 {
+	/* FUN_100c5e30: if this+0x2e4 == 8, clear and return 1. Latch is set when
+	   the player is loud (2D vel > 80) within 256u — original memory bit 8. */
 	Vector d;
 	if( !pPlayer )
 		return 0;
 	d = pPlayer->pev->origin - pev->origin;
 	d.z = 0;
-	if( d.Length() > 256.0f )
-		return 0;
-	d = pPlayer->pev->velocity;
-	d.z = 0;
-	return d.Length() > 80.0f;
+	if( d.Length() <= 256.0f )
+	{
+		Vector vel = pPlayer->pev->velocity;
+		vel.z = 0;
+		if( vel.Length() > 80.0f )
+			m_iHearLatch = 8;
+	}
+	if( m_iHearLatch == 8 )
+	{
+		m_iHearLatch = 0;
+		return 1;
+	}
+	return 0;
 }
 
 float CPatrolGuard::Dist2D( CBaseEntity *pOther )
@@ -502,6 +513,7 @@ void CPatrolGuard::Spawn( void )
 	m_flAlertTime = 0;
 	m_flStateTime = 0;
 	m_iCaught = 0;
+	m_iHearLatch = 0;
 	SetUse( &CPatrolGuard::TalkUse );
 	SetThink( &CPatrolGuard::PatrolThink );
 	pev->nextthink = gpGlobals->time + 0.5f;

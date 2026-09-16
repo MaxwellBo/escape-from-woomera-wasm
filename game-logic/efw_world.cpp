@@ -81,26 +81,30 @@ void EFW_ChangeLevel( const char *map )
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer )
 {
 	int level;
-	int tag;
-	int pliers;
 
 	if( !pPlayer )
 		return;
+	/* ClientCommand 0x1001b969: MapLevel, then HasKeyword / HasWeapon. */
 	level = EFW_MapLevel();
-	tag = EFW_HasKeyword( "Player'sIDTagOnFence" );
-	pliers = EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
 	if( level == 0 )
 	{
-		if( tag )
-			EFW_FailOrNarrate( pPlayer, 0x3f );
-		else
+		if( !EFW_HasKeyword( "PliersInBin" ) )
 			EFW_FailOrNarrate( pPlayer, 0x40 );
+		else if( !EFW_HasKeyword( "GholanAgreedToPloy" ) )
+			EFW_FailOrNarrate( pPlayer, 0x41 );
+		else if( !EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+			EFW_FailOrNarrate( pPlayer, 0x42 );
+		else
+			EFW_FailOrNarrate( pPlayer, 0x3f );
 		return;
 	}
-	if( pliers )
-		EFW_FailOrNarrate( pPlayer, 0x43 );
-	else
-		EFW_FailOrNarrate( pPlayer, 0x42 );
+	if( level == 1 )
+	{
+		if( !EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
+			EFW_FailOrNarrate( pPlayer, 0x44 );
+		else
+			EFW_FailOrNarrate( pPlayer, 0x43 );
+	}
 }
 
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value )

@@ -147,29 +147,55 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 	return pBest;
 }
 
-void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
+void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 {
 	EfwDllState *st = EFW_Dll();
 	const char *tn;
 	if( !pPlayer || !pNpc )
 		return;
 	tn = STRING( pNpc->pev->targetname );
+	if( weaponId <= 0 && pPlayer->m_pActiveItem )
+		weaponId = pPlayer->m_pActiveItem->m_iId;
+
+	/* FUN_100c5240: give MobilePhone to Gholan after GotHintAboutHiding. */
+	if( weaponId == WEAPON_EFW_MOBILEPHONE && EFW_FStrEq( tn, "Gholan" ) )
+	{
+		if( EFW_HasKeyword( "GotHintAboutHiding" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_MobilePhone", EFW_ITEM_PHONE );
+			EFW_Squark( "Gholan",
+				"Well done, my friend. When you next go to the main compound, rest assured I'll remove the tag. You'll be free to hide then.",
+				0 );
+			EFW_AddKeyword( "GholanAgreedToPloy", 1 );
+			EFW_AddKeyword( "IDTAG", 0 );
+			EFW_AddKeyword( "HIDING", 0 );
+			EFW_AdjustHope( 10.0f );
+			EFW_AddDiary( 13, 1 );
+			return;
+		}
+	}
+
+	/* FUN_100c5330: give WashingPowder to Mouhtaz → lever. */
+	if( weaponId == WEAPON_EFW_WASHINGPOWDER && EFW_FStrEq( tn, "Mouhtaz" ) )
+	{
+		EFW_StripWeapon( pPlayer, "weapon_efw_WashingPowder", EFW_ITEM_POWDER );
+		EFW_Squark( "Mouhtaz",
+			"Mustafa, this is far too kind of you! The only thing I can offer you in exchange is this length of metal pipe I have found and have been hiding. Perhaps you can find a use for it?",
+			2 );
+		EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+		EFW_AddDiary( 17, 1 );
+		EFW_AdjustHope( 15.0f );
+		return;
+	}
+
+	if( weaponId && weaponId != WEAPON_EFW_PLIERS )
+		return;
+
 	if( EFW_FStrEq( tn, "Amir" ) )
 	{
-		CBasePlayerItem *pItem;
-		int slot;
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
 		st->items &= ~EFW_ITEM_PLIERS;
-		for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
-		{
-			for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; )
-			{
-				CBasePlayerItem *pNext = pItem->m_pNext;
-				if( !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pliers" )
-					|| !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pilers" ) )
-					pPlayer->RemovePlayerItem( pItem, true );
-				pItem = pNext;
-			}
-		}
 		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
 		EFW_FlagDiary( 2 ); /* FUN_100c6910(2) */
 		EFW_FailOrNarrate( pPlayer, 0x4c );
@@ -199,12 +225,14 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 }
 
-void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
+void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 {
 	const char *name;
-	EfwDllState *st = EFW_Dll();
+	static int electricianFails;
 	if( !pPlayer || !pMarker )
 		return;
+	if( weaponId <= 0 && pPlayer->m_pActiveItem )
+		weaponId = pPlayer->m_pActiveItem->m_iId;
 	EFW_CloseTalk();
 	name = STRING( pMarker->pev->targetname );
 
@@ -213,7 +241,9 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 		int had;
 		if( EFW_ElectricianSees( pPlayer ) )
 		{
-			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+			electricianFails++;
+			EFW_DebugPrint( "Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.", electricianFails );
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
 			return;
 		}
 		had = EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
@@ -231,16 +261,26 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
 	{
-		if( st->items & EFW_ITEM_PLIERS )
+		/* FUN_100c4f90: pliers UseWithMarker on efw_kitchen_bin. */
+		if( weaponId != WEAPON_EFW_PLIERS && !EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
+			return;
+		if( EFW_ElectricianSees( pPlayer ) )
 		{
-			st->items &= ~EFW_ITEM_PLIERS;
-			EFW_FailOrNarrate( pPlayer, 0x3e );
+			electricianFails++;
+			EFW_DebugPrint( "Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.", electricianFails );
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
+			EFW_AdjustHope( -2.0f ); /* FUN_100c4d10(2.0) */
+			return;
 		}
-		else
-		{
-			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_FailOrNarrate( pPlayer, 0x44 );
-		}
+		EFW_FailOrNarrate( pPlayer, 0x3e );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
+		EFW_AddKeyword( "PliersInBin", 1 );
+		EFW_AddKeyword( "PLIERS_GOT_PLIERS", 0 );
+		EFW_AdjustHope( 10.0f );
+		EFW_PALockRAR();
+		EFW_AddKeyword( "OFFICE", 1 );
+		EFW_AddDiary( 6, 0 );
 		return;
 	}
 	if( !strcmp( name, "efw_hiding_place" ) )
@@ -268,20 +308,61 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 	}
 	if( !strcmp( name, "efw_cage_door" ) )
 	{
-		if( EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+		/* FUN_100c50d0 lever / FUN_100c5180 branch. */
+		if( weaponId == WEAPON_EFW_BRANCH )
+		{
+			EFW_Print( pPlayer, "Oh, you've broken the branch attempting to open the cage door! The door stays locked! Try something else." );
+			EFW_StripWeapon( pPlayer, "weapon_efw_Branch", EFW_ITEM_BRANCH );
+			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+			return;
+		}
+		if( weaponId == WEAPON_EFW_LEVER || EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+		{
+			EFW_Print( pPlayer, "Good work; you've openned the cage door, by using the metal lever." );
 			EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
+			EFW_StripWeapon( pPlayer, "weapon_efw_Lever", EFW_ITEM_LEVER );
+		}
 		return;
 	}
 }
 
 void EFW_Spider( CBasePlayer *pPlayer )
 {
-	CBaseEntity *pMark;
+	/* ClientCommand 0x1001b450: FUN_100c7820 (scanCount>0) else "Ignoring spider". */
 	if( !pPlayer )
 		return;
-	pMark = EFW_NearestMarker( pPlayer, 140.0f );
-	if( pMark )
-		EFW_UseMarker( pPlayer, pMark );
+	if( EFW_Dll()->scanCount <= 0 )
+	{
+		EFW_DebugPrint( "Ignoring spider" );
+		return;
+	}
+	EFW_SendCntxt();
+	EFW_FailOrNarrate( pPlayer, 0x48 );
+}
+
+void EFW_Pickup( CBasePlayer *pPlayer, const char *arg )
+{
+	CBaseEntity *pEnt = NULL;
+	const char *cn = NULL;
+
+	/* ClientCommand 0x1001b5d7: FindEntityByClassname(0, argv[1]), skip if owner set, Touch player.
+	   Client HUD formats `efw_Pickup %u` with weapon id 16..24 (FUN_10044f70). */
+	if( !pPlayer || !arg || !arg[0] )
+		return;
+	if( !strncmp( arg, "weapon_", 7 ) )
+		cn = arg;
+	else
+		cn = EFW_WeaponClassname( atoi( arg ) );
+	if( !cn )
+		return;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, cn ) ) != NULL )
+	{
+		if( !pEnt->pev->owner )
+			break;
+	}
+	if( !pEnt || pEnt->pev->owner )
+		return;
+	pEnt->Touch( pPlayer );
 }
 
 static void EFW_ToggleDiary( void )
@@ -369,6 +450,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 	{
 		CBaseEntity *pEnt = NULL;
 		const char *who = EFW_CmdName( arg0 );
+		int wep = 0;
+		if( CMD_ARGC() > arg0 + 1 )
+		{
+			const char *a = CMD_ARGV( arg0 + 1 );
+			if( a && a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
+		}
 		if( who && who[0] )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
@@ -376,31 +464,46 @@ int EFW_ClientCommand( edict_t *pEntity )
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
-			EFW_GiveToNpc( pPlayer, pEnt );
+			EFW_GiveToNpc( pPlayer, pEnt, wep );
 		return 1;
 	}
-	if( FStrEq( pcmd, "efw_spider" ) || FStrEq( pcmd, "efw_Pickup" ) )
+	if( FStrEq( pcmd, "efw_spider" ) )
 	{
 		EFW_Spider( pPlayer );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_Pickup" ) )
+	{
+		const char *arg = NULL;
+		if( CMD_ARGC() > arg0 + 1 )
+			arg = CMD_ARGV( arg0 + 1 );
+		EFW_Pickup( pPlayer, arg );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_UseWithMarker" ) )
 	{
 		CBaseEntity *pEnt = NULL;
 		const char *who = EFW_CmdName( arg0 );
+		int wep = 0;
+		if( CMD_ARGC() > arg0 + 1 )
+		{
+			const char *a = CMD_ARGV( arg0 + 1 );
+			if( a && a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
+		}
 		if( who && who[0] )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 128.0f );
 		if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
 		{
-			EFW_UseMarker( pPlayer, pEnt );
+			EFW_UseMarker( pPlayer, pEnt, wep );
 			return 1;
 		}
 		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
 			pEnt = EFW_NearestMarker( pPlayer, 140.0f );
 		if( pEnt )
-			EFW_UseMarker( pPlayer, pEnt );
+			EFW_UseMarker( pPlayer, pEnt, wep );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_setpos" ) || FStrEq( pcmd, "setpos" ) )
@@ -447,7 +550,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_HelpScreen" ) )
 	{
-		EFW_FailOrNarrate( pPlayer, 0x47 );
+		EFW_FailOrNarrate( pPlayer, 0x52 ); /* ClientCommand 0x1001baab push 0x52 */
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_HideUnderBuilding" ) )
@@ -458,7 +561,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_PickupPliers" ) )
 	{
 		if( EFW_ElectricianSees( pPlayer ) )
-			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
 		else
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
 		return 1;

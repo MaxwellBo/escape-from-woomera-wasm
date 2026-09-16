@@ -176,6 +176,12 @@ static void EFW_OpenStoryboard( int code )
 		spr = "Storyboard/EFW_Storyboards_Dec_Replace.spr";
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level3", sizeof( g_storyChange ) - 1 );
 		break;
+	case 0x48:
+		/* FUN_10048650: 0xd4 VGUI panel (debounced 0.4s), not a storyboard sprite.
+		   Server already sent EFW_Cntxt; HUD/HTML CommandButtons are the stand-in. */
+		g_storyCode = 0;
+		g_hStory = 0;
+		return;
 	default:
 		g_hStory = 0;
 		return;
