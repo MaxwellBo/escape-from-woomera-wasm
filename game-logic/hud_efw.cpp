@@ -31,6 +31,9 @@ static float g_clientHudFloat[2]; /* DAT_100bc498; FUN_10047650 / FUN_10047660 *
 static int g_clientHudInt[7]; /* DAT_100bc4a0; FUN_10047670 */
 static float g_hudDrawTime; /* DAT_100a95ac; FUN_1001db00 flTime */
 static float g_contextOpenedAt; /* DAT_100bc354; FUN_10046370 */
+static int g_hudMsgCount; /* DAT_100baed8; FUN_10041a20 */
+static int g_hudMsgBase; /* DAT_100baedc; FUN_10041a30 */
+static char g_showMenuSlot[7][24]; /* DAT_100bc884; FUN_10047720 efw_ShowMenu %i */
 static unsigned char g_panel48[0xd4]; /* FUN_10048650 operator_new(0xd4) Panel */
 static int g_panel48On;
 static int g_diaryPage;
@@ -280,18 +283,73 @@ static void EFW_Palette3( float *out, const float *stops, float t )
 	EFW_Lerp4( out, t, a, b );
 }
 
-/* FUN_10041a30: DAT_100baed8 - DAT_100baedc conversation depth. */
+/* FUN_10041a20: DAT_100baed8++ each HUD_Redraw. */
+static void EFW_BumpHudMsgCount( void )
+{
+	static int s_logged;
+
+	g_hudMsgCount++;
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_10041a20 n=%d\n", g_hudMsgCount );
+	}
+}
+
+/* FUN_10041a30: DAT_100baed8 - DAT_100baedc. */
 static int EFW_MenuDepth( void )
 {
-	int i;
-	int n = 0;
+	int n;
+	static int s_logged = -1;
 
-	for( i = 0; i <= 6; i++ )
+	n = g_hudMsgCount - g_hudMsgBase;
+	if( n != s_logged )
 	{
-		if( g_menuLine[i][0] )
-			n++;
+		s_logged = n;
+		if( n <= 2 || ( n % 10 ) == 0 )
+			gEngfuncs.Con_Printf( ">>> FUN_10041a30 n=%d\n", n );
 	}
 	return n;
+}
+
+/* FUN_10046990: return DAT_100bc338. */
+static int EFW_ContextOn( void )
+{
+	static int s_logged = -1;
+
+	if( s_logged != g_contextMode )
+	{
+		s_logged = g_contextMode;
+		gEngfuncs.Con_Printf( ">>> FUN_10046990 v=%d\n", g_contextMode );
+	}
+	return g_contextMode;
+}
+
+/* FUN_10047720: HOOK_MESSAGE(EFW_Menu) then sprintf 7× "efw_ShowMenu %i". */
+static void EFW_HookMenuSlots( void )
+{
+	int i;
+
+	for( i = 0; i < 7; i++ )
+		snprintf( g_showMenuSlot[i], sizeof( g_showMenuSlot[i] ), "efw_ShowMenu %i", i );
+	gEngfuncs.Con_Printf(
+		">>> FUN_10047720 n=7 %s %s\n", g_showMenuSlot[0], g_showMenuSlot[6] );
+}
+
+/* FUN_100419e0: HOOK_MESSAGE(EFWShow/EFWData), zero DAT_100baed8/edc, FUN_10042140. */
+static void EFW_HookUserMsgs( void )
+{
+	g_hudMsgCount = 0;
+	g_hudMsgBase = 0;
+	gEngfuncs.Con_Printf( ">>> FUN_100419e0 EFWShow EFWData\n" );
+}
+
+/* FUN_100436a0: DAT_1007ab5c = DAT_1007ab60 = -1, then FUN_10044e30. */
+static void EFW_HudCtor( void )
+{
+	g_storyCode = 0;
+	g_hStory = 0;
+	gEngfuncs.Con_Printf( ">>> FUN_100436a0 +0x7ab5c=-1 +0x7ab60=-1\n" );
 }
 
 /* FUN_10046550: 2*(now - DAT_100bc354), clamp 0.0078125..0.75. */
@@ -358,11 +416,20 @@ static void EFW_HudColor( float param )
 		EFW_Lerp4( tmp, dawnT, kPaletteDawn, outc );
 		memcpy( outc, tmp, sizeof( outc ) );
 	}
+	/* FUN_1001e790: __ftol RGB from palette floats (already 0..255). */
 	r = EFW_ClampByte( outc[0] );
 	g = EFW_ClampByte( outc[1] );
 	b = EFW_ClampByte( outc[2] );
 	a = EFW_ClampByte( outc[3] );
-	if( g_contextMode )
+	{
+		static int s_ftol;
+		if( !s_ftol )
+		{
+			s_ftol = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_1001e790 rgb=%d,%d,%d\n", r, g, b );
+		}
+	}
+	if( EFW_ContextOn() )
 		a = EFW_ClampByte( EFW_ContextPulse() * 255.0f );
 	memset( &sf, 0, sizeof( sf ) );
 	if( gEngfuncs.pfnGetScreenFade )
@@ -719,6 +786,7 @@ static void EFW_LeaveContext( void )
 	g_contextDismissAt = EFW_ClientTime();
 	g_storyPauseSent = 0;
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_10048740 pause=0 t=%.2f\n", g_contextDismissAt );
 	gEngfuncs.Con_Printf( ">>> FUN_100463c0\n" );
 }
 
@@ -919,6 +987,9 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnHookUserMsg( "EFW_Menu", __MsgFunc_EFW_Menu );
 	gEngfuncs.pfnHookUserMsg( "EFW_CtPrv", __MsgFunc_EFW_CtPrv );
 	gEngfuncs.pfnHookUserMsg( "EFW_Cntxt", __MsgFunc_EFW_Cntxt );
+	EFW_HookUserMsgs();
+	EFW_HookMenuSlots();
+	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
 	gEngfuncs.Con_Printf( "efw: HUD_Init\n" );
@@ -2018,6 +2089,7 @@ int CHudEfw::Draw( float flTime )
 	   rasterize. Skip FillRGBA/SPR until a few frames have completed. */
 	if( s_drawN <= 8 )
 	{
+		EFW_BumpHudMsgCount();
 		gEngfuncs.Con_Printf( "efw: HUD_Draw skip n=%d\n", s_drawN );
 		return 1;
 	}
@@ -2030,28 +2102,46 @@ int CHudEfw::Draw( float flTime )
 	if( !g_hGive )
 		g_hGive = EFW_LoadSpr( "sprites/efw_give_icon.spr" );
 
-	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
-		return 1;
-
 	g_hudDrawTime = flTime;
 	g_mapLevel = EFW_MapLevelFromName();
 	EFW_SetClientHudInt( 3, g_mapLevel );
 	(void)EFW_ClientTime();
+	EFW_BumpHudMsgCount();
 	/* FUN_1001db00: FUN_1001e4c0(1.0) then menu darken from FUN_10041a30. */
 	EFW_HudColor( 1.0f );
-	if( g_menuOn && !g_contextMode )
+	if( ( g_menuOn || g_hudMsgCount > 0 ) && !EFW_ContextOn() )
 	{
-		float depth = (float)EFW_MenuDepth() * 0.1f;
-		if( depth < 0.0f )
-			depth = 0.0f;
-		if( depth > 1.0f )
-			depth = 1.0f;
-		EFW_HudColor( 1.0f - depth * 0.35000002f );
+		float depth;
+		int n = EFW_MenuDepth();
+		/* PE: (float)FUN_10041a30()*0.1 clamp 0..1, then 1-f*0.35 when DAT_100baee0>=1. */
+		if( g_menuOn )
+		{
+			depth = (float)n * 0.1f;
+			if( depth < 0.0f )
+				depth = 0.0f;
+			if( depth > 1.0f )
+				depth = 1.0f;
+			EFW_HudColor( 1.0f - depth * 0.35000002f );
+		}
+	}
+
+	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
+	{
+		/* Still draw hope number so FUN_1001e880 quotes after EFWData. */
+		float hopeF = EFW_GetClientHudFloat( 1 );
+		if( hopeF < 0.0f && g_hope >= 0.0f )
+			hopeF = g_hope;
+		if( hopeF >= 0.0f )
+			EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40,
+				(int)( hopeF + 0.5f ), 200, 0, 0 );
+		return 1;
 	}
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	{
 		float hopeF = EFW_GetClientHudFloat( 1 );
+		if( hopeF < 0.0f && g_hope >= 0.0f )
+			hopeF = g_hope;
 		hope = (int)( hopeF + 0.5f );
 		if( hopeF >= 0.0f )
 		{

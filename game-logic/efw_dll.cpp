@@ -159,30 +159,58 @@ int EFW_MapLevel( void )
 
 void EFW_SetHudFloat( int slot, float value )
 {
+	static int s_logged = -1;
 	if( slot < 0 || slot > 1 )
 		return;
 	g_efw.hudFloat[slot] = value;
+	if( s_logged != slot )
+	{
+		s_logged = slot;
+		EFW_DebugPrint( ">>> FUN_100c8180 idx=%d v=%.1f", slot, value );
+	}
 }
 
 float EFW_GetHudFloat( int slot )
 {
+	float v = 0;
+	static int s_logged = -1;
 	if( slot < 0 || slot > 1 )
 		return 0;
-	return g_efw.hudFloat[slot];
+	v = g_efw.hudFloat[slot];
+	if( s_logged != slot )
+	{
+		s_logged = slot;
+		EFW_DebugPrint( ">>> FUN_100c8190 idx=%d v=%.1f", slot, v );
+	}
+	return v;
 }
 
 void EFW_SetHudInt( int slot, int value )
 {
+	static int s_logged = -1;
 	if( slot < 0 || slot > 6 )
 		return;
 	g_efw.hudInt[slot] = value;
+	if( s_logged < 0 )
+	{
+		s_logged = slot;
+		EFW_DebugPrint( ">>> FUN_100c81a0 idx=%d v=%d", slot, value );
+	}
 }
 
 int EFW_GetHudInt( int slot )
 {
+	int v = 0;
+	static int s_logged = -1;
 	if( slot < 0 || slot > 6 )
 		return 0;
-	return g_efw.hudInt[slot];
+	v = g_efw.hudInt[slot];
+	if( s_logged < 0 )
+	{
+		s_logged = slot;
+		EFW_DebugPrint( ">>> FUN_100c81b0 idx=%d v=%d", slot, v );
+	}
+	return v;
 }
 
 static void EFW_PackBlob( void )

@@ -338,6 +338,7 @@ void EFW_InitPA( void )
 	g_pa.rarLock = 0;
 	g_pa.inited = 1;
 	PRECACHE_SOUND( "Dingaling.wav" );
+	EFW_DebugPrint( ">>> FUN_100c7670 Ann_RAR_124 Ann_HAM_103 Ann_TRE_046 Ann_PHA_216 callToPrayer" );
 }
 
 void EFW_ThinkPA( void )
@@ -369,6 +370,8 @@ void EFW_ThinkPA( void )
 		else
 			sample = g_pa.slot[g_pa.index + 1].sample;
 		EFW_PlayCue( sample );
+		EFW_DebugPrint( ">>> FUN_100c75e0 %s", sample ? sample : "?" );
+		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d", g_pa.rarLock, g_pa.index );
 		EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
 			sample ? sample : "?", g_pa.rarLock, g_pa.index );
 		g_pa.timer = 0.0f;
