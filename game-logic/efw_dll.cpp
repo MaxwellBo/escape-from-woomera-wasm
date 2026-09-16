@@ -549,27 +549,92 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 	}
 }
 
-static void EFW_SpawnFenceTag( void )
+CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 {
-	CBaseEntity *pMark;
+	Vector pos;
+	CBasePlayerItem *pItem;
+
+	/* FUN_100c2a20 after FStrEq(targetname, "efw_IDTag_Position"). */
+	if( !pTag || !pMark )
+		return NULL;
+	pos = ( pMark->pev->absmin + pMark->pev->absmax ) * 0.5f;
+	if( ( pMark->pev->absmax - pMark->pev->absmin ).Length() < 1.0f )
+		pos = pMark->pev->origin;
+	pTag->pev->origin = pos;
+	pTag->pev->angles = g_vecZero;
+	pTag->pev->velocity = g_vecZero;
+	pTag->pev->movetype = MOVETYPE_NONE;
+	pTag->pev->effects &= ~EF_NODRAW;
+	SET_MODEL( ENT( pTag->pev ), "models/w_idtag.mdl" );
+	UTIL_SetOrigin( pTag->pev, pos );
+	pItem = (CBasePlayerItem *)pTag;
+	pItem->SetThink( NULL );
+	pTag->pev->nextthink = 0;
+	pItem->Materialize();
+	pTag->pev->solid = SOLID_NOT;
+	pTag->pev->effects |= EF_NODRAW;
+	pTag->pev->dmgtime = gpGlobals->time + 0.5f; /* GetTickCount + 0x1f4 at this+0x12c */
+	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+	EFW_Print( EFW_Player(), "ID Tag has been placed on the wall" );
+	EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
+	return pTag;
+}
+
+CBaseEntity *EFW_MaterializeIdTag( CBaseEntity *pMark )
+{
 	edict_t *pent;
+	CBaseEntity *pTag;
 	Vector pos;
 
-	/* FUN_100c27f0: on maplevel 2, materialize weapon_efw_IDTag at efw_IDTag_Position. */
-	if( EFW_MapLevel() != 2 )
-		return;
-	pMark = UTIL_FindEntityByTargetname( NULL, "efw_IDTag_Position" );
+	/* FUN_100c27f0: CREATE weapon_efw_IDTag, then vtable+0x1a8(marker) = FUN_100c2a20. */
 	if( !pMark )
-		return;
+		return NULL;
 	pos = ( pMark->pev->absmin + pMark->pev->absmax ) * 0.5f;
 	if( ( pMark->pev->absmax - pMark->pev->absmin ).Length() < 1.0f )
 		pos = pMark->pev->origin;
 	pent = CREATE_NAMED_ENTITY( MAKE_STRING( "weapon_efw_IDTag" ) );
 	if( FNullEnt( pent ) )
-		return;
+		return NULL;
 	pent->v.origin = pos;
 	DispatchSpawn( pent );
-	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+	pTag = CBaseEntity::Instance( pent );
+	if( !pTag )
+		return NULL;
+	return EFW_PlaceIdTag( pTag, pMark );
+}
+
+CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMark )
+{
+	int slot;
+	CBasePlayerItem *pItem;
+
+	if( !pPlayer || !pMark )
+		return NULL;
+	for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
+	{
+		for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; pItem = pItem->m_pNext )
+		{
+			if( strcmp( STRING( pItem->pev->classname ), "weapon_efw_IDTag" ) )
+				continue;
+			pPlayer->RemovePlayerItem( pItem, true );
+			pItem->m_pPlayer = NULL;
+			g_efw.items &= ~EFW_ITEM_IDTAG;
+			return EFW_PlaceIdTag( pItem, pMark );
+		}
+	}
+	return NULL;
+}
+
+static void EFW_SpawnFenceTag( void )
+{
+	CBaseEntity *pMark;
+
+	/* FUN_100c27f0: on maplevel 2, materialize weapon_efw_IDTag at efw_IDTag_Position. */
+	if( EFW_MapLevel() != 2 )
+		return;
+	pMark = UTIL_FindEntityByTargetname( NULL, "efw_IDTag_Position" );
+	if( pMark )
+		EFW_MaterializeIdTag( pMark );
 }
 
 static void EFW_TrimInPlace( char *s )

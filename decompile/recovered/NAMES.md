@@ -36,6 +36,12 @@
 | 0x100c54e0 | `CPatrolGuard::Think` | sight/hear FSM; halt; isolation 0x46 |
 | 0x100c5ea0 | `monster_refugee` | CRefugee, alloc 0x3a8, vtable 0x100f93a4 |
 | 0x100c5f10 | `monster_efw_guard` | same CRefugee vtable |
+| 0x100c6000 | `CRefugee::Precache` | PRECACHE 13 models at PTR 0x1011cf40, then Dingaling.wav |
+| 0x100c6040 | `CRefugee::Spawn` | named model table (Shala/Amir/…/Gholan); unknown → T6/T7; health 80; CLASS 3 |
+| 0x100c6310 | `CRefugee::Classify` | return 3 (`CLASS_HUMAN_PASSIVE`) |
+| 0x100c27f0 | `efw_SpawnFenceTag` | maplevel==2: CREATE weapon_efw_IDTag, call UseWithMarker on marker |
+| 0x100c29f0 | `weapon_efw_IDTag::AddToPlayer` | GetTickCount > this+0x12c then FUN_100c46a0 + clear Player'sIDTagOnFence |
+| 0x100c2a20 | `weapon_efw_IDTag::UseWithMarker` | place at abs center, Materialize, SOLID_NOT+NODRAW, keyword=1, Squark |
 | 0x100c6440 | `CRefugee::IdleThink` | queue / mad_scientist_entity / walk-to-player |
 | 0x100c6880 | `efw_DiaryCount` | return DAT_10134870 |
 | 0x100c6890 | `efw_AddDiary` | append diary page; logs 'Diary active item added' |

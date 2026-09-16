@@ -102,6 +102,12 @@ int CEfwWeapon::GetItemInfo( ItemInfo *p )
 
 int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 {
+#ifndef CLIENT_DLL
+	const EfwWeaponDef *defEarly = EFW_FindDef( STRING( pev->classname ) );
+	/* FUN_100c29f0: GetTickCount must pass this+0x12c before FUN_100c46a0. */
+	if( defEarly->itemBit == EFW_ITEM_IDTAG && pev->dmgtime && gpGlobals->time < pev->dmgtime )
+		return FALSE;
+#endif
 	if( CBasePlayerWeapon::AddToPlayer( pPlayer ) )
 	{
 #ifndef CLIENT_DLL
@@ -114,6 +120,8 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 			pretty += 11;
 		snprintf( picked, sizeof( picked ), "You just picked up the %s.", pretty );
 		EFW_Print( pPlayer, picked );
+		if( def->itemBit == EFW_ITEM_IDTAG )
+			EFW_AddKeyword( "Player'sIDTagOnFence", 0 );
 		if( def->itemBit == EFW_ITEM_PLIERS )
 		{
 			EFW_AddKeyword( "PLIERS", 0 );

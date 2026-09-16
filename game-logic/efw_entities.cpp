@@ -46,11 +46,6 @@ static int EFW_NameIs( const char *tn, const char *a )
 	return !stricmp( tn, a );
 }
 
-static int EFW_IsFemale( const char *tn )
-{
-	return EFW_NameIs( tn, "Elika" ) || EFW_NameIs( tn, "Laleh" ) || EFW_NameIs( tn, "Shala" );
-}
-
 void EFW_OverrideNpcModel( CBaseEntity *pEntity )
 {
 	const char *tn;
@@ -91,7 +86,7 @@ LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
 
 int CRefugee::Classify( void )
 {
-	return CLASS_PLAYER_ALLY;
+	return CLASS_HUMAN_PASSIVE; /* FUN_100c6310 returns 3 */
 }
 
 void CRefugee::SetYawSpeed( void )
@@ -166,56 +161,76 @@ void CRefugee::IdleThink( void )
 
 void CRefugee::Precache( void )
 {
-	PRECACHE_MODEL( "models/DetaineeMaleT0.mdl" );
-	PRECACHE_MODEL( "models/DetaineeMaleT1.mdl" );
-	PRECACHE_MODEL( "models/DetaineeMaleT2.mdl" );
-	PRECACHE_MODEL( "models/DetaineeMaleT3.mdl" );
-	PRECACHE_MODEL( "models/DetaineeFemaleT0.mdl" );
-	PRECACHE_MODEL( "models/DetaineeFemaleT1.mdl" );
-	PRECACHE_MODEL( "models/DetaineeFemaleT2.mdl" );
+	/* FUN_100c6000 walks PTR 0x1011cf40[DAT_1011cf74=13]. Zip names are
+	   case-sensitive; DLL strings are models/detaineeMaleT0.mdl etc. */
+	static const char *kModels[] = {
+		"models/DetaineeMaleT0.mdl",
+		"models/DetaineeMaleT1.mdl",
+		"models/DetaineeMaleT2.mdl",
+		"models/DetaineeMaleT3.mdl",
+		"models/DetaineeMaleT4.mdl",
+		"models/DetaineeMaleT5.mdl",
+		"models/DetaineeMaleT6.mdl",
+		"models/DetaineeMaleT7.mdl",
+		"models/DetaineeFemaleT0.mdl",
+		"models/DetaineeFemaleT1.mdl",
+		"models/DetaineeFemaleT2.mdl",
+		"models/Security.mdl",
+		"models/tradesman.mdl"
+	};
+	unsigned i;
+	for( i = 0; i < sizeof( kModels ) / sizeof( kModels[0] ); i++ )
+		PRECACHE_MODEL( (char *)kModels[i] );
+	PRECACHE_SOUND( "Dingaling.wav" ); /* FUN_100c5fb0 from Precache */
 }
 
 void CRefugee::Spawn( void )
 {
 	const char *tn;
 	const char *model;
-	int variant;
+	static int s_unknownModel; /* DAT_10132ccc */
 
+	/* FUN_100c6040 CRefugee::Spawn (Ghidra left the 0x420-byte gap). */
 	Precache();
-	PRECACHE_MODEL( "models/player.mdl" );
-	PRECACHE_MODEL( "models/barney.mdl" );
 	tn = STRING( pev->targetname );
-	variant = ENTINDEX( edict() );
-	if( EFW_IsFemale( tn ) )
-	{
-		static const char *fem[] = {
-			"models/DetaineeFemaleT0.mdl",
-			"models/DetaineeFemaleT1.mdl",
-			"models/DetaineeFemaleT2.mdl"
-		};
-		model = fem[variant % 3];
-	}
+	pev->movetype = MOVETYPE_STEP;
+	pev->solid = SOLID_BBOX;
+	pev->takedamage = DAMAGE_YES;
+	pev->flags |= FL_MONSTER;
+	pev->health = 80.0f;
+	pev->gravity = 1.0f;
+
+	if( EFW_FStrEq( tn, "Shala" ) )
+		model = "models/DetaineeFemaleT0.mdl";
+	else if( EFW_FStrEq( tn, "Amir" ) )
+		model = "models/DetaineeMaleT0.mdl";
+	else if( EFW_FStrEq( tn, "Hassan" ) )
+		model = "models/DetaineeMaleT1.mdl";
+	else if( EFW_FStrEq( tn, "Laleh" ) )
+		model = "models/DetaineeFemaleT1.mdl";
+	else if( EFW_FStrEq( tn, "Elika" ) )
+		model = "models/DetaineeFemaleT2.mdl";
+	else if( EFW_FStrEq( tn, "Mouhtaz" ) )
+		model = "models/DetaineeMaleT2.mdl";
+	else if( EFW_FStrEq( tn, "Fashid" ) )
+		model = "models/DetaineeMaleT3.mdl";
+	else if( EFW_FStrEq( tn, "Nasir" ) )
+		model = "models/DetaineeMaleT4.mdl";
+	else if( EFW_FStrEq( tn, "Gholan" ) )
+		model = "models/DetaineeMaleT5.mdl";
 	else
 	{
-		static const char *male[] = {
-			"models/DetaineeMaleT0.mdl",
-			"models/DetaineeMaleT1.mdl",
-			"models/DetaineeMaleT2.mdl",
-			"models/DetaineeMaleT3.mdl"
-		};
-		model = male[variant % 4];
+		EFW_DebugPrint( "Model not known for name: %s", tn ? tn : "" );
+		s_unknownModel++;
+		model = ( s_unknownModel & 1 )
+			? "models/DetaineeMaleT6.mdl"
+			: "models/DetaineeMaleT7.mdl";
 	}
 
 	EFW_SetVisibleModel( this, model );
-	UTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
-	pev->solid = SOLID_SLIDEBOX;
-	pev->movetype = MOVETYPE_STEP;
-	m_bloodColor = BLOOD_COLOR_RED;
-	pev->health = 100;
-	pev->takedamage = DAMAGE_NO;
-	pev->view_ofs = Vector( 0, 0, 50 );
-	m_flFieldOfView = 0.5;
-	m_MonsterState = MONSTERSTATE_NONE;
+	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+	SetActivity( ACT_IDLE );
+	MonsterInit();
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
@@ -223,6 +238,8 @@ void CRefugee::Spawn( void )
 	SetUse( &CRefugee::TalkUse );
 	SetThink( &CRefugee::IdleThink );
 	pev->nextthink = gpGlobals->time + 0.1f;
+	pev->framerate = 1.0f;
+	pev->movetype = MOVETYPE_STEP;
 }
 
 class CPatrolGuard : public CBaseMonster

@@ -296,20 +296,9 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
-		/* FUN_100c2a20 place / FUN_100c29f0 collect. */
-		if( EFW_HasWeapon( pPlayer, "weapon_efw_IDTag" ) )
-		{
-			EFW_StripWeapon( pPlayer, "weapon_efw_IDTag", EFW_ITEM_IDTAG );
-			EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
-			EFW_Print( pPlayer, "ID Tag has been placed on the wall" );
-			EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
-		}
-		else if( EFW_HasKeyword( "Player'sIDTagOnFence" ) )
-		{
-			EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
-			EFW_AddKeyword( "Player'sIDTagOnFence", 0 );
-			EFW_Print( pPlayer, "You just picked up the IDTag." );
-		}
+		/* FUN_100c2a20 is the IDTag weapon UseWithMarker virtual (place only). */
+		if( weaponId == WEAPON_EFW_IDTAG || EFW_HasWeapon( pPlayer, "weapon_efw_IDTag" ) )
+			EFW_PlacePlayerIdTag( pPlayer, pMarker );
 		return;
 	}
 	if( !strcmp( name, "efw_cage_door" ) )

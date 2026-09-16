@@ -45,6 +45,11 @@ Not exported. `Squark` is only named in an error string.
 | `0x100c3120` | `efw_Marker` — `LINK_ENTITY`, alloc `0x15c` |
 | `0x100c5ea0` | `monster_refugee` — `CRefugee`, alloc `0x3a8`, vtable `0x100f93a4` |
 | `0x100c5f10` | `monster_efw_guard` — same vtable |
+| `0x100c6000` | `CRefugee::Precache` — 13 models (`detaineeMaleT0`–`T7`, `FemaleT0`–`T2`, security, tradesman) |
+| `0x100c6040` | `CRefugee::Spawn` — `efw_FStrEq` name table; unknown logs `Model not known for name: %s` and alternates MaleT6/T7; `movetype=STEP`, `solid=BBOX`, health 80, `FL_MONSTER` |
+| `0x100c27f0` | maplevel 2 fence IDTag spawn, then `FUN_100c2a20` |
+| `0x100c29f0` | IDTag AddToPlayer cooldown (`GetTickCount` vs `this+0x12c`) then clear `Player'sIDTagOnFence` |
+| `0x100c2a20` | IDTag UseWithMarker: `"ID Tag has been placed on the wall"`, abs-center, Materialize, NODRAW+SOLID_NOT, Squark gate guard |
 | `0x100c6440` | `CRefugee::IdleThink` — hull, `queue`, `now walking %s`, `mad_scientist_entity` |
 | `0x100c4700`+ | `weapon_efw_{Pliers,Lever,Branch,MobilePhone,IDTag,*PhoneCard,WashingPowder}` |
 | `0x1000d1d0` | guard models: electrician → `tradesman.mdl`, others → `security.mdl` |
