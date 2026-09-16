@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll43b`;
+    return `${url}?v=efw-dll43c`;
   return url;
 }
 
@@ -706,6 +706,14 @@ async function boot() {
       '0',
       '+sv_lan',
       '1',
+      '+r_drawentities',
+      '0',
+      '+r_drawworld',
+      '0',
+      '+r_fullbright',
+      '1',
+      '+cl_himodels',
+      '0',
     ];
     if (shimOk) {
       bootArgs.splice(1, 0, '-width', String(view.width), '-height', String(view.height));
