@@ -239,8 +239,12 @@ void CRefugee::Spawn( void )
 	const char *model;
 	static int s_unknownModel; /* DAT_10132ccc */
 
-	/* FUN_100c6040 CRefugee::Spawn (Ghidra left the 0x420-byte gap). */
-	Precache();
+	/* FUN_100c6040 CRefugee::Spawn (Ghidra left the 0x420-byte gap).
+	   WASM SET_MODEL/PRECACHE of detainee studios stalls ED_LoadFromFile;
+	   apply the PE names after ServerActivate via EFW_StartFrame. */
+	ALERT( at_error, "efw: refugee Spawn enter defer=%d\n", EFW_DeferStudio() );
+	if( !EFW_DeferStudio() )
+		Precache();
 	tn = STRING( pev->targetname );
 	pev->movetype = MOVETYPE_STEP;
 	pev->solid = SOLID_BBOX;
