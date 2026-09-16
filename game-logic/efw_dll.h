@@ -125,6 +125,7 @@ void EFW_HideUnderBuilding( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b969 
 void EFW_SetPause( int on ); /* 0x100c7510 */
 void EFW_ChangeLevel( const char *map ); /* ClientCommand 0x1001b2f3 */
 int EFW_ElectricianSees( CBasePlayer *pPlayer ); /* 0x100c59c0 */
+int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
 int EFW_WeaponTypeId( const char *classname ); /* 0x100c43b0 */
 const char *EFW_WeaponClassname( int id ); /* inverse of 0x100c43b0 table */
 int EFW_WeaponMask( CBasePlayer *pPlayer ); /* inventory bits for ids 16..31, packed into EFWData */

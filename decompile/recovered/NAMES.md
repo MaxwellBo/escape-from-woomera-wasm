@@ -18,7 +18,7 @@
 | 0x100c77e0 | `efw_PAUnlock` | rarLock=0 |
 | 0x100c6910 | `efw_FlagDiary` | `DAT_10134474[page] = 1` |
 | 0x100c4550 | `CEfwWeapon::GiveUnwanted` | `FUN_100b95a0(npc, classname, 8)` — UNWANTED_ITEM type-1 question, flag 8 Squark; fallback "Thanks, but I don't need it." |
-| 0x100c4e30 | `weapon_efw_Pliers::Give` | Amir strips+0x4c; Fashid/Nasir/Mouhtaz Squark; else GiveUnwanted |
+| 0x100c4af0 | `efw_LookUse` | sphere 96 from EyePosition, acos(dot)<10°, TraceLine 0.97, vtable+0x114 (weapon AddToPlayer / marker Use) |
 | 0x100c4f90 | `weapon_efw_Pliers::UseWithMarker` | kitchen_bin: electrician hope-2 / else 0x3e + PliersInBin |
 | 0x100c50d0 | `weapon_efw_Lever::UseWithMarker` | efw_cage_door open + strip lever |
 | 0x100c5180 | `weapon_efw_Branch::UseWithMarker` | efw_cage_door break → GiveNamedItem Lever |
@@ -38,6 +38,7 @@
 | 0x100c5f10 | `monster_efw_guard` | same CRefugee vtable |
 | 0x100c6000 | `CRefugee::Precache` | PRECACHE 13 models at PTR 0x1011cf40, then Dingaling.wav |
 | 0x100c6040 | `CRefugee::Spawn` | named model table (Shala/Amir/…/Gholan); unknown → T6/T7; health 80; CLASS 3 |
+| 0x100c6320 | `CRefugee::SetObjectCollisionBox` | GET_MODEL_PTR sequence hull; "Invalid model ptr! FUCK" |
 | 0x100c6310 | `CRefugee::Classify` | return 3 (`CLASS_HUMAN_PASSIVE`) |
 | 0x100c27f0 | `efw_SpawnFenceTag` | maplevel==2: CREATE weapon_efw_IDTag, call UseWithMarker on marker |
 | 0x100c29f0 | `weapon_efw_IDTag::AddToPlayer` | GetTickCount > this+0x12c then FUN_100c46a0 + clear Player'sIDTagOnFence |

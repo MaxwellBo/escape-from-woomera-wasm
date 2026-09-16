@@ -875,6 +875,12 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		EFW_InitFromSpawn( pPlayer );
 	if( EFW_GetHudInt( 6 ) )
 		pPlayer->pev->movetype = MOVETYPE_NONE;
+	/* FUN_100c4af0: PE has no callers; attach to IN_USE so look-use runs. */
+	if( pPlayer->m_afButtonPressed & IN_USE )
+	{
+		if( EFW_LookUse( pPlayer ) )
+			pPlayer->m_afButtonPressed &= ~IN_USE;
+	}
 	if( g_efw.talkActive )
 	{
 		int slot = pPlayer->pev->impulse;

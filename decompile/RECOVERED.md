@@ -50,6 +50,8 @@ Not exported. `Squark` is only named in an error string.
 | `0x100c27f0` | maplevel 2 fence IDTag spawn, then `FUN_100c2a20` |
 | `0x100c29f0` | IDTag AddToPlayer cooldown (`GetTickCount` vs `this+0x12c`) then clear `Player'sIDTagOnFence` |
 | `0x100c2a20` | IDTag UseWithMarker: `"ID Tag has been placed on the wall"`, abs-center, Materialize, NODRAW+SOLID_NOT, Squark gate guard |
+| `0x100c4af0` | player look-use: sphere 96 from `EyePosition`, `_CIacos` cone 0.1745 rad, `TraceLine` 0.97, `efw_Marker` then vtable+0x114 |
+| `0x100c6320` | CRefugee studio sequence hull (`GET_MODEL_PTR`, seqdesc bbmin/bbmax) |
 | `0x100c6440` | `CRefugee::IdleThink` — hull, `queue`, `now walking %s`, `mad_scientist_entity` |
 | `0x100c4700`+ | `weapon_efw_{Pliers,Lever,Branch,MobilePhone,IDTag,*PhoneCard,WashingPowder}` |
 | `0x1000d1d0` | guard models: electrician → `tradesman.mdl`, others → `security.mdl` |
@@ -85,6 +87,6 @@ Give virtuals (Capstone of the gap Ghidra skipped between `0x100c4f30` and `0x10
 
 Client issues `efw_Talk %c` / `efw_Give %d %c` / `efw_UseWithMarker %d %c` as `ClientCmd` strings; the server `ClientCommand` above is the matching half.
 
-Remaining thinner surfaces are CRT/STL helpers and Spirit-of-HL stock AI, not EFW overlay gameplay.
+Remaining thinner surfaces are CRT/STL helpers, the Win32 VGUI Panel class, and Spirit-of-HL stock AI. Overlay look-use `FUN_100c4af0` is in `EFW_LookUse` (IN_USE). `FUN_100c69a0` GetAsyncKeyState('1'–'6') is the client `EFW_ClientKey` / `menuselect` stand-in. Intro menus `0x49`–`0x4b` stay client-only.
 
-Client VGUI CommandButtons (`FUN_10044f70`) are ported as HUD widgets plus an HTML overlay. The client writes `EFWVGUI` lines to MEMFS `/efwvgui.txt` (and stdout/stderr) so the browser can click the original `efw_Talk` / `efw_Give %d` / `efw_UseWithMarker %d` ClientCmds. Patrol `FUN_100c54e0` + `FUN_100c5480` chase-all-guards is in `CPatrolGuard::PatrolThink`.
+Client VGUI CommandButtons (`FUN_10044f70`) are ported as HUD widgets plus an HTML overlay. The client writes `EFWVGUI` lines to MEMFS `/efwvgui.txt` (and stdout/stderr) so the browser can click the original `efw_Talk` / `efw_Give %d` / `efw_UseWithMarker %d` ClientCmds. Patrol `FUN_100c54e0` + `FUN_100c5480` chase-all-guards is in `CPatrolGuard::PatrolThink`. Look-use (`FUN_100c4af0`) runs on IN_USE so markers and world weapons work without those clicks.

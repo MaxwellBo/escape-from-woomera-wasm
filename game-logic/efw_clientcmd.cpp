@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
 {
@@ -145,6 +146,88 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 	if( !pBest )
 		pBest = EFW_NearestMarker( pPlayer, dist );
 	return pBest;
+}
+
+/* FUN_100c4af0 vtable+0x114: weapons AddToPlayer (0x100c4690);
+   CBaseEntity default is ret 4. Marker classname branch is unfinished in
+   the PE (stub); call EFW_UseMarker so the recovered path is playable. */
+static int EFW_LookUse114( CBaseEntity *pEnt, CBasePlayer *pPlayer )
+{
+	const char *cn;
+
+	if( !pEnt || !pPlayer )
+		return 0;
+	cn = STRING( pEnt->pev->classname );
+	if( !strncmp( cn, "weapon_", 7 ) )
+	{
+		if( pEnt->pev->owner )
+			return 0;
+		EFW_DebugPrint( "efw: look-use pickup %s", cn );
+		return ( (CBasePlayerItem *)pEnt )->AddToPlayer( pPlayer ) ? 1 : 0;
+	}
+	if( EFW_FStrEq( cn, "efw_Marker" ) )
+	{
+		EFW_DebugPrint( "efw: look-use marker %s", STRING( pEnt->pev->targetname ) );
+		EFW_UseMarker( pPlayer, pEnt, 0 );
+		return 1;
+	}
+	return 0;
+}
+
+int EFW_LookUse( CBasePlayer *pPlayer )
+{
+	/* FUN_100c4af0: cdecl player look-use. Sphere 96 from EyePosition,
+	   acos(dot) < 0.17453278 (~10°), TraceLine fraction 0.97,
+	   efw_Marker classname @ 0x1011c9ac, vtable+0x114. */
+	Vector eye;
+	CBaseEntity *pEnt;
+	TraceResult tr;
+	CBaseEntity *pHit;
+	Vector dir;
+	float len;
+	float ang;
+	float dot;
+
+	if( !pPlayer )
+		return 0;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	eye = pPlayer->EyePosition();
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityInSphere( pEnt, eye, 96.0f ) ) != NULL )
+	{
+		if( pEnt == pPlayer )
+			continue;
+		dir.x = pEnt->pev->origin.x - eye.x;
+		dir.y = pEnt->pev->origin.y - eye.y;
+		dir.z = pEnt->pev->origin.z - eye.z;
+		len = dir.Length();
+		if( len == 0.0f )
+			dir = Vector( 0.0f, 0.0f, 1.0f );
+		else
+			dir = dir * ( 1.0f / len );
+		dot = DotProduct( dir, gpGlobals->v_forward );
+		if( dot > 1.0f )
+			dot = 1.0f;
+		if( dot < -1.0f )
+			dot = -1.0f;
+		ang = (float)acos( (double)dot );
+		if( ang >= 0.17453278f )
+			continue;
+		UTIL_TraceLine( eye, pEnt->pev->origin, dont_ignore_monsters, pPlayer->edict(), &tr );
+		if( tr.flFraction >= 0.97f )
+		{
+			if( EFW_LookUse114( pEnt, pPlayer ) )
+				return 1;
+			continue;
+		}
+		pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
+		if( pHit && EFW_FStrEq( STRING( pHit->pev->classname ), "efw_Marker" ) )
+		{
+			if( EFW_LookUse114( pHit, pPlayer ) )
+				return 1;
+		}
+	}
+	return 0;
 }
 
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )

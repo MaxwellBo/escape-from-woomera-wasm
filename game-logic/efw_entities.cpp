@@ -7,6 +7,7 @@
 #include "activity.h"
 #include "player.h"
 #include "efw_dll.h"
+#include "studio.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -75,6 +76,7 @@ public:
 	void Precache( void );
 	void SetYawSpeed( void );
 	int Classify( void );
+	void SetObjectCollisionBox( void ); /* FUN_100c6320 */
 	int ObjectCaps( void ) { return CBaseMonster::ObjectCaps() | FCAP_IMPULSE_USE; }
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
@@ -87,6 +89,28 @@ LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
 int CRefugee::Classify( void )
 {
 	return CLASS_HUMAN_PASSIVE; /* FUN_100c6310 returns 3 */
+}
+
+void CRefugee::SetObjectCollisionBox( void )
+{
+	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c. */
+	studiohdr_t *hdr;
+	mstudioseqdesc_t *seq;
+	int index;
+
+	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
+	if( !hdr )
+	{
+		ALERT( at_console, "Invalid model ptr! FUCK\n" );
+		CBaseMonster::SetObjectCollisionBox();
+		return;
+	}
+	index = pev->sequence;
+	if( index < 0 || index >= hdr->numseq )
+		index = 0;
+	seq = (mstudioseqdesc_t *)( (unsigned char *)hdr + hdr->seqindex ) + index;
+	UTIL_SetSize( pev, Vector( seq->bbmin[0], seq->bbmin[1], seq->bbmin[2] ),
+		Vector( seq->bbmax[0], seq->bbmax[1], seq->bbmax[2] ) );
 }
 
 void CRefugee::SetYawSpeed( void )

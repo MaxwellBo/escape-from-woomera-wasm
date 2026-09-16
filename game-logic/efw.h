@@ -26,6 +26,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId = 0 );
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480 */
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
+int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 #endif
