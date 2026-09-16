@@ -70,6 +70,16 @@ void CEfwWeapon::Spawn( void )
 	const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
 	Precache();
 	m_iId = def->id;
+#ifndef CLIENT_DLL
+	{
+		static int s_models;
+		if( !s_models )
+		{
+			s_models = 1;
+			EFW_DebugPrint( ">>> FUN_100c43f0 %s %s %s", def->wmodel, def->vmodel, def->pmodel );
+		}
+	}
+#endif
 	SET_MODEL( ENT( pev ), def->wmodel );
 	m_iClip = -1;
 	FallInit();

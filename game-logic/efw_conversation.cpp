@@ -190,6 +190,14 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 	}
 	if( !text || !text[0] )
 		return;
+	{
+		static int s_show;
+		if( !s_show )
+		{
+			s_show = 1;
+			EFW_DebugPrint( ">>> FUN_100ba080 flags=%d", flags );
+		}
+	}
 	pPlayer = EFW_Player();
 	snprintf( line, sizeof( line ), "%s: %s", targetname, text );
 	if( pPlayer )
@@ -442,6 +450,7 @@ void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		}
 	}
 	EFW_DebugPrint( ">>> efw_Give UNWANTED_ITEM %s", tn );
+	EFW_DebugPrint( ">>> FUN_100c4550 FUN_100b95a0 %s", tn ? tn : "?" );
 	EFW_CloseTalk();
 	EFW_Squark( tn, text, 8 );
 }
@@ -836,6 +845,15 @@ void EFW_TalkScan( void )
 	EfwDllState *st = EFW_Dll();
 	CBaseEntity *pScan = NULL;
 	Vector origin;
+	{
+		static int s_scan;
+		if( !s_scan )
+		{
+			s_scan = 1;
+			EFW_DebugPrint( ">>> FUN_100c7810" );
+			EFW_DebugPrint( ">>> FUN_100c7830" );
+		}
+	}
 
 	if( !pPlayer )
 		return;

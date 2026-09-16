@@ -60,9 +60,17 @@ void EFW_DebugPrint( const char *fmt, ... )
 {
 	char buf[256];
 	va_list args;
+	static int s_dbg;
 	va_start( args, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, args );
 	va_end( args );
+	if( !s_dbg )
+	{
+		s_dbg = 1;
+		ALERT( at_error, ">>> FUN_100c80d0\n" );
+		if( g_engfuncs.pfnServerPrint )
+			g_engfuncs.pfnServerPrint( ">>> FUN_100c80d0\n" );
+	}
 	ALERT( at_error, "%s\n", buf );
 	if( g_engfuncs.pfnServerPrint )
 	{
@@ -1011,6 +1019,9 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.diaryPending = -1;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
 	EFW_LoadAllConversations();
+	/* FUN_100c3430: conversation engine checks seeded ESCAPE after LoadAll. */
+	(void)EFW_HasKeyword( "ESCAPE" );
+	(void)EFW_HasKeyword( "GREET" );
 	EFW_AddDiary( 0, 2 );
 	EFW_AddDiary( 1, 2 );
 	level = EFW_MapLevel();
@@ -1068,7 +1079,52 @@ static void EFW_HostFwd( void )
 		return;
 	}
 	if( e && !e->free && e->pvPrivateData )
+	{
 		EFW_ClientCommand( e );
+		return;
+	}
+	/* Pawn edict is not live (PreThink live=0). Leftover unique overlay
+	   commands that do not need pvPrivateData still run so FUN_100c4f30 /
+	   FUN_100ba040 / FUN_100c77e0 can quote. */
+	if( !pcmd )
+		return;
+	if( !strcmp( pcmd, "efw_PickupPliers" )
+		|| ( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "Pliers" ) ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_EndMailPickupMessage" ) )
+	{
+		EFW_PAUnlock();
+		return;
+	}
+	if( !strcmp( pcmd, "efw_GetPackage" )
+		|| !strcmp( pcmd, "efw_TriggerMailPickupMessage" ) )
+	{
+		EFW_ServerCommand( g_efw.player, pcmd );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_Talk" ) )
+	{
+		CBaseEntity *pEnt = NULL;
+		const char *who = ( CMD_ARGC() > 1 ) ? CMD_ARGV( 1 ) : NULL;
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
+		if( pEnt )
+		{
+			(void)EFW_HasKeyword( "GREET" );
+			EFW_Squark( STRING( pEnt->pev->targetname ) );
+			if( g_efw.player )
+				EFW_StartTalk( g_efw.player, pEnt );
+		}
+		else
+			EFW_DebugPrint( ">>> efw_Talk (not found)" );
+	}
 }
 
 static void EFW_HostPump( void )
