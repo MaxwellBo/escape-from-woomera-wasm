@@ -693,6 +693,14 @@ void CPatrolGuard::Spawn( void )
 	m_iCaught = 0;
 	m_iHearLatch = 0;
 	SetUse( &CPatrolGuard::TalkUse );
+	{
+		static int s_pt;
+		if( !s_pt )
+		{
+			s_pt = 1;
+			EFW_DebugPrint( ">>> FUN_100c54e0" );
+		}
+	}
 	if( EFW_DeferStudio() )
 	{
 		SetThink( NULL );

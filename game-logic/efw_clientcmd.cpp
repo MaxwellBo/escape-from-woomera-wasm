@@ -699,6 +699,8 @@ int EFW_ClientCommand( edict_t *pEntity )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_GiveToNpc( pPlayer, pEnt, wep );
+		/* HostFwd leftover unique also pulses PatrolThink so FUN_100c54e0 quotes. */
+		EFW_PatrolAlertAll();
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_spider" ) )
