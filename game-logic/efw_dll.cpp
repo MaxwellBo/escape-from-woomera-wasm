@@ -849,6 +849,7 @@ static int s_worldPrecacheDone;
 static int s_worldPasses;
 static int s_dropPass;
 static int s_dropped;
+static int s_mapLive;
 static char s_precacheMap[32];
 static char s_precacheSeen[96][40];
 static int s_precacheSeenN;
@@ -928,7 +929,7 @@ int EFW_ShouldSpawn( edict_t *pent )
 	if( cn && !strcmp( cn, "worldspawn" ) && !s_worldPrecache )
 	{
 		s_worldPasses++;
-		if( s_worldPasses > 1 )
+		if( s_mapLive )
 		{
 			char line[160];
 			s_dropPass = 1;
@@ -972,6 +973,7 @@ void EFW_OnServerActivate( void )
 {
 	char line[160];
 	s_dropPass = 0;
+	s_mapLive = 1;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses );
@@ -985,6 +987,7 @@ void EFW_OnServerDeactivate( void )
 	s_worldPasses = 0;
 	s_dropPass = 0;
 	s_dropped = 0;
+	s_mapLive = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );

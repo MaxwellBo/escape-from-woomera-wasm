@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll24`;
+    return `${url}?v=efw-dll25`;
   return url;
 }
 
@@ -190,6 +190,27 @@ function runEngineCmd(cmd: string) {
   } catch (err) {
     log(`cmd failed (${cmd}): ${formatErr(err)}`);
   }
+}
+
+function resumeEngineLoop() {
+  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
+  try {
+    mod?.resumeMainLoop?.();
+  } catch {
+    /* ignore */
+  }
+}
+
+let startedMap = '';
+function loadMap(name: string, reason: string) {
+  if (startedMap === name) {
+    log(`skip duplicate map ${name} (${reason})`);
+    return;
+  }
+  startedMap = name;
+  log(`> map ${name} (${reason})`);
+  runEngineCmd(`map ${name}`);
+  resumeEngineLoop();
 }
 
 /** Host console, ClientCommand, and listen-server `cmd` forwarding. */
@@ -743,27 +764,22 @@ async function boot() {
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
     log('engine main loop started; map load deferred until after Host_Init');
     canvas.focus();
+    resumeEngineLoop();
     setTimeout(() => {
-      log('> map efw_prototype_level1');
-      runEngineCmd('map efw_prototype_level1');
+      loadMap('efw_prototype_level1', 'deferred after Host_Init');
     }, 1500);
     setTimeout(() => {
       runEngineCmd('pausable 0');
+      resumeEngineLoop();
     }, 4000);
     setInterval(() => {
       runEngineCmd('pausable 0');
     }, 2000);
     setInterval(pollEfwVgui, 250);
     pollEfwVgui();
-    const resumeLoop = () => {
-      const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
-      try {
-        mod?.resumeMainLoop?.();
-      } catch {
-        /* ignore */
-      }
-    };
-    setInterval(resumeLoop, 100);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) resumeEngineLoop();
+    });
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
@@ -789,7 +805,7 @@ mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
     log(`> map ${map}`);
-    runEngineCmd(`map ${map}`);
+    if (map) loadMap(map, 'maps panel');
     void captureInput();
   });
 });
