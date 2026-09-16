@@ -525,10 +525,15 @@ void CEfwMarker::MarkerUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_T
 
 void CEfwMarker::Spawn( void )
 {
+	/* FUN_100c30a0: solid=0, movetype=7, SET_MODEL, DROP_TO_FLOOR,
+	   EF_NODRAW unless showtriggers. */
 	pev->angles = g_vecZero;
 	pev->movetype = MOVETYPE_PUSH;
-	pev->solid = SOLID_BSP;
+	pev->solid = SOLID_NOT;
 	SET_MODEL( ENT( pev ), STRING( pev->model ) );
+	DROP_TO_FLOOR( ENT( pev ) );
+	if( CVAR_GET_FLOAT( "showtriggers" ) == 0.0f )
+		pev->effects |= EF_NODRAW;
 	SetUse( &CEfwMarker::MarkerUse );
 }
 

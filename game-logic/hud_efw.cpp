@@ -162,10 +162,10 @@ static void EFW_OpenStoryboard( int code )
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level1", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x4d:
-		spr = "Storyboard/EFW_Sb_Ending_Iso.spr";
+		spr = "Storyboard/EFW_SB_Ending_Iso.spr";
 		break;
 	case 0x4e:
-		spr = "Storyboard/EFW_Sb_Ending_Dep.spr";
+		spr = "Storyboard/EFW_SB_Ending_Dep.spr";
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level1", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x4f:

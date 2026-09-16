@@ -11,7 +11,7 @@
 //   Scan slots DAT_101348b0 are 0x30 bytes (FUN_100c7830 / FUN_100c7d30).
 
 #define EFW_HUD_BLOB 36
-#define EFW_MAX_DIARY 12
+#define EFW_MAX_DIARY 24 /* collected slots; flags indexed by page number (AddDiary 0..16) */
 #define EFW_MAX_KEYWORDS 48
 #define EFW_MAX_SEEN 80
 #define EFW_MENU_LINES 7
@@ -90,6 +90,7 @@ void EFW_SendEfwData( void ); /* 0x100c6dd0 */
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code ); /* 0x100c81d0 */
 void EFW_AdjustHope( float delta ); /* 0x100c4d70 */
 void EFW_AddDiary( int page, int mode ); /* 0x100c6890 */
+void EFW_FlagDiary( int page ); /* 0x100c6910 — flag by page number */
 int EFW_DiaryCount( void ); /* 0x100c6880 */
 void EFW_AddKeyword( const char *word, int unlocked ); /* 0x100c3500 */
 int EFW_HasKeyword( const char *word ); /* 0x100c3430 — unlocked flag */
@@ -104,6 +105,7 @@ int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname ); /* 0x100c2f70 
 int EFW_HasSeen( const char *npc, const char *topic );
 void EFW_MarkSeen( const char *npc, const char *topic );
 void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action );
+void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd ); /* 0x100bfbf0 */
 void EFW_InitFromSpawn( CBasePlayer *pPlayer ); /* 0x100c6740 + 0x100c6780 */
 
 void EFW_LoadAllConversations( void ); /* 0x100b8ff0 */
@@ -130,6 +132,8 @@ void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard cha
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */
+void EFW_PALockRAR( void ); /* 0x100c77c0 — rarLock=1, play Ann_RAR_124, timer=0 */
+void EFW_PAUnlock( void ); /* 0x100c77e0 — rarLock=0 */
 
 extern int gmsgEFWShow;
 extern int gmsgEFWData;

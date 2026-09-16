@@ -306,4 +306,18 @@ void EFW_ThinkPA( void )
 	g_pa.lastTime = now;
 }
 
+void EFW_PALockRAR( void )
+{
+	if( !g_pa.inited )
+		EFW_InitPA();
+	g_pa.rarLock = 1;
+	EFW_PlayCue( g_pa.slot[0].sample );
+	g_pa.timer = 0.0f;
+}
+
+void EFW_PAUnlock( void )
+{
+	g_pa.rarLock = 0;
+}
+
 #endif

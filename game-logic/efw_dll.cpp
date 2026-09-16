@@ -186,7 +186,8 @@ void EFW_SendHudState( void )
 		cursor = 0;
 	page = g_efw.diaryCount ? g_efw.diaryPages[cursor] : 0;
 	EFW_SetHudInt( 1, page );
-	EFW_SetHudInt( 2, ( cursor < EFW_MAX_DIARY ) ? g_efw.diaryFlags[cursor] : 0 );
+	/* FUN_100c6b60: hudInt[2] = diaryFlags[page number], not cursor. */
+	EFW_SetHudInt( 2, ( page >= 0 && page < EFW_MAX_DIARY ) ? g_efw.diaryFlags[page] : 0 );
 	EFW_SetHudInt( 3, EFW_MapLevel() );
 	{
 		int active = 0;
@@ -274,6 +275,12 @@ void EFW_AddDiary( int page, int mode )
 	}
 	g_efw.diaryCount++;
 	EFW_DebugPrint( "Diary active item added    %d", page );
+}
+
+void EFW_FlagDiary( int page )
+{
+	if( page >= 0 && page < EFW_MAX_DIARY )
+		g_efw.diaryFlags[page] = 1;
 }
 
 void EFW_AddKeyword( const char *word, int unlocked )
@@ -545,12 +552,82 @@ static void EFW_SpawnFenceTag( void )
 	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
 }
 
+static void EFW_TrimInPlace( char *s )
+{
+	char *a;
+	char *b;
+	if( !s )
+		return;
+	a = s;
+	while( *a == ' ' || *a == '\t' )
+		a++;
+	if( a != s )
+		memmove( s, a, strlen( a ) + 1 );
+	b = s + strlen( s );
+	while( b > s && ( b[-1] == ' ' || b[-1] == '\t' ) )
+	{
+		b--;
+		*b = '\0';
+	}
+}
+
+static int EFW_CmdIs( const char *cmd, const char *want )
+{
+	size_t n;
+	if( !cmd || !want )
+		return 0;
+	n = strlen( want );
+	if( strncmp( cmd, want, n ) != 0 )
+		return 0;
+	return cmd[n] == '\0' || cmd[n] == ' ' || cmd[n] == '\t';
+}
+
+/* FUN_100bfbf0: conversation ServerCommand(efw_GetPackage / efw_EndMailPickupMessage).
+   efw_TriggerMailPickupMessage is in Conversations txt files but not in the DLL
+   strings; reconstruct as FUN_100c77c0 + AddKeyword(OFFICE) so Mail_Officer
+   can reach the package topic. */
+void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
+{
+	char buf[64];
+	if( !cmd || !cmd[0] )
+		return;
+	strncpy( buf, cmd, sizeof( buf ) - 1 );
+	buf[sizeof( buf ) - 1] = '\0';
+	EFW_TrimInPlace( buf );
+	if( EFW_CmdIs( buf, "efw_GetPackage" ) )
+	{
+		if( !pPlayer )
+			pPlayer = EFW_Player();
+		if( pPlayer )
+		{
+			EFW_GiveItem( pPlayer, EFW_ITEM_POWDER, "weapon_efw_WashingPowder" );
+			EFW_GiveItem( pPlayer, EFW_ITEM_PHONE, "weapon_efw_MobilePhone" );
+			EFW_FailOrNarrate( pPlayer, 0x47 );
+		}
+		EFW_AdjustHope( 10.0f );
+		return;
+	}
+	if( EFW_CmdIs( buf, "efw_EndMailPickupMessage" ) )
+	{
+		EFW_PAUnlock();
+		return;
+	}
+	if( EFW_CmdIs( buf, "efw_TriggerMailPickupMessage" ) )
+	{
+		EFW_PALockRAR();
+		EFW_AddKeyword( "OFFICE", 1 );
+		return;
+	}
+}
+
 void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 {
 	char name[48];
 	char arg[48];
 	const char *open;
 	const char *close;
+	size_t nlen;
+	size_t alen;
 
 	if( !action || !action[0] )
 		return;
@@ -565,10 +642,18 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 	close = strchr( open, ')' );
 	if( !close )
 		return;
-	strncpy( name, action, (size_t)( open - action ) );
-	name[open - action] = '\0';
-	strncpy( arg, open + 1, (size_t)( close - open - 1 ) );
-	arg[close - open - 1] = '\0';
+	nlen = (size_t)( open - action );
+	if( nlen >= sizeof( name ) )
+		nlen = sizeof( name ) - 1;
+	memcpy( name, action, nlen );
+	name[nlen] = '\0';
+	alen = (size_t)( close - open - 1 );
+	if( alen >= sizeof( arg ) )
+		alen = sizeof( arg ) - 1;
+	memcpy( arg, open + 1, alen );
+	arg[alen] = '\0';
+	EFW_TrimInPlace( name );
+	EFW_TrimInPlace( arg );
 	if( !strcmp( name, "AddTopic" ) )
 		EFW_AddKeyword( arg, 1 );
 	else if( !strcmp( name, "DeleteTopic" ) )
@@ -579,14 +664,15 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 			if( !strcmp( g_efw.keywords[i], arg ) )
 			{
 				g_efw.keywords[i][0] = '\0';
+				g_efw.keywordUnlocked[i] = 0;
 				break;
 			}
 		}
 	}
 	else if( !strcmp( name, "AddDiary" ) )
 		EFW_AddDiary( atoi( arg ), 2 );
-	else if( !strcmp( name, "ServerCommand" ) && pPlayer )
-		CLIENT_COMMAND( pPlayer->edict(), arg );
+	else if( !strcmp( name, "ServerCommand" ) )
+		EFW_ServerCommand( pPlayer, arg );
 }
 
 void EFW_InitFromSpawn( CBasePlayer *pPlayer )
@@ -644,6 +730,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_Talk", "efw_Give", "efw_spider", "efw_Pickup", "efw_UseWithMarker",
 		"efw_diary", "efw_diary_next", "efw_diary_prev", "efw_ShowMenu",
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
+		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"menuselect", NULL
 	};

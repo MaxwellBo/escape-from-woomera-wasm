@@ -28,6 +28,8 @@ static const char *kConversationFiles[] = {
 	"Roster_Officer", "Shala", NULL
 };
 
+static void EFW_RegisterDefaults( void );
+
 static EfwScriptCache *EFW_ScriptSlots( void )
 {
 	if( !g_scripts )
@@ -88,6 +90,7 @@ void EFW_LoadAllConversations( void )
 	EFW_AddKeyword( "ESCAPE", 1 );
 	EFW_AddKeyword( "GREET", 1 );
 	EFW_AddKeyword( "GOODBYE", 1 );
+	EFW_RegisterDefaults();
 }
 
 void EFW_Squark( const char *targetname, const char *text, int flags )
@@ -133,6 +136,37 @@ static int EFW_Ieq( const char *a, const char *b )
 		b++;
 	}
 	return *a == *b;
+}
+
+/* FUN_100b86b0 RegisterDefaults: targetname -> HUD display name. */
+static const struct
+{
+	const char *target;
+	const char *display;
+} kDisplayNames[] = {
+	{ "efw_compound_gate_guard", "Gate Guard" },
+	{ "efw_electrician", "Electrician" },
+	{ "detainee", "Detainee" },
+	{ "detainee_queue", "Detainee in queue" },
+	{ NULL, NULL }
+};
+
+static const char *EFW_DisplayName( const char *targetname )
+{
+	int i;
+	if( !targetname || !targetname[0] )
+		return targetname;
+	for( i = 0; kDisplayNames[i].target; i++ )
+	{
+		if( EFW_Ieq( targetname, kDisplayNames[i].target ) )
+			return kDisplayNames[i].display;
+	}
+	return targetname;
+}
+
+static void EFW_RegisterDefaults( void )
+{
+	(void)kDisplayNames;
 }
 
 const char *EFW_ScriptNameForNpc( CBaseEntity *pNpc )
@@ -256,7 +290,8 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	snprintf( title, sizeof( title ), "Talk to %s", npc );
+	snprintf( title, sizeof( title ), "Talk to %s",
+		EFW_DisplayName( STRING( pNpc->pev->targetname ) ) );
 	slot = 0;
 	for( i = 0; i < script->questionCount && slot < 6; i++ )
 	{

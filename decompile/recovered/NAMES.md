@@ -12,7 +12,11 @@
 | 0x100c3120 | `efw_Marker` | LINK_ENTITY_TO_CLASS, alloc 0x15c |
 | 0x100c3430 | `efw_HasKeyword` | return unlocked flag at keyword node +0x1c |
 | 0x100c3500 | `efwConversation::AddKeyword` | insert keyword and store unlocked flag (0 = locked topic) |
-| 0x100c4d70 | `efw_AdjustHope` | hope += delta, clamp 0..100 |
+| 0x100bfbf0 | `efw_ServerCommand` | GetPackage gives powder+phone, FailOrNarrate 0x47, hope+10; EndMail unlocks PA |
+| 0x100c30a0 | `CEfwMarker::Spawn` | solid=0, movetype=7, DROP_TO_FLOOR, NODRAW unless showtriggers |
+| 0x100c77c0 | `efw_PALockRAR` | rarLock=1, play slot 0 (Ann_RAR_124), timer=0 |
+| 0x100c77e0 | `efw_PAUnlock` | rarLock=0 |
+| 0x100c6910 | `efw_FlagDiary` | `DAT_10134474[page] = 1` |
 | 0x100c4e30 | `weapon Give to NPC` | Amir / Fashid / Nasir / Mouhtaz Squark + diary 0x4c |
 | 0x100c59c0 | `efw_ElectricianSees` | dist < 256 or view cone ~35° |
 | 0x100c7510 | `efw_pause` | hudInt[6], MOVETYPE_NONE freeze |

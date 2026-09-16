@@ -37,6 +37,11 @@ Not exported. `Squark` is only named in an error string.
 | VA | Symbol |
 |----|--------|
 | `0x100c6890` | `efw_AddDiary` — `Diary active item added    %d` |
+| `0x100c6910` | `efw_FlagDiary` — set `DAT_10134474[page]` |
+| `0x100c30a0` | `CEfwMarker::Spawn` — SOLID_NOT, DROP_TO_FLOOR, EF_NODRAW unless `showtriggers` |
+| `0x100bfbf0` | conversation `ServerCommand` — `efw_GetPackage` (powder+phone, menu 0x47, hope+10), `efw_EndMailPickupMessage` (`FUN_100c77e0`) |
+| `0x100c77c0` | PA rarLock=1, play `Ann_RAR_124.wav`, timer=0 |
+| `0x100c77e0` | PA rarLock=0 |
 | `0x100c3120` | `efw_Marker` — `LINK_ENTITY`, alloc `0x15c` |
 | `0x100c5ea0` | `monster_refugee` — `CRefugee`, alloc `0x3a8`, vtable `0x100f93a4` |
 | `0x100c5f10` | `monster_efw_guard` — same vtable |

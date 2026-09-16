@@ -171,9 +171,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 			}
 		}
 		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
-		if( 2 < EFW_MAX_DIARY )
-			st->diaryFlags[2] = 1;
-		EFW_AddDiary( 2, 2 );
+		EFW_FlagDiary( 2 ); /* FUN_100c6910(2) */
 		EFW_FailOrNarrate( pPlayer, 0x4c );
 		return;
 	}
@@ -485,6 +483,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 	{
 		if( CMD_ARGC() > arg0 + 1 )
 			EFW_ChangeLevel( CMD_ARGV( arg0 + 1 ) );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_GetPackage" )
+		|| FStrEq( pcmd, "efw_EndMailPickupMessage" )
+		|| FStrEq( pcmd, "efw_TriggerMailPickupMessage" ) )
+	{
+		EFW_ServerCommand( pPlayer, pcmd );
 		return 1;
 	}
 	return 0;

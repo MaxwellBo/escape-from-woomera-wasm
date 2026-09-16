@@ -76,24 +76,37 @@ static void EfwParseBracketActions( EfwReply *reply, char *text )
 	p = open + 1;
 	while( *p && reply->actionCount < EFW_MAX_ACTIONS )
 	{
+		char packed[EFW_ACTION_LEN];
+		int n;
 		p = (char *)EfwSkipWs( p );
 		if( !*p )
 			break;
 		start = p;
-		while( *p && !isspace( (unsigned char)*p ) )
-		{
-			if( *p == '(' )
-			{
-				p++;
-				while( *p && *p != ')' )
-					p++;
-				if( *p == ')' )
-					p++;
-				break;
-			}
+		while( *p && !isspace( (unsigned char)*p ) && *p != '(' )
 			p++;
+		p = (char *)EfwSkipWs( p );
+		if( *p == '(' )
+		{
+			p++;
+			while( *p && *p != ')' )
+				p++;
+			if( *p == ')' )
+				p++;
 		}
-		EfwCopy( reply->actions[reply->actionCount], EFW_ACTION_LEN, start, (int)( p - start ) );
+		/* Collapse "AddDiary (16)" to "AddDiary(16)" so RunScriptAction
+		   can split on '('. */
+		n = 0;
+		{
+			const char *q = start;
+			while( q < p && n < EFW_ACTION_LEN - 1 )
+			{
+				if( *q != ' ' && *q != '\t' )
+					packed[n++] = *q;
+				q++;
+			}
+			packed[n] = '\0';
+		}
+		EfwCopy( reply->actions[reply->actionCount], EFW_ACTION_LEN, packed, n );
 		reply->actionCount++;
 	}
 
