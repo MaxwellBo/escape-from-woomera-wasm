@@ -1223,6 +1223,41 @@ static int EFW_BindOneDetainee( void )
 	return 0;
 }
 
+/* Libmenu leaves the listen server paused, so engine DispatchThink never
+   runs CRefugee::IdleThink. Pulse the same function from StartFrame. */
+static void EFW_PulseRefugeeThinks( void )
+{
+	int i;
+	int n = 0;
+
+	for( i = 1; i < EFW_MaxEnts(); i++ )
+	{
+		edict_t *pent;
+		CBaseEntity *pEnt;
+		const char *cn;
+
+		pent = INDEXENT( i );
+		if( !pent || pent->free )
+			continue;
+		if( pent->v.modelindex <= 0 )
+			continue;
+		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+		if( strcmp( cn, "monster_refugee" ) )
+			continue;
+		pEnt = CBaseEntity::Instance( pent );
+		if( !pEnt )
+			continue;
+		pEnt->Think();
+		n++;
+	}
+	if( n && ( s_liveTicks <= 12 || ( s_liveTicks % 40 ) == 0 ) )
+	{
+		char line[80];
+		snprintf( line, sizeof( line ), "efw: pulse IdleThink n=%d live=%d\n", n, s_liveTicks );
+		EFW_LogLine( line );
+	}
+}
+
 void EFW_StartFrame( void )
 {
 	int i;
@@ -1271,6 +1306,7 @@ void EFW_StartFrame( void )
 		EFW_SendHudState();
 		EFW_PollMenuKeys();
 		EFW_BindOneDetainee();
+		EFW_PulseRefugeeThinks();
 	}
 	/* First live frames: do not SET_MODEL other studios. Bound detainees
 	   keep IdleThink; FreezeNpcPhysics skips modelindex>0 refugees. */

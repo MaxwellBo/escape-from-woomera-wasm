@@ -171,10 +171,13 @@ void CRefugee::IdleThink( void )
 		return;
 	if( pev->health == 2.0f )
 		return;
+	tn = STRING( pev->targetname );
+	if( s_idleLog < 1 )
+		EFW_DebugPrint( "IdleThink enter %s mi=%d",
+			( tn && tn[0] ) ? tn : "?", pev->modelindex );
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
 	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
 	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
-	tn = STRING( pev->targetname );
 	pPlayer = EFW_Player();
 	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
 	{
