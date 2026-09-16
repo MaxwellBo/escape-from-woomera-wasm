@@ -303,11 +303,10 @@ static int EFW_MenuDepth( void )
 	static int s_logged = -1;
 
 	n = g_hudMsgCount - g_hudMsgBase;
-	if( n != s_logged )
+	if( s_logged < 0 && n >= 1 )
 	{
 		s_logged = n;
-		if( n <= 2 || ( n % 10 ) == 0 )
-			gEngfuncs.Con_Printf( ">>> FUN_10041a30 n=%d\n", n );
+		gEngfuncs.Con_Printf( ">>> FUN_10041a30 n=%d\n", n );
 	}
 	return n;
 }
