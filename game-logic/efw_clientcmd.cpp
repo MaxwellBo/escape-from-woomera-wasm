@@ -1038,6 +1038,14 @@ int EFW_ClientCommand( edict_t *pEntity )
 			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
 		else
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		{
+			static int s_pick;
+			if( !s_pick )
+			{
+				s_pick = 1;
+				EFW_DebugPrint( ">>> FUN_100c4700 models/w_pliers.mdl" );
+			}
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )

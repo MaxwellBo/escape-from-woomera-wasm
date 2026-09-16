@@ -107,6 +107,9 @@ void EFW_SetPause( int on )
 		EFW_DebugPrint( "efw_pause 1" );
 	else
 		EFW_DebugPrint( "efw_pause 0" );
+	/* FUN_100c6dd0 immediately so the client Panel dtor (FUN_10048460)
+	   sees hudInt[6] even while StartFrame live-ticks are deferred. */
+	EFW_SendHudState();
 }
 
 static char s_queuedMap[64];
