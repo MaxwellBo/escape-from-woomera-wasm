@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll27`;
+    return `${url}?v=efw-dll28`;
   return url;
 }
 
@@ -780,7 +780,7 @@ async function boot() {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) resumeEngineLoop();
     });
-    setInterval(resumeEngineLoop, 250);
+    setTimeout(resumeEngineLoop, 3000);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
