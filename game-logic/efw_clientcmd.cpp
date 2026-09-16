@@ -308,7 +308,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 	if( weaponId <= 0 && pPlayer && pPlayer->m_pActiveItem )
 		weaponId = pPlayer->m_pActiveItem->m_iId;
 	if( weaponId <= 0 )
-		return;
+		weaponId = WEAPON_EFW_PLIERS;
 
 	/* FUN_100c5240: MobilePhone Give virtual. Else FUN_100c4550. */
 	if( weaponId == WEAPON_EFW_MOBILEPHONE )
@@ -840,19 +840,24 @@ int EFW_ClientCommand( edict_t *pEntity )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 128.0f );
-		if( ( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
-			|| ( who && strstr( who, "cage_door" ) ) )
+		if( who && strstr( who, "cage_door" ) )
 		{
-			if( pEnt )
+			if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
 				EFW_UseMarker( pPlayer, pEnt, wep );
 			else
 				EFW_CageDoorVirtual( pPlayer, wep );
 			return 1;
 		}
-		if( ( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_IDTag_Position" ) )
-			|| ( who && strstr( who, "IDTag" ) ) )
+		if( who && strstr( who, "IDTag" ) )
 		{
+			if( pEnt && !EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_IDTag_Position" ) )
+				pEnt = NULL;
 			EFW_IdTagPlaceVirtual( pPlayer, pEnt );
+			return 1;
+		}
+		if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+		{
+			EFW_UseMarker( pPlayer, pEnt, wep );
 			return 1;
 		}
 		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
