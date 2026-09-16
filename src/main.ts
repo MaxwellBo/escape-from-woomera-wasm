@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll61`;
+    return `${url}?v=efw-dll62`;
   return url;
 }
 
@@ -329,12 +329,27 @@ function loadMap(name: string, reason: string) {
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
   runEngineCmd('r_norefresh 1');
+  runEngineCmd('sv_validate_changelevel 0');
+  runEngineCmd('sv_newunit 1');
+  /* Only pfnChangeLevel (PE ClientCommand). Console `changelevel` is
+     SV_ChangeLevel_f and fights COM_ChangeLevel: Host RUNFRAME notices
+     nextstate, SCR_BeginLoadingPlaque (pauses rAF), then the *next*
+     COM_Frame runs SV_ExecChangeLevel. A second command plus resume()
+     during that Host_Frame aborts the load. */
   runEngineCmd(`efw_changelevel ${name}`);
-  runEngineCmd(`changelevel ${name}`);
-  /* One resume so Host_Frame can process STATE_CHANGELEVEL. Further
-     resume() calls abort that Host_Frame (map load > 120ms). */
-  lastResumeMs = 0;
-  resumeEngineLoop();
+  const kick = (ms: number) => {
+    setTimeout(() => {
+      if (listenReady)
+        return;
+      lastResumeMs = 0;
+      log(`listen: CHANGE_LEVEL kick resume t=${ms}ms`);
+      resumeEngineLoop();
+    }, ms);
+  };
+  /* 80ms: finish RUNFRAME → plaque. 400ms: unpause into SV_ExecChangeLevel.
+     Do not resume while Exec is loading the BSP. */
+  kick(80);
+  kick(400);
   if (changeWatch)
     clearTimeout(changeWatch);
   changeWatch = setTimeout(() => {
@@ -349,7 +364,7 @@ function loadMap(name: string, reason: string) {
       runEngineCmd('disconnect');
       setTimeout(() => loadMap(name, 'after disconnect'), 400);
     }, 400);
-  }, 12000);
+  }, 16000);
 }
 
 let lastActivateMs = 0;

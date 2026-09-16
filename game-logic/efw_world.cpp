@@ -74,8 +74,14 @@ void EFW_ChangeLevel( const char *map )
 {
 	if( !map || !map[0] )
 		return;
-	EFW_DebugPrint( ">>> efw_changelevel %s", map );
-	/* PE ClientCommand: pfnChangeLevel. Xash queues Host STATE_CHANGELEVEL. */
+	/* Classic Quake transition (no landmark). Skip save/restore and the
+	   sv.framecount<15 infinite-changelevel lock so WASM Host can finish
+	   STATE_CHANGELEVEL → SV_ExecChangeLevel on the next COM_Frame. */
+	CVAR_SET_FLOAT( "sv_validate_changelevel", 0.0f );
+	CVAR_SET_FLOAT( "sv_newunit", 1.0f );
+	EFW_DebugPrint( ">>> efw_changelevel %s time=%.2f", map, gpGlobals->time );
+	/* PE ClientCommand: pfnChangeLevel. Xash COM_ChangeLevel sets
+	   Host nextstate = STATE_CHANGELEVEL; Exec runs on the next COM_Frame. */
 	CHANGE_LEVEL( (char *)map, NULL );
 	EFW_DebugPrint( ">>> CHANGE_LEVEL returned %s", map );
 }
