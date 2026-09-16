@@ -137,6 +137,11 @@ void CRefugee::IdleThink( void )
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
 			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
+			{
+				char line[80];
+				snprintf( line, sizeof( line ), "now walking %s", ( tn && tn[0] ) ? tn : "?" );
+				EFW_Print( pPlayer, line );
+			}
 		}
 		if( m_iWalkState == 3 && dist < 100.0f )
 			SetActivity( ACT_IDLE );

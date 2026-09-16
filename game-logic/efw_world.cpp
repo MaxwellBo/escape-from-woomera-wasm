@@ -236,6 +236,12 @@ void EFW_PlayCue( const char *sample )
 	pitch = 100 - RANDOM_LONG( 0, 19 );
 	EMIT_SOUND_DYN( ed, CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
 	EFW_DebugPrint( "efw: play %s", sample );
+	if( EFW_Player() )
+	{
+		char line[96];
+		snprintf( line, sizeof( line ), "efw: play %s", sample );
+		EFW_Print( EFW_Player(), line );
+	}
 }
 
 void EFW_InitPA( void )
