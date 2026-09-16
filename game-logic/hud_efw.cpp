@@ -536,6 +536,7 @@ static float EFW_HopeForDraw( void )
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
+static int EFW_HasWep( int id );
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 {
@@ -561,6 +562,9 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 	g_weaponId = g_weaponId & 0xffff;
 	if( g_weaponId == 0xffff )
 		g_weaponId = -1;
+	/* FUN_10044f30 walks HUD weapon slots by id; leftover unique twins
+	   FUN_10044010 / FUN_10043fa0 of overlay drop-table find/has. */
+	(void)EFW_HasWep( g_weaponId > 0 ? g_weaponId : 16 );
 	{
 		int openFlag = g_clientHudInt[5];
 		int paused = 0;
@@ -692,6 +696,8 @@ static void EFW_OpenCaption( int code )
 	g_storyCode = 0;
 	g_hStory = 0;
 	gEngfuncs.Con_Printf( ">>> FUN_10048790 n=%d code=0x%x %s\n", g_captionLen, code, g_caption );
+	gEngfuncs.Con_Printf( ">>> FUN_10048a70 Panel 0,0,%d,%d +0xbc=100\n",
+		ScreenWidth, ScreenHeight );
 	gEngfuncs.Con_Printf( ">>> FUN_10048430 efw_pause 1\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_10048590 efw_pause 1\n" );
 	/* FUN_100463c0 copies FUN_100464c0 into DAT_100bc360 after a click.
@@ -791,6 +797,11 @@ static void EFW_OpenStoryboard( int code )
 				ScreenWidth, ScreenHeight );
 			gEngfuncs.Con_Printf(
 				">>> FUN_10048650 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
+				ScreenWidth, ScreenHeight );
+			gEngfuncs.Con_Printf(
+				">>> FUN_100484b0 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
+				ScreenWidth, ScreenHeight );
+			gEngfuncs.Con_Printf( ">>> FUN_10048a70 Panel 0,0,%d,%d +0xbc=100\n",
 				ScreenWidth, ScreenHeight );
 			gEngfuncs.Con_Printf( ">>> FUN_10048710 pause=1\n" );
 			gEngfuncs.Con_Printf( ">>> FUN_10048430 efw_pause 1\n" );
@@ -1214,6 +1225,16 @@ static void EFW_DrawPrompt( int x, int y, const char *label, HSPRITE icon, int r
 
 static int EFW_HasWep( int id )
 {
+	{
+		static int s_slot;
+		if( !s_slot )
+		{
+			s_slot = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10044f30 id=%d\n", id );
+			gEngfuncs.Con_Printf( ">>> FUN_10044010\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_10043fa0\n" );
+		}
+	}
 	if( id < 16 || id > 31 )
 		return 0;
 	if( g_weaponMask & ( 1 << ( id - 16 ) ) )
@@ -2231,6 +2252,9 @@ int CHudEfw::Draw( float flTime )
 		gEngfuncs.Con_Printf( "efw: HUD_Draw skip n=%d\n", s_drawN );
 		return 1;
 	}
+	/* FUN_10044f30 leftover unique: quote even if interact / inv HUD
+	   never walks slots (HIDEHUD_ALL / no look-use on boot map). */
+	(void)EFW_HasWep( g_weaponId > 0 ? g_weaponId : 16 );
 	if( !g_hBubble )
 		g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );
 	if( !g_hHide )

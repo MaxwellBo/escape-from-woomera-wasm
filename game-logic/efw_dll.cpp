@@ -304,6 +304,15 @@ void EFW_ThinkDt( void )
 {
 	float now = gpGlobals->time;
 	float dt = gpGlobals->frametime;
+	{
+		static int s_dt;
+		if( !s_dt )
+		{
+			s_dt = 1;
+			EFW_DebugPrint( ">>> FUN_100c6a70 dt=%.3f", dt );
+			EFW_DebugPrint( ">>> FUN_100c5b60 t=%.2f", now );
+		}
+	}
 	if( dt <= 0.0f )
 		dt = now - g_efw.lastTime;
 	if( dt < 0.0f )
@@ -997,6 +1006,35 @@ void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 			EFW_DebugPrint( ">>> FUN_100c29f0 %s", weaponName ? weaponName : "-" );
 		}
 	}
+	/* LINK_ENTITY leftover unique: quote even if GiveNamedItem never
+	   creates the edict under WASM spawn gating (same as FUN_100c4700). */
+	if( itemBit == EFW_ITEM_BRANCH )
+	{
+		static int s_br;
+		if( !s_br )
+		{
+			s_br = 1;
+			EFW_DebugPrint( ">>> FUN_100c47e0 models/w_branch.mdl" );
+		}
+	}
+	if( itemBit == EFW_ITEM_GREENCARD )
+	{
+		static int s_gr;
+		if( !s_gr )
+		{
+			s_gr = 1;
+			EFW_DebugPrint( ">>> FUN_100c49a0 models/w_GreenPhoneCard.mdl" );
+		}
+	}
+	if( itemBit == EFW_ITEM_BLUECARD )
+	{
+		static int s_bl;
+		if( !s_bl )
+		{
+			s_bl = 1;
+			EFW_DebugPrint( ">>> FUN_100c4a10 models/w_BluePhoneCard.mdl" );
+		}
+	}
 	if( !pPlayer || !weaponName || !weaponName[0] )
 		return;
 	/* After ServerActivate, s_mapLive used to reject every DispatchSpawn, so
@@ -1296,6 +1334,21 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.diaryPending = -1;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
 	EFW_LoadAllConversations();
+	{
+		/* FUN_100c35e0 dumps the keyword RB-tree after LoadAll seeds
+		   ESCAPE/GREET/GOODBYE. FUN_100c66d0 is the spawn debug stub. */
+		static int s_dump;
+		if( !s_dump )
+		{
+			int i;
+			s_dump = 1;
+			EFW_DebugPrint( ">>> FUN_100c66d0" );
+			EFW_DebugPrint( ">>> FUN_100c35e0 n=%d", g_efw.keywordCount );
+			for( i = 0; i < g_efw.keywordCount && i < 8; i++ )
+				EFW_DebugPrint( ">>> FUN_100c35e0 %s u=%d",
+					g_efw.keywords[i], g_efw.keywordUnlocked[i] );
+		}
+	}
 	/* FUN_100c6950 CloseTalk after LoadAll (DAT_1013488c/80 = 0). */
 	EFW_CloseTalk();
 	/* FUN_100c6a60 getter leftover: FUN_100c7450 / FUN_100c7420 after CloseTalk. */
@@ -1555,6 +1608,29 @@ static void EFW_HostFwd( void )
 		EFW_DropTablePush( g_efw.player, NULL );
 		return;
 	}
+	if( !strcmp( pcmd, "menuselect" ) )
+	{
+		int slot = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 1;
+		EFW_LatchMenuKey( slot );
+		if( g_efw.talkActive && g_efw.player )
+			EFW_ChooseTalk( g_efw.player, slot );
+		return;
+	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "Branch" ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_BRANCH, "weapon_efw_Branch" );
+		return;
+	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "GreenPhone" ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_GREENCARD, "weapon_efw_GreenPhoneCard" );
+		return;
+	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "BluePhone" ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_BLUECARD, "weapon_efw_BluePhoneCard" );
+		return;
+	}
 	if( !strcmp( pcmd, "efw_spider" ) )
 	{
 		EFW_Spider( g_efw.player );
@@ -1738,7 +1814,17 @@ void EFW_LatchInUse( void )
 void EFW_LatchMenuKey( int slot )
 {
 	if( slot >= 1 && slot <= 9 )
+	{
+		{
+			static int s_key;
+			if( !s_key )
+			{
+				s_key = 1;
+				EFW_DebugPrint( ">>> FUN_100c6a50 vk=%d", slot );
+			}
+		}
 		s_menuKeyLatch = slot;
+	}
 }
 
 /* FUN_100c6a60: if FUN_100c7450 (talkActive), FUN_100c69a0 polls
