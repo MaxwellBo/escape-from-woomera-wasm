@@ -356,6 +356,7 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 		{
 			s_pliersGive = 1;
 			EFW_DebugPrint( ">>> FUN_100c4e30 pliers %s", tn ? tn : "?" );
+			EFW_PatrolAlertAll();
 		}
 		if( EFW_FStrEq( tn, "Amir" ) )
 		{
