@@ -162,12 +162,12 @@ static int EFW_LookUse114( CBaseEntity *pEnt, CBasePlayer *pPlayer )
 	{
 		if( pEnt->pev->owner )
 			return 0;
-		EFW_DebugPrint( "efw: look-use pickup %s", cn );
+		ALERT( at_error, "efw: look-use pickup %s\n", cn );
 		return ( (CBasePlayerItem *)pEnt )->AddToPlayer( pPlayer ) ? 1 : 0;
 	}
 	if( EFW_FStrEq( cn, "efw_Marker" ) )
 	{
-		EFW_DebugPrint( "efw: look-use marker %s", STRING( pEnt->pev->targetname ) );
+		ALERT( at_error, "efw: look-use marker %s\n", STRING( pEnt->pev->targetname ) );
 		EFW_UseMarker( pPlayer, pEnt, 0 );
 		return 1;
 	}

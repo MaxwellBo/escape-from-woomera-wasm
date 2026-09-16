@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll28`;
+    return `${url}?v=efw-dll29`;
   return url;
 }
 
@@ -772,6 +772,18 @@ async function boot() {
       runEngineCmd('pausable 0');
       resumeEngineLoop();
     }, 4000);
+    /* Listen-server join uses the loopback token. `connect 127.0.0.1`
+       is treated as a remote host and prints
+       "Server was killed due to connection to remote server". */
+    setTimeout(() => {
+      log('> connect localhost (listen-server loopback)');
+      runEngineCmd('connect localhost');
+      resumeEngineLoop();
+    }, 4500);
+    setTimeout(() => {
+      runEngineCmd('status');
+      resumeEngineLoop();
+    }, 6500);
     setInterval(() => {
       runEngineCmd('pausable 0');
     }, 2000);

@@ -31,7 +31,7 @@ int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_OnDispatchSpawn( edict_t *pent ); /* edict-budget log during map spawn */
 int EFW_ShouldSpawn( edict_t *pent ); /* skip nested worldspawn during FUN_100b2f80 */
-int EFW_RejectSpawn( edict_t *pent ); /* pfnSpawn -1 drops duplicate entity-lump passes */
+int EFW_RejectSpawn( edict_t *pent ); /* pfnSpawn -1 frees duplicate edicts; never worldspawn */
 int EFW_BeginWorldPrecache( void ); /* re-entry guard around CWorld::Precache */
 void EFW_EndWorldPrecache( void );
 int EFW_PrecacheOnce( const char *szClassname ); /* one CREATE_NAMED_ENTITY per class */

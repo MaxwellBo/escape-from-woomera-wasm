@@ -272,7 +272,7 @@ void CRefugee::Spawn( void )
 	/* FUN_100c6040 hardcodes this hull; MonsterInit is stock HL, not in the PE Spawn. */
 	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 	g_refugeeCount++;
-	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
+	ALERT( at_error, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ),
 		pev->origin.x, pev->origin.y, pev->origin.z, NUMBER_OF_ENTITIES() );
 	m_iWalkState = 0;

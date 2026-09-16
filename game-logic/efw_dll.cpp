@@ -847,12 +847,97 @@ void EFW_LinkUserMessages( void )
 static int s_worldPrecache;
 static int s_worldPrecacheDone;
 static int s_worldPasses;
-static int s_dropPass;
 static int s_dropped;
 static int s_mapLive;
+static int s_skipThis;
 static char s_precacheMap[32];
 static char s_precacheSeen[96][40];
 static int s_precacheSeenN;
+
+/* WASM Host_Frame can re-enter ED_LoadFromFile mid-lump (first studio NPC).
+   Returning -1 from pfnSpawn on worldspawn frees edict 0 and the local
+   client never signs on. Remember the first copy of each map entity and
+   only ED_Free duplicates. */
+#define EFW_SPAWN_TRACK 512
+static struct
+{
+	char cn[32];
+	char model[32];
+	char tn[32];
+	int x, y, z;
+} s_seen[EFW_SPAWN_TRACK];
+static int s_seenN;
+static int s_markers;
+static int s_refugees;
+
+static void EFW_SpawnResetSeen( void )
+{
+	s_seenN = 0;
+	s_markers = 0;
+	s_refugees = 0;
+	memset( s_seen, 0, sizeof( s_seen ) );
+}
+
+static int EFW_SpawnAlready( edict_t *pent, const char *cn )
+{
+	const char *model;
+	const char *tn;
+	int x, y, z, i;
+
+	if( !pent || !cn )
+		return 0;
+	model = pent->v.model ? STRING( pent->v.model ) : "";
+	tn = pent->v.targetname ? STRING( pent->v.targetname ) : "";
+	if( !model )
+		model = "";
+	if( !tn )
+		tn = "";
+	x = (int)pent->v.origin.x;
+	y = (int)pent->v.origin.y;
+	z = (int)pent->v.origin.z;
+	for( i = 0; i < s_seenN; i++ )
+	{
+		if( s_seen[i].x != x || s_seen[i].y != y || s_seen[i].z != z )
+			continue;
+		if( strcmp( s_seen[i].cn, cn ) )
+			continue;
+		if( strcmp( s_seen[i].model, model ) )
+			continue;
+		if( strcmp( s_seen[i].tn, tn ) )
+			continue;
+		return 1;
+	}
+	return 0;
+}
+
+static void EFW_SpawnRemember( edict_t *pent, const char *cn )
+{
+	const char *model;
+	const char *tn;
+
+	if( !pent || !cn || s_seenN >= EFW_SPAWN_TRACK )
+		return;
+	model = pent->v.model ? STRING( pent->v.model ) : "";
+	tn = pent->v.targetname ? STRING( pent->v.targetname ) : "";
+	if( !model )
+		model = "";
+	if( !tn )
+		tn = "";
+	strncpy( s_seen[s_seenN].cn, cn, sizeof( s_seen[0].cn ) - 1 );
+	s_seen[s_seenN].cn[sizeof( s_seen[0].cn ) - 1] = 0;
+	strncpy( s_seen[s_seenN].model, model, sizeof( s_seen[0].model ) - 1 );
+	s_seen[s_seenN].model[sizeof( s_seen[0].model ) - 1] = 0;
+	strncpy( s_seen[s_seenN].tn, tn, sizeof( s_seen[0].tn ) - 1 );
+	s_seen[s_seenN].tn[sizeof( s_seen[0].tn ) - 1] = 0;
+	s_seen[s_seenN].x = (int)pent->v.origin.x;
+	s_seen[s_seenN].y = (int)pent->v.origin.y;
+	s_seen[s_seenN].z = (int)pent->v.origin.z;
+	s_seenN++;
+	if( !strcmp( cn, "efw_Marker" ) )
+		s_markers++;
+	if( !strcmp( cn, "monster_refugee" ) )
+		s_refugees++;
+}
 
 static void EFW_LogLine( const char *line )
 {
@@ -925,24 +1010,39 @@ int EFW_ShouldSpawn( edict_t *pent )
 {
 	const char *cn;
 
+	s_skipThis = 0;
 	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "";
-	if( cn && !strcmp( cn, "worldspawn" ) && !s_worldPrecache )
+	if( !cn )
+		cn = "";
+	if( !strcmp( cn, "player" ) )
+		return 1;
+	if( !strcmp( cn, "worldspawn" ) )
 	{
+		if( s_worldPrecache )
+		{
+			s_skipThis = 1;
+			return 0;
+		}
 		s_worldPasses++;
 		if( s_worldPasses > 1 || s_mapLive )
 		{
 			char line[160];
-			s_dropPass = 1;
 			snprintf( line, sizeof( line ),
-				"efw: drop duplicate entity lump pass=%d ents=%d\n",
-				s_worldPasses, NUMBER_OF_ENTITIES() );
+				"efw: skip duplicate worldspawn pass=%d ents=%d seen=%d\n",
+				s_worldPasses, NUMBER_OF_ENTITIES(), s_seenN );
 			EFW_LogLine( line );
+			s_skipThis = 1;
+			return 0;
 		}
+		EFW_SpawnRemember( pent, cn );
+		return 1;
 	}
-	if( s_dropPass && ( !cn || strcmp( cn, "player" ) ) )
+	if( EFW_SpawnAlready( pent, cn ) )
+	{
+		s_skipThis = 1;
 		return 0;
-	if( s_worldPrecache && cn && !strcmp( cn, "worldspawn" ) )
-		return 0;
+	}
+	EFW_SpawnRemember( pent, cn );
 	return 1;
 }
 
@@ -951,19 +1051,20 @@ int EFW_RejectSpawn( edict_t *pent )
 	const char *cn;
 
 	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "";
-	if( cn && !strcmp( cn, "player" ) )
-	{
-		s_dropPass = 0;
+	if( !cn )
+		cn = "";
+	/* Never ED_Free world or the listen-server pawn. pfnSpawn -1 on
+	   worldspawn is why the WASM client stayed on "Can't cmd, not connected". */
+	if( !strcmp( cn, "worldspawn" ) || !strcmp( cn, "player" ) )
 		return 0;
-	}
-	if( !s_dropPass )
+	if( !s_skipThis )
 		return 0;
 	s_dropped++;
 	if( s_dropped <= 6 || ( s_dropped % 50 ) == 0 )
 	{
 		char line[160];
 		snprintf( line, sizeof( line ), "efw: reject #%d ents=%d %s\n",
-			s_dropped, NUMBER_OF_ENTITIES(), cn && cn[0] ? cn : "?" );
+			s_dropped, NUMBER_OF_ENTITIES(), cn[0] ? cn : "?" );
 		EFW_LogLine( line );
 	}
 	return 1;
@@ -971,12 +1072,12 @@ int EFW_RejectSpawn( edict_t *pent )
 
 void EFW_OnServerActivate( void )
 {
-	char line[160];
-	s_dropPass = 0;
+	char line[192];
 	s_mapLive = 1;
 	snprintf( line, sizeof( line ),
-		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d\n",
-		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses );
+		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d\n",
+		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
+		s_seenN, s_markers, s_refugees );
 	EFW_LogLine( line );
 }
 
@@ -985,12 +1086,13 @@ void EFW_OnServerDeactivate( void )
 	s_worldPrecache = 0;
 	s_worldPrecacheDone = 0;
 	s_worldPasses = 0;
-	s_dropPass = 0;
 	s_dropped = 0;
 	s_mapLive = 0;
+	s_skipThis = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
+	EFW_SpawnResetSeen();
 }
 
 void EFW_WPrecache( void )
@@ -1024,8 +1126,9 @@ void EFW_OnDispatchSpawn( edict_t *pent )
 	used = NUMBER_OF_ENTITIES();
 	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "?";
 	{
-		char line[160];
-		snprintf( line, sizeof( line ), "efw: spawn #%d ents=%d %s\n", s_n, used, cn ? cn : "?" );
+		char line[192];
+		snprintf( line, sizeof( line ), "efw: spawn #%d edict=%d ents=%d %s\n",
+			s_n, pent ? ENTINDEX( pent ) : -1, used, cn ? cn : "?" );
 		if( s_n <= 12 || ( s_n % 25 ) == 0 || ( used >= 700 && ( s_n % 25 ) == 0 )
 			|| ( cn && !strncmp( cn, "monster_", 8 ) )
 			|| ( cn && !strncmp( cn, "efw_", 4 ) )
