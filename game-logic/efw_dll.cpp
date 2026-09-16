@@ -291,6 +291,15 @@ void EFW_ThinkHope( void )
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
+	{
+		static int s_enter;
+		if( !s_enter )
+		{
+			s_enter = 1;
+			EFW_DebugPrint( ">>> FUN_100c6ad0 hope=%.1f pause=%d",
+				EFW_GetHudFloat( 1 ), EFW_GetHudInt( 6 ) );
+		}
+	}
 
 	if( EFW_GetHudInt( 6 ) )
 		return;
@@ -311,14 +320,6 @@ void EFW_ThinkHope( void )
 	if( elapsed > 0.2f )
 		elapsed = 0.2f;
 	hope = EFW_GetHudFloat( 1 );
-	{
-		static int s_thinkHope;
-		if( !s_thinkHope )
-		{
-			s_thinkHope = 1;
-			EFW_DebugPrint( ">>> FUN_100c6ad0 hope=%.1f dt=%.3f", hope, elapsed );
-		}
-	}
 	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
 		hope = 0.0f;

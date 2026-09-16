@@ -74,6 +74,8 @@ void EFW_OverrideNpcModel( CBaseEntity *pEntity )
 		{
 			s_assign = 1;
 			EFW_DebugPrint( ">>> FUN_1000d1d0 %s %s", tn && tn[0] ? tn : "?", model );
+			if( strstr( model, "security" ) || strstr( model, "Security" ) )
+				EFW_DebugPrint( ">>> FUN_100c5420 models/security.mdl" );
 		}
 		PRECACHE_MODEL( (char *)model );
 		if( EFW_DeferStudio() )
