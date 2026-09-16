@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll43c`;
+    return `${url}?v=efw-dll43d`;
   return url;
 }
 
@@ -758,6 +758,25 @@ async function boot() {
     log('boot: valve files written');
     writeTree(FS, staged.woomera);
     log('boot: woomera files written');
+    mkdirTree(FS, `/${GAME_DIR}/overviews`);
+    {
+      const maps = ['efw_prototype_level1', 'efw_prototype_level2', 'efw_prototype_level3'];
+      const txt = new TextEncoder().encode('ZOOM 1.0\nORIGIN 0 0 0\nROTATED 0\nHEIGHT 0\n');
+      const tga = new Uint8Array(21);
+      tga[2] = 2;
+      tga[12] = 1;
+      tga[14] = 1;
+      tga[16] = 24;
+      for (const map of maps) {
+        try {
+          FS.writeFile(`/${GAME_DIR}/overviews/${map}.txt`, txt);
+          FS.writeFile(`/${GAME_DIR}/overviews/${map}.tga`, tga);
+        } catch {
+          /* ignore */
+        }
+      }
+      log('boot: stub overviews written');
+    }
     mkdirTree(FS, `/${GAME_DIR}/cl_dlls`);
     mkdirTree(FS, `/${GAME_DIR}/dlls`);
     mkdirTree(FS, '/valve');
