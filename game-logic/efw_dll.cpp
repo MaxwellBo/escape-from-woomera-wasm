@@ -1073,6 +1073,11 @@ int EFW_ShouldSpawn( edict_t *pent )
 		cn = "";
 	if( !strcmp( cn, "player" ) )
 		return 1;
+	if( s_mapLive )
+	{
+		s_skipThis = 1;
+		return 0;
+	}
 	if( !strcmp( cn, "worldspawn" ) )
 	{
 		if( s_worldPrecache )
@@ -1124,7 +1129,7 @@ int EFW_RejectSpawn( edict_t *pent )
 	if( !s_skipThis )
 		return 0;
 	s_dropped++;
-	if( s_dropped <= 6 || ( s_dropped % 50 ) == 0 )
+	if( !s_mapLive && ( s_dropped <= 6 || ( s_dropped % 50 ) == 0 ) )
 	{
 		char line[160];
 		snprintf( line, sizeof( line ), "efw: reject #%d ents=%d %s\n",
@@ -1137,6 +1142,11 @@ int EFW_RejectSpawn( edict_t *pent )
 void EFW_OnServerActivate( void )
 {
 	char line[192];
+	if( s_mapLive )
+	{
+		EFW_LogLine( "efw: ServerActivate already live\n" );
+		return;
+	}
 	s_mapLive = 1;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d\n",
@@ -1210,6 +1220,8 @@ void EFW_OnDispatchSpawn( edict_t *pent )
 	int used;
 	const char *cn;
 
+	if( s_mapLive )
+		return;
 	if( s_mapLive == 0 && s_worldPasses == 0 )
 		s_n = 0;
 	s_n++;

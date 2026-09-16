@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll34`;
+    return `${url}?v=efw-dll35`;
   return url;
 }
 
@@ -221,13 +221,13 @@ function onServerActivateSeen() {
   log('listen: ServerActivate — resume loop for local client signon');
   setTimeout(() => {
     runEngineCmd('pausable 0');
+    runEngineCmd('hideconsole');
     resumeEngineLoop();
-  }, 200);
+  }, 250);
   setTimeout(() => {
-    runEngineCmd('pausable 0');
     resumeEngineLoop();
     runEngineCmd('status');
-  }, 1500);
+  }, 2000);
   setInterval(() => {
     runEngineCmd('pausable 0');
   }, 2000);
