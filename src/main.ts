@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll36`;
+    return `${url}?v=efw-dll37`;
   return url;
 }
 
@@ -136,9 +136,9 @@ function log(text: string) {
   logLines++;
   logCount.textContent = String(logLines);
   logEl.textContent += normalized + '\n';
-  if (logLines > 8000) {
+  if (logLines > 20000) {
     const lines = logEl.textContent.split('\n');
-    logEl.textContent = lines.slice(lines.length - 8000).join('\n');
+    logEl.textContent = lines.slice(lines.length - 20000).join('\n');
   }
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -225,6 +225,8 @@ function onServerActivateSeen() {
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
+    runEngineCmd('host_clientloaded');
+    runEngineCmd('host_gameloaded');
     resumeEngineLoop();
   }, 250);
   setTimeout(() => {
@@ -688,7 +690,7 @@ async function boot() {
       '-game',
       GAME_DIR,
       '+maxplayers',
-      '1',
+      '2',
       '+mp_allowmonsters',
       '1',
       '+deathmatch',

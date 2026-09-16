@@ -319,6 +319,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnHookUserMsg( "EFW_Cntxt", __MsgFunc_EFW_Cntxt );
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
+	gEngfuncs.Con_Printf( "efw: HUD_Init\n" );
 	return 1;
 }
 

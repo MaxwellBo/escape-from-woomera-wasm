@@ -113,7 +113,6 @@ void CRefugee::SetObjectCollisionBox( void )
 	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
 	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
 	{
-		ALERT( at_console, "Invalid model ptr! FUCK\n" );
 		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 		return;
 	}
@@ -172,7 +171,8 @@ void CRefugee::IdleThink( void )
 		return;
 	}
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
-	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+	if( pev->modelindex )
+		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 	tn = STRING( pev->targetname );
 	pPlayer = EFW_Player();
 	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
