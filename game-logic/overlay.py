@@ -52,6 +52,9 @@ def main() -> None:
             "dlls/barney.cpp",
             "dlls/cbase.cpp",
             "dlls/subs.cpp",
+            "dlls/world.cpp",
+            "dlls/weapons.cpp",
+            "dlls/util.cpp",
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
             "cl_dll/input.cpp",
@@ -258,10 +261,92 @@ def main() -> None:
         "\t\tpEntity->Spawn();\n"
         "\n"
         "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
-        "\t\tpEntity->Spawn();\n"
         f"\t\tEFW_OnDispatchSpawn( pent ); {MARKER}\n"
+        f"\t\tif( EFW_ShouldSpawn( pent ) )\n"
+        "\t\t\tpEntity->Spawn();\n"
         "\n"
         "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
+    )
+
+    world_cpp = dlls / "world.cpp"
+    once(
+        world_cpp,
+        '#include "teamplay_gamerules.h"\n',
+        '#include "teamplay_gamerules.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        world_cpp,
+        "void CWorld::Precache( void )\n"
+        "{\n"
+        "	g_pLastSpawn = NULL;\n",
+        "void CWorld::Precache( void )\n"
+        "{\n"
+        f"	if( !EFW_BeginWorldPrecache() ) {MARKER}\n"
+        "		return;\n"
+        "	g_pLastSpawn = NULL;\n",
+    )
+    once(
+        world_cpp,
+        "		CVAR_SET_FLOAT( \"mp_defaultteam\", 0.0f );\n"
+        "	}\n"
+        "}\n",
+        "		CVAR_SET_FLOAT( \"mp_defaultteam\", 0.0f );\n"
+        "	}\n"
+        f"	EFW_EndWorldPrecache(); {MARKER}\n"
+        "}\n",
+    )
+
+    weapons_cpp = dlls / "weapons.cpp"
+    once(
+        weapons_cpp,
+        '#include "gamerules.h"\n',
+        '#include "gamerules.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        weapons_cpp,
+        "void UTIL_PrecacheOtherWeapon( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+        "void UTIL_PrecacheOtherWeapon( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        f"	if( !EFW_PrecacheOnce( szClassname ) ) {MARKER}\n"
+        "		return;\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+    )
+    once(
+        weapons_cpp,
+        "	g_sModelIndexFireball = PRECACHE_MODEL( \"sprites/zerogxplode.spr\" );// fireball\n",
+        f"	EFW_WPrecache(); {MARKER}\n"
+        "	g_sModelIndexFireball = PRECACHE_MODEL( \"sprites/zerogxplode.spr\" );// fireball\n",
+    )
+
+    util_cpp = dlls / "util.cpp"
+    once(
+        util_cpp,
+        '#include "byteswap.h"\n',
+        '#include "byteswap.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        util_cpp,
+        "void UTIL_PrecacheOther( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+        "void UTIL_PrecacheOther( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        f"	if( !EFW_PrecacheOnce( szClassname ) ) {MARKER}\n"
+        "		return;\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
     )
 
     barney = dlls / "barney.cpp"

@@ -830,6 +830,8 @@ static void EFW_RegisterHostCmds( void )
 void EFW_LinkUserMessages( void )
 {
 	EFW_RegisterHostCmds();
+	ALERT( at_error, "efw: GameDLLInit ents=%d max=%d\n",
+		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities );
 	if( !gmsgEFWShow )
 		gmsgEFWShow = REG_USER_MSG( "EFWShow", -1 );
 	if( !gmsgEFWData )
@@ -842,6 +844,111 @@ void EFW_LinkUserMessages( void )
 		gmsgEFWCtPrv = REG_USER_MSG( "EFW_CtPrv", 1 );
 }
 
+static int s_worldPrecache;
+static int s_worldPrecacheDone;
+static char s_precacheMap[32];
+static char s_precacheSeen[96][40];
+static int s_precacheSeenN;
+
+static void EFW_LogLine( const char *line )
+{
+	ALERT( at_error, "%s", line );
+	if( g_engfuncs.pfnServerPrint )
+		g_engfuncs.pfnServerPrint( line );
+}
+
+int EFW_PrecacheOnce( const char *szClassname )
+{
+	int i;
+	if( !szClassname || !szClassname[0] )
+		return 0;
+	for( i = 0; i < s_precacheSeenN; i++ )
+	{
+		if( !strcmp( s_precacheSeen[i], szClassname ) )
+			return 0;
+	}
+	if( s_precacheSeenN < (int)( sizeof( s_precacheSeen ) / sizeof( s_precacheSeen[0] ) ) )
+	{
+		strncpy( s_precacheSeen[s_precacheSeenN], szClassname, sizeof( s_precacheSeen[0] ) - 1 );
+		s_precacheSeen[s_precacheSeenN][sizeof( s_precacheSeen[0] ) - 1] = 0;
+		s_precacheSeenN++;
+	}
+	return 1;
+}
+
+int EFW_BeginWorldPrecache( void )
+{
+	char line[160];
+	const char *map;
+
+	map = ( gpGlobals && gpGlobals->mapname ) ? STRING( gpGlobals->mapname ) : "";
+	if( s_worldPrecache )
+	{
+		snprintf( line, sizeof( line ), "efw: skip nested CWorld::Precache ents=%d\n",
+			NUMBER_OF_ENTITIES() );
+		EFW_LogLine( line );
+		return 0;
+	}
+	if( s_worldPrecacheDone && s_precacheMap[0] && map[0] && !strcmp( s_precacheMap, map ) )
+	{
+		snprintf( line, sizeof( line ), "efw: skip repeat CWorld::Precache %s ents=%d\n",
+			map, NUMBER_OF_ENTITIES() );
+		EFW_LogLine( line );
+		return 0;
+	}
+	strncpy( s_precacheMap, map, sizeof( s_precacheMap ) - 1 );
+	s_precacheMap[sizeof( s_precacheMap ) - 1] = 0;
+	s_worldPrecache = 1;
+	s_precacheSeenN = 0;
+	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
+	snprintf( line, sizeof( line ), "efw: CWorld::Precache begin ents=%d max=%d map=%s\n",
+		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_precacheMap[0] ? s_precacheMap : "?" );
+	EFW_LogLine( line );
+	return 1;
+}
+
+void EFW_EndWorldPrecache( void )
+{
+	char line[160];
+	snprintf( line, sizeof( line ), "efw: CWorld::Precache end ents=%d\n",
+		NUMBER_OF_ENTITIES() );
+	EFW_LogLine( line );
+	s_worldPrecache = 0;
+	s_worldPrecacheDone = 1;
+}
+
+int EFW_ShouldSpawn( edict_t *pent )
+{
+	const char *cn;
+	if( !s_worldPrecache || !pent || !pent->v.classname )
+		return 1;
+	cn = STRING( pent->v.classname );
+	if( cn && !strcmp( cn, "worldspawn" ) )
+		return 0;
+	return 1;
+}
+
+void EFW_WPrecache( void )
+{
+	/* FUN_100b2f80 after the HL weapon list: UTIL_PrecacheOtherWeapon
+	   weapon_efw_Pliers @ 101054a4 through weapon_efw_WashingPowder. */
+	static const char *kEfw[] = {
+		"weapon_efw_Pliers",
+		"weapon_efw_Lever",
+		"weapon_efw_Branch",
+		"weapon_efw_MobilePhone",
+		"weapon_efw_IDTag",
+		"weapon_efw_RedPhoneCard",
+		"weapon_efw_GreenPhoneCard",
+		"weapon_efw_BluePhoneCard",
+		"weapon_efw_WashingPowder"
+	};
+	unsigned i;
+	extern void UTIL_PrecacheOtherWeapon( const char *szClassname );
+	for( i = 0; i < sizeof( kEfw ) / sizeof( kEfw[0] ); i++ )
+		UTIL_PrecacheOtherWeapon( kEfw[i] );
+}
+
 void EFW_OnDispatchSpawn( edict_t *pent )
 {
 	static int s_n;
@@ -851,12 +958,14 @@ void EFW_OnDispatchSpawn( edict_t *pent )
 	s_n++;
 	used = NUMBER_OF_ENTITIES();
 	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "?";
-	if( s_n <= 8 || ( s_n % 50 ) == 0 || used >= 900
-		|| ( cn && !strncmp( cn, "monster_", 8 ) )
-		|| ( cn && !strncmp( cn, "efw_", 4 ) ) )
 	{
-		ALERT( at_console, "efw: spawn #%d ents=%d %s\n", s_n, used, cn ? cn : "?" );
-		EFW_DebugPrint( "efw: spawn #%d ents=%d %s", s_n, used, cn ? cn : "?" );
+		char line[160];
+		snprintf( line, sizeof( line ), "efw: spawn #%d ents=%d %s\n", s_n, used, cn ? cn : "?" );
+		if( s_n <= 12 || ( s_n % 25 ) == 0 || used >= 700
+			|| ( cn && !strncmp( cn, "monster_", 8 ) )
+			|| ( cn && !strncmp( cn, "efw_", 4 ) )
+			|| ( cn && !strncmp( cn, "worldspawn", 10 ) ) )
+			EFW_LogLine( line );
 	}
 }
 

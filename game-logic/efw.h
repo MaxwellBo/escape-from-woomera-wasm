@@ -30,6 +30,11 @@ int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_OnDispatchSpawn( edict_t *pent ); /* edict-budget log during map spawn */
+int EFW_ShouldSpawn( edict_t *pent ); /* skip nested worldspawn during FUN_100b2f80 */
+int EFW_BeginWorldPrecache( void ); /* re-entry guard around CWorld::Precache */
+void EFW_EndWorldPrecache( void );
+int EFW_PrecacheOnce( const char *szClassname ); /* one CREATE_NAMED_ENTITY per class */
+void EFW_WPrecache( void ); /* FUN_100b2f80 tail: weapon_efw_* */
 #endif
 
 /* FUN_100c43b0 table 0x100f81e0: Pliers, Lever, Branch, MobilePhone, IDTag, Red, Green, Blue, Powder. */

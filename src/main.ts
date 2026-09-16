@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll21`;
+    return `${url}?v=efw-dll23`;
   return url;
 }
 
@@ -641,6 +641,8 @@ async function boot() {
       '-console',
       '-game',
       GAME_DIR,
+      '+maxplayers',
+      '1',
       '+mp_allowmonsters',
       '1',
       '+deathmatch',
