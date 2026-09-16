@@ -10,6 +10,47 @@
 #include <stdio.h>
 #include <string.h>
 
+static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
+{
+	CBaseEntity *pScan;
+	char line[96];
+
+	if( !pPlayer )
+		return;
+	UTIL_SetOrigin( pPlayer->pev, pos );
+	pPlayer->pev->velocity = g_vecZero;
+	pPlayer->pev->flags &= ~FL_ONGROUND;
+	snprintf( line, sizeof( line ), "efw: setpos %.0f %.0f %.0f", pos.x, pos.y, pos.z );
+	EFW_Print( pPlayer, line );
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityInSphere( pScan, pos, 96.0f ) ) != NULL )
+	{
+		const char *cn;
+		if( pScan == pPlayer )
+			continue;
+		cn = STRING( pScan->pev->classname );
+		if( !strncmp( cn, "trigger_", 8 ) )
+			pScan->Touch( pPlayer );
+	}
+}
+
+static CBaseEntity *EFW_FindGoto( const char *name )
+{
+	CBaseEntity *pEnt;
+	if( !name || !name[0] )
+		return NULL;
+	pEnt = UTIL_FindEntityByTargetname( NULL, name );
+	if( pEnt )
+		return pEnt;
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, "trigger_multiple" ) ) != NULL )
+	{
+		if( EFW_FStrEq( STRING( pEnt->pev->target ), name ) )
+			return pEnt;
+	}
+	return NULL;
+}
+
 static Vector EFW_Place( CBaseEntity *pEnt )
 {
 	Vector c;
@@ -316,9 +357,35 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_UseWithMarker" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		CBaseEntity *pEnt = NULL;
+		if( CMD_ARGC() > arg0 + 1 )
+			pEnt = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
+			pEnt = EFW_NearestMarker( pPlayer, 140.0f );
 		if( pEnt && !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
 			EFW_UseMarker( pPlayer, pEnt );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_setpos" ) || FStrEq( pcmd, "setpos" ) )
+	{
+		if( CMD_ARGC() > arg0 + 3 )
+		{
+			Vector pos;
+			pos.x = (float)atof( CMD_ARGV( arg0 + 1 ) );
+			pos.y = (float)atof( CMD_ARGV( arg0 + 2 ) );
+			pos.z = (float)atof( CMD_ARGV( arg0 + 3 ) );
+			EFW_Relocate( pPlayer, pos );
+		}
+		else if( CMD_ARGC() > arg0 + 1 )
+		{
+			CBaseEntity *pEnt = EFW_FindGoto( CMD_ARGV( arg0 + 1 ) );
+			if( pEnt )
+				EFW_Relocate( pPlayer, EFW_Place( pEnt ) );
+			else
+				EFW_DebugPrint( ">>> efw_setpos (not found) %s", CMD_ARGV( arg0 + 1 ) );
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_diary" ) )

@@ -308,15 +308,45 @@ static int EFW_Project( float wx, float wy, float wz, int *sx, int *sy )
 {
 	float world[3];
 	float screen[3];
-	if( !gEngfuncs.pTriAPI || !gEngfuncs.pTriAPI->WorldToScreen )
-		return 0;
+	float angles[3];
+	float fwd[3], right[3], up[3], org[3], delta[3];
+	cl_entity_t *lp;
+	float z, px, py;
+
 	world[0] = wx;
 	world[1] = wy;
 	world[2] = wz;
-	if( gEngfuncs.pTriAPI->WorldToScreen( world, screen ) )
+	if( gEngfuncs.pTriAPI && gEngfuncs.pTriAPI->WorldToScreen )
+	{
+		if( !gEngfuncs.pTriAPI->WorldToScreen( world, screen ) )
+		{
+			*sx = (int)( XPROJECT( screen[0] ) );
+			*sy = (int)( YPROJECT( screen[1] ) );
+			if( *sx >= 8 && *sy >= 8 && *sx <= ScreenWidth - 8 && *sy <= ScreenHeight - 8 )
+				return 1;
+		}
+	}
+
+	/* client.dll FUN_10044f70 projects bubbles in view space when the
+	   triangle API clips (common in the WASM GL path). */
+	lp = gEngfuncs.GetLocalPlayer();
+	if( !lp )
 		return 0;
-	*sx = (int)( XPROJECT( screen[0] ) );
-	*sy = (int)( YPROJECT( screen[1] ) );
+	gEngfuncs.GetViewAngles( angles );
+	AngleVectors( angles, fwd, right, up );
+	org[0] = lp->origin[0];
+	org[1] = lp->origin[1];
+	org[2] = lp->origin[2] + 28.0f;
+	delta[0] = wx - org[0];
+	delta[1] = wy - org[1];
+	delta[2] = wz - org[2];
+	z = delta[0] * fwd[0] + delta[1] * fwd[1] + delta[2] * fwd[2];
+	if( z < 16.0f )
+		return 0;
+	px = ( delta[0] * right[0] + delta[1] * right[1] + delta[2] * right[2] ) / z;
+	py = ( delta[0] * up[0] + delta[1] * up[1] + delta[2] * up[2] ) / z;
+	*sx = (int)( ScreenWidth * 0.5f + px * ScreenWidth * 0.5f );
+	*sy = (int)( ScreenHeight * 0.5f - py * ScreenWidth * 0.5f );
 	if( *sx < 8 || *sy < 8 || *sx > ScreenWidth - 8 || *sy > ScreenHeight - 8 )
 		return 0;
 	return 1;

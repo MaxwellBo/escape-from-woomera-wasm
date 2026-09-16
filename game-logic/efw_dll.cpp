@@ -538,7 +538,8 @@ static void EFW_RegisterHostCmds( void )
 		"efw_Talk", "efw_Give", "efw_spider", "efw_Pickup", "efw_UseWithMarker",
 		"efw_diary", "efw_diary_next", "efw_diary_prev", "efw_ShowMenu",
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
-		"efw_pause", "efw_set_state", "efw_changelevel", "menuselect", NULL
+		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
+		"menuselect", NULL
 	};
 	int i;
 	if( done )

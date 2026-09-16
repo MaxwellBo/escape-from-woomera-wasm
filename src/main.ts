@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll11`;
+    return `${url}?v=efw-dll12`;
   return url;
 }
 
@@ -117,7 +117,7 @@ function runGameCmd(cmd: string) {
   const trimmed = cmd.trim();
   if (!trimmed) return;
   /* Send listen-server ClientCommand once. Host+cmd together XOR-toggled diary. */
-  if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b)/i.test(trimmed))
+  if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b|setpos\b)/i.test(trimmed))
     runEngineCmd(`cmd ${trimmed}`);
   else
     runEngineCmd(trimmed);
@@ -732,10 +732,10 @@ consoleForm.addEventListener('submit', (e) => {
   log(`> ${cmd}`);
   // Game-DLL ClientCommand names are not host commands. Prefix with cmd
   // so the listen server forwards them to EFW_ClientCommand.
-  const forwarded =
-    /^(efw_|menuselect\b)/i.test(cmd) && !/^cmd\s/i.test(cmd) ? `cmd ${cmd}` : cmd;
-  runEngineCmd(forwarded);
-  if (forwarded !== cmd) runEngineCmd(cmd);
+  if (!/^cmd\s/i.test(cmd) && /^(efw_|menuselect\b|setpos\b)/i.test(cmd))
+    runEngineCmd(`cmd ${cmd}`);
+  else
+    runEngineCmd(cmd);
   consoleInput.value = '';
 });
 
