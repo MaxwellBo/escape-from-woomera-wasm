@@ -126,14 +126,26 @@ static void EFW_PackBlob( void )
 void EFW_SendEfwData( void )
 {
 	int i;
+	CBasePlayer *pPlayer;
 	if( !gmsgEFWData )
 		return;
 	EFW_PackBlob();
+	/* FUN_100c6dd0: MESSAGE_BEGIN dest=2 (MSG_ALL). Listen-server under
+	   libmenu often drops MSG_ALL; also send MSG_ONE like EFWShow. */
 	MESSAGE_BEGIN( MSG_ALL, gmsgEFWData );
 		WRITE_BYTE( 1 );
 		for( i = 0; i < EFW_HUD_BLOB; i++ )
 			WRITE_BYTE( g_efw.blob[i] );
 	MESSAGE_END();
+	pPlayer = EFW_Player();
+	if( pPlayer )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgEFWData, NULL, pPlayer->pev );
+			WRITE_BYTE( 1 );
+			for( i = 0; i < EFW_HUD_BLOB; i++ )
+				WRITE_BYTE( g_efw.blob[i] );
+		MESSAGE_END();
+	}
 }
 
 void EFW_ThinkDt( void )
@@ -231,14 +243,10 @@ void EFW_SendHudState( void )
 		packed = ( EFW_WeaponMask( g_efw.player ) << 16 ) | ( active & 0xffff );
 		EFW_SetHudInt( 4, packed );
 	}
-	/* FUN_100c6b60 calls FUN_100c6a70 then FUN_100c6a60 (talk-menu hotkeys). */
+	/* FUN_100c6b60 calls FUN_100c6dd0 every time, then FUN_100c6a70/6a60. */
 	EFW_PollMenuKeys();
-	if( gpGlobals->time - g_efw.hudRetry >= 0.1f )
-	{
-		g_efw.hudRetry = gpGlobals->time;
-		EFW_SendEfwData();
-		EFW_TalkScan();
-	}
+	EFW_SendEfwData();
+	EFW_TalkScan();
 	EFW_ThinkConversation();
 }
 

@@ -92,6 +92,12 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		memcpy( &openFlag, blob + 8 + 5 * 4, sizeof( int ) );
 		g_diaryOpen = openFlag != 0;
 	}
+	{
+		static int s_hopeLog;
+		s_hopeLog++;
+		if( s_hopeLog == 1 || ( s_hopeLog % 40 ) == 0 )
+			gEngfuncs.Con_Printf( ">>> hopehud %.1f\n", g_hope );
+	}
 	return 1;
 }
 
@@ -236,6 +242,15 @@ static int __MsgFunc_EFW_Cntxt( const char *pszName, int iSize, void *pbuf )
 	raw = (unsigned char *)g_scan;
 	for( i = 0; i < n; i++ )
 		raw[i] = (unsigned char)READ_BYTE();
+	{
+		static int s_cntxt;
+		if( g_scanCount != s_cntxt )
+		{
+			s_cntxt = g_scanCount;
+			gEngfuncs.Con_Printf( ">>> Cntxt n=%d %s\n", g_scanCount,
+				g_scanCount > 0 && g_scan[0].name[0] ? g_scan[0].name : "" );
+		}
+	}
 	return 1;
 }
 
@@ -638,8 +653,16 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 	{
 		EfwScanSlot *s = &g_scan[i];
 		int x, y;
-		if( EFW_Project( s->x, s->y, s->z, &x, &y ) )
+		int projected = EFW_Project( s->x, s->y, s->z, &x, &y );
+		if( projected )
+		{
+			static int s_bub;
+			s_bub++;
+			if( s_bub <= 3 || ( s_bub % 40 ) == 0 )
+				gEngfuncs.Con_Printf( ">>> bubble %s sx=%d sy=%d type=%d\n",
+					s->name[0] ? s->name : "?", x, y, s->type );
 			EFW_BuildVgui( s, x, y );
+		}
 		else
 		{
 			x = 200;
@@ -706,6 +729,12 @@ int CHudEfw::Draw( float flTime )
 			FillRGBA( x, y, fill, 12, 255, 155, 50, 220 );
 		snprintf( label, sizeof( label ), "HOPE  %d", hope );
 		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
+		{
+			static int s_hopeDraw;
+			s_hopeDraw++;
+			if( s_hopeDraw == 1 || ( s_hopeDraw % 60 ) == 0 )
+				gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
+		}
 		if( g_talkPrompt )
 			gHUD.DrawHudString( x + w + 88, y + 16, ScreenWidth - 8, "TALK", r, g, b );
 		if( g_diaryOpen )

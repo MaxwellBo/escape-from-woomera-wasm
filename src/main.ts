@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll85`;
+    return `${url}?v=efw-dll86`;
   return url;
 }
 
@@ -57,6 +57,16 @@ function applyEfwVgui(text: string): boolean {
   if (msg === 'EFWVGUI CLR') {
     layer.innerHTML = '';
     layer.hidden = true;
+    return true;
+  }
+  if (msg.startsWith('EFWVGUI HOPE ')) {
+    const n = Math.max(0, Math.min(100, parseInt(msg.slice('EFWVGUI HOPE '.length), 10) || 0));
+    const hope = document.getElementById('efw-hope');
+    const label = document.getElementById('efw-hope-label');
+    const fill = document.getElementById('efw-hope-fill');
+    if (hope) hope.hidden = false;
+    if (label) label.textContent = `HOPE  ${n}`;
+    if (fill) fill.style.width = `${n}%`;
     return true;
   }
   if (!msg.startsWith('EFWVGUI ADD ')) return true;
@@ -195,9 +205,23 @@ function pollEfwVgui() {
   }
 }
 
+function applyHopeHud(text: string): boolean {
+  const m = text.match(/>>> hopehud ([\d.]+)/);
+  if (!m) return false;
+  const n = Math.max(0, Math.min(100, Math.round(Number(m[1]))));
+  const hope = document.getElementById('efw-hope');
+  const label = document.getElementById('efw-hope-label');
+  const fill = document.getElementById('efw-hope-fill');
+  if (hope) hope.hidden = false;
+  if (label) label.textContent = `HOPE  ${n}`;
+  if (fill) fill.style.width = `${n}%`;
+  return false;
+}
+
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
+  applyHopeHud(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))

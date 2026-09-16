@@ -725,10 +725,16 @@ void EFW_HtmlVguiSync( void )
 
 	if( !pPlayer )
 		return;
+	/* FUN_10044f70 world-space CommandButtons are client HUD_Redraw.
+	   Writing TalkScan widgets here CLRs projected coords. Only emit
+	   ShowMenu picks while talkActive. */
+	if( !st->talkActive )
+		return;
 	memset( btns, 0, sizeof( btns ) );
 	/* FUN_100c6e60 ShowMenu CommandButtons. TalkScan's world widgets
 	   must not CLR the topic list while a conversation is up. */
-	if( st->talkActive && st->menuCount > 0 )
+	if( st->menuCount <= 0 )
+		return;
 	{
 		int x = 320;
 		int y = 220;
@@ -740,15 +746,6 @@ void EFW_HtmlVguiSync( void )
 				st->menuText[i][0] ? st->menuText[i] : st->menuTitle );
 			snprintf( cmd, sizeof( cmd ), "menuselect %d", i + 1 );
 			EFW_HtmlVguiAdd( btns, &n, x, y, label, cmd );
-		}
-	}
-	else
-	{
-		for( i = 0; i < st->scanCount; i++ )
-		{
-			int x = 200;
-			int y = EFW_HTML_SH - 32 * ( st->scanCount - i ) - 24;
-			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, x, y );
 		}
 	}
 	sig[0] = '\0';

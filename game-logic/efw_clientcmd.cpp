@@ -45,6 +45,25 @@ static void EFW_TouchTriggers( CBasePlayer *pPlayer, const Vector &pos )
 	}
 }
 
+static void EFW_Face( CBasePlayer *pPlayer, const Vector &target )
+{
+	Vector dir;
+	float yaw;
+
+	if( !pPlayer )
+		return;
+	dir = target - pPlayer->pev->origin;
+	dir.z = 0;
+	if( dir.Length() < 1.0f )
+		return;
+	yaw = UTIL_VecToYaw( dir );
+	pPlayer->pev->angles.x = 0;
+	pPlayer->pev->angles.y = yaw;
+	pPlayer->pev->angles.z = 0;
+	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	pPlayer->pev->fixangle = 1;
+}
+
 static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
 {
 	char line[96];
@@ -823,6 +842,12 @@ int EFW_ClientCommand( edict_t *pEntity )
 				if( cn && !strncmp( cn, "monster_", 8 ) )
 					pos = pos + Vector( 110.0f, 0.0f, 8.0f );
 				EFW_Relocate( pPlayer, pos );
+				if( cn && !strncmp( cn, "monster_", 8 ) )
+				{
+					Vector look = EFW_Place( pEnt );
+					look.z += 36.0f;
+					EFW_Face( pPlayer, look );
+				}
 				if( cn && !strncmp( cn, "trigger_", 8 ) )
 					pEnt->Touch( pPlayer );
 				/* FUN_100c7da0: named GateFSM targets fire from trigger
