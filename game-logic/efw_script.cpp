@@ -142,13 +142,13 @@ static int EfwFlex_GetNextBuffer( EfwYyScan *yy )
 					yy->ch_buf = NULL;
 				else
 					yy->ch_buf = (char *)realloc( yy->ch_buf, (size_t)new_size + 2 );
+				EfwFlexMsg( ">>> FUN_100c2560" ); /* yy_flex_realloc */
 			}
 			if( !yy->ch_buf )
 			{
 				EfwFlexFatal( "fatal error - scanner input buffer overflow" );
 				return 0;
 			}
-			EfwFlexMsg( ">>> FUN_100c2560" ); /* yy_flex_realloc */
 			num_to_read = yy->buf_size - number_to_move;
 		}
 		if( num_to_read > EFW_YY_READ_BUF )
