@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll25`;
+    return `${url}?v=efw-dll26`;
   return url;
 }
 
@@ -765,9 +765,10 @@ async function boot() {
     log('engine main loop started; map load deferred until after Host_Init');
     canvas.focus();
     resumeEngineLoop();
-    setTimeout(() => {
-      loadMap('efw_prototype_level1', 'deferred after Host_Init');
-    }, 1500);
+    /* liblist.gam startmap is efw_prototype_level1; do not issue map again
+       (a second map command stacked SV_SpawnServer and hung/refilled edicts). */
+    startedMap = 'efw_prototype_level1';
+    log('engine using liblist startmap efw_prototype_level1 (no second map command)');
     setTimeout(() => {
       runEngineCmd('pausable 0');
       resumeEngineLoop();
@@ -780,6 +781,7 @@ async function boot() {
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) resumeEngineLoop();
     });
+    setInterval(resumeEngineLoop, 250);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
@@ -804,7 +806,6 @@ consoleInput.addEventListener('keyup', (e) => e.stopPropagation());
 mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
-    log(`> map ${map}`);
     if (map) loadMap(map, 'maps panel');
     void captureInput();
   });
