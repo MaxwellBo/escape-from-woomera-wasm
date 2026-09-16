@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll72`;
+    return `${url}?v=efw-dll73`;
   return url;
 }
 
@@ -408,18 +408,19 @@ function onServerActivateSeen() {
   runEngineCmd('pausable 0');
   runEngineCmd('cancelselect');
   runEngineCmd('scr_loading 0');
+  runEngineCmd('ui_renderworld 1');
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
-    /* Boot leaves libmenu painted over the world. One togglemenu hides
-       it; a second toggle after CHANGE_LEVEL would show it again. */
+    runEngineCmd('ui_renderworld 1');
+    /* togglemenu is CL_Escape_f: no-op when key_dest is the menu, otherwise
+       it OPENS the menu. Resume Game is hidden unless CL_IsActive(). Draw
+       the BSP under libmenu via ui_renderworld. */
     if (!menuDismissed) {
-      runEngineCmd('togglemenu');
       menuDismissed = true;
-      log('listen: togglemenu after ServerActivate (dismiss libmenu)');
+      log('listen: ui_renderworld 1 (libmenu cannot hide via togglemenu)');
     } else {
-      /* Leave key_console so the software renderer presents the BSP. */
       runEngineCmd('toggleconsole');
       log('listen: toggleconsole after CHANGE_LEVEL (back to game)');
     }
@@ -440,8 +441,9 @@ function onServerActivateSeen() {
     if (changeWatch) return;
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
+    runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
-    log('listen: r_norefresh 0 (soft world present)');
+    log('listen: r_norefresh 0 ui_renderworld 1 (soft world present)');
   }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
@@ -919,6 +921,8 @@ async function boot() {
       '+sv_validate_changelevel',
       '0',
       '+sv_newunit',
+      '1',
+      '+ui_renderworld',
       '1',
       '+r_fullbright',
       '1',
