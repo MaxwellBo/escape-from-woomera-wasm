@@ -416,6 +416,9 @@ void EFW_Spider( CBasePlayer *pPlayer )
 	if( EFW_Dll()->scanCount <= 0 )
 	{
 		EFW_DebugPrint( "Ignoring spider" );
+		ALERT( at_error, "Ignoring spider\n" );
+		if( g_engfuncs.pfnServerPrint )
+			g_engfuncs.pfnServerPrint( "Ignoring spider\n" );
 		return;
 	}
 	EFW_SendCntxt();

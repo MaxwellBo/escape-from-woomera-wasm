@@ -58,6 +58,7 @@ def main() -> None:
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
             "cl_dll/input.cpp",
+            "cl_dll/cdll_int.cpp",
         ]
         subprocess.run(["git", "-C", str(sdk), "checkout", "--", *tracked], check=False)
     for leftover in (
@@ -457,6 +458,50 @@ def main() -> None:
         "\tm_Flash.Init();\n",
         "\tm_Flash.Init();\n"
         f"\tm_Efw.Init(); {MARKER}\n",
+    )
+
+    cdll_int = cldll / "cdll_int.cpp"
+    once(
+        cdll_int,
+        "int DLLEXPORT HUD_Redraw( float time, int intermission )\n"
+        "{\n"
+        "	gHUD.Redraw( time, intermission );\n"
+        "\n"
+        "	return 1;\n"
+        "}\n",
+        "int DLLEXPORT HUD_Redraw( float time, int intermission )\n"
+        "{\n"
+        "	static int s_efwRedraw;\n"
+        "	s_efwRedraw++;\n"
+        "	if( s_efwRedraw <= 32 || ( s_efwRedraw % 120 ) == 1 )\n"
+        "		gEngfuncs.Con_Printf( \"efw: HUD_Redraw n=%d\\n\", s_efwRedraw );\n"
+        "	/* TeamFortressViewport + logo SPR after CHudEfw::Draw never\n"
+        "	   returned from the first ClientFrame. Draw only EFW until\n"
+        "	   Host_Frame has proven it can loop. */\n"
+        "	if( s_efwRedraw <= 32 )\n"
+        "	{\n"
+        "		gHUD.m_Efw.Draw( time );\n"
+        "		gEngfuncs.Con_Printf( \"efw: HUD_Redraw skip n=%d\\n\", s_efwRedraw );\n"
+        "		return 1;\n"
+        "	}\n"
+        "	gHUD.Redraw( time, intermission );\n"
+        "	return 1;\n"
+        "}\n",
+    )
+    once(
+        cdll_int,
+        "void DLLEXPORT HUD_Frame( double time )\n"
+        "{\n"
+        "	GetClientVoiceMgr()->Frame(time);\n"
+        "}\n",
+        "void DLLEXPORT HUD_Frame( double time )\n"
+        "{\n"
+        "	static int s_efwFrame;\n"
+        "	s_efwFrame++;\n"
+        "	if( s_efwFrame <= 32 )\n"
+        "		return;\n"
+        "	GetClientVoiceMgr()->Frame(time);\n"
+        "}\n",
     )
 
     input_cpp = cldll / "input.cpp"

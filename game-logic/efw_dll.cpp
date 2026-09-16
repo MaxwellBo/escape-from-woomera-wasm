@@ -1053,21 +1053,10 @@ void EFW_StartFrame( void )
 	if( !s_thinkRestored )
 	{
 		s_thinkRestored = 1;
-		EFW_LogLine( "efw: StartFrame pawn live - restoring NPC think\n" );
-		for( i = 1; i < EFW_MaxEnts(); i++ )
-		{
-			edict_t *pent = INDEXENT( i );
-			if( !pent || pent->free )
-				continue;
-			if( pent->v.modelindex <= 0 )
-				continue;
-			EFW_EnableNpcThink( pent );
-			/* Leave stock HL monsters frozen. Unfreezing monster_barney
-			   made MonsterThink/GetEyePosition stall Host_Frame after the
-			   first live tick. */
-		}
+		EFW_LogLine( "efw: StartFrame pawn live - defer NPC think until ClientFrame loops\n" );
+		EFW_FreezeNpcPhysics();
 		/* Return so ClientFrame/CheckForResend and cmd forwarding run
-		   before the first deferred SET_MODEL. */
+		   before any IdleThink/SET_MODEL. */
 		return;
 	}
 	s_liveTicks++;
