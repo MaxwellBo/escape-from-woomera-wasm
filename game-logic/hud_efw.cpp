@@ -71,6 +71,8 @@ static HSPRITE EFW_LoadSpr( const char *path )
 	return SPR_Load( path );
 }
 
+static void EFW_ClearStoryboard( void );
+
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 {
 	unsigned char blob[36];
@@ -93,8 +95,19 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		g_weaponId = -1;
 	{
 		int openFlag = 0;
+		int paused = 0;
 		memcpy( &openFlag, blob + 8 + 5 * 4, sizeof( int ) );
 		g_diaryOpen = openFlag != 0;
+		/* hudInt[6] pause. HTML Continue is FUN_100485d0 ClientCmd
+		   efw_pause 0; Panel dtor then clears DAT_1007ab5c. */
+		memcpy( &paused, blob + 8 + 6 * 4, sizeof( int ) );
+		{
+			static int s_lastPause = -1;
+			/* Falling edge of hudInt[6]: Panel dtor DAT_1007ab5c = -1. */
+			if( g_storyCode && s_lastPause == 1 && paused == 0 )
+				EFW_ClearStoryboard();
+			s_lastPause = paused;
+		}
 	}
 	{
 		static int s_diaryLog = -1;
@@ -217,6 +230,17 @@ static void EFW_OpenStoryboard( int code )
 	g_hStory = EFW_LoadSpr( spr );
 }
 
+/* FUN_10043a10 / Panel dtor 0x10045899: DAT_1007ab5c = -1 so tiles stop. */
+static void EFW_ClearStoryboard( void )
+{
+	g_storyCode = 0;
+	g_storyPauseSent = 0;
+	g_hStory = 0;
+	g_storyFade = 0.0f;
+	g_menuCode = 0;
+	g_storyChange[0] = '\0';
+}
+
 static void EFW_DismissStoryboard( void )
 {
 	/* FUN_100485d0: storyboard InputSignal ClientCmd efw_pause 0, then
@@ -228,12 +252,7 @@ static void EFW_DismissStoryboard( void )
 		snprintf( buf, sizeof( buf ), "%s\n", g_storyChange );
 		gEngfuncs.pfnServerCmd( buf );
 	}
-	g_storyCode = 0;
-	g_storyPauseSent = 0;
-	g_hStory = 0;
-	g_storyFade = 0.0f;
-	g_menuCode = 0;
-	g_storyChange[0] = '\0';
+	EFW_ClearStoryboard();
 }
 
 static int __MsgFunc_EFW_Menu( const char *pszName, int iSize, void *pbuf )
@@ -799,9 +818,18 @@ static void EFW_DrawInteractPrompt( void )
 	int nameW;
 	const char *name;
 	static char s_interact[32];
+	static int s_wasStory;
 
 	if( g_storyCode )
+	{
+		s_wasStory = 1;
 		return;
+	}
+	if( s_wasStory )
+	{
+		s_wasStory = 0;
+		s_interact[0] = '\0';
+	}
 	if( g_scanCount <= 0 )
 	{
 		if( s_interact[0] )
