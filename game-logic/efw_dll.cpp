@@ -803,7 +803,18 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 
 static void EFW_HostFwd( void )
 {
-	edict_t *e = INDEXENT( 1 );
+	CBasePlayer *pPlayer;
+	edict_t *e;
+	char line[96];
+	const char *pcmd = CMD_ARGV( 0 );
+
+	pPlayer = EFW_Player();
+	e = pPlayer ? pPlayer->edict() : INDEXENT( 1 );
+	snprintf( line, sizeof( line ), "efw: hostfwd %s pawn=%d\n",
+		pcmd ? pcmd : "?", ( e && e->pvPrivateData ) ? 1 : 0 );
+	ALERT( at_error, "%s", line );
+	if( g_engfuncs.pfnServerPrint )
+		g_engfuncs.pfnServerPrint( line );
 	if( e && e->pvPrivateData )
 		EFW_ClientCommand( e );
 }

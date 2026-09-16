@@ -325,6 +325,7 @@ int CHudEfw::Init( void )
 
 int CHudEfw::VidInit( void )
 {
+	gEngfuncs.Con_Printf( "efw: HUD_VidInit\n" );
 	g_hDiary = 0;
 	g_loadedPage = -1;
 	g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );
@@ -642,10 +643,15 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 
 int CHudEfw::Draw( float flTime )
 {
+	static int s_drawN;
 	int x, y, w, fill;
 	int r, g, b;
 	char label[32];
 	int hope;
+
+	s_drawN++;
+	if( s_drawN <= 8 || ( s_drawN % 120 ) == 1 )
+		gEngfuncs.Con_Printf( "efw: HUD_Draw n=%d\n", s_drawN );
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 		return 1;

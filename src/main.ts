@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll43d`;
+    return `${url}?v=efw-dll44`;
   return url;
 }
 
@@ -182,9 +182,9 @@ function pressGameKey(key: string, keyCode: number) {
 (window as Window & { pressGameKey?: typeof pressGameKey }).pressGameKey = pressGameKey;
 
 function chooseTalkSlot(slot: number) {
-  log(`> cmd menuselect ${slot}`);
+  log(`> menuselect ${slot}`);
   runEngineCmd('pausable 0');
-  runEngineCmd(`cmd menuselect ${slot}`);
+  runEngineCmd(`menuselect ${slot}`);
 }
 
 function runEngineCmd(cmd: string) {
@@ -245,15 +245,12 @@ function onServerActivateSeen() {
   }, 4000);
 }
 
-/** Host console, ClientCommand, and listen-server `cmd` forwarding. */
+/** Host console plus EFW AddServerCommand (EFW_HostFwd). Do not prefix
+ *  `cmd` — that queues a usercmd and never runs while ClientFrame is stuck. */
 function runGameCmd(cmd: string) {
   const trimmed = cmd.trim();
   if (!trimmed) return;
-  /* Send listen-server ClientCommand once. Host+cmd together XOR-toggled diary. */
-  if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b|setpos\b)/i.test(trimmed))
-    runEngineCmd(`cmd ${trimmed}`);
-  else
-    runEngineCmd(trimmed);
+  runEngineCmd(trimmed);
 }
 
 function formatErr(err: unknown): string {
@@ -708,8 +705,6 @@ async function boot() {
       '1',
       '+r_drawentities',
       '0',
-      '+r_drawworld',
-      '0',
       '+r_fullbright',
       '1',
       '+cl_himodels',
@@ -720,6 +715,7 @@ async function boot() {
     }
     engine = new Xash3D({
       canvas,
+      renderer: 'soft',
       arguments: bootArgs,
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
@@ -741,6 +737,7 @@ async function boot() {
     loopbackNet.onLog = log;
     engine.net = loopbackNet;
     (window as Window & { __efwNet?: EfwLoopbackNet }).__efwNet = loopbackNet;
+    (window as Window & { __efwRun?: typeof runEngineCmd }).__efwRun = runEngineCmd;
     log('boot: init() with in-process loopback net');
     await engine.init();
     log('boot: init ok');
@@ -876,12 +873,7 @@ consoleForm.addEventListener('submit', (e) => {
   const cmd = consoleInput.value.trim();
   if (!cmd) return;
   log(`> ${cmd}`);
-  // Game-DLL ClientCommand names are not host commands. Prefix with cmd
-  // so the listen server forwards them to EFW_ClientCommand.
-  if (!/^cmd\s/i.test(cmd) && /^(efw_|menuselect\b|setpos\b)/i.test(cmd))
-    runEngineCmd(`cmd ${cmd}`);
-  else
-    runEngineCmd(cmd);
+  runEngineCmd(cmd);
   consoleInput.value = '';
 });
 
