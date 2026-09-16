@@ -185,7 +185,7 @@ void EFW_ThinkHope( void )
 	EFW_SetHudFloat( 1, hope );
 	s_hopeN++;
 	if( s_hopeN == 1 || ( s_hopeN % 40 ) == 0 )
-		EFW_DebugPrint( "hope %.1f", hope );
+		EFW_DebugPrint( ">>> hope %.1f time=%.2f", hope, now );
 	if( hope <= 0.0f && g_efw.player && !g_efw.hopeFailed )
 	{
 		g_efw.hopeFailed = 1;
@@ -510,13 +510,26 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		return;
 	/* efw_ShowMenu 0x100c6e60 writes DAT_1013487c = now on each show. */
 	st->talkStart = gpGlobals->time;
+	st->menuTitle[0] = '\0';
+	if( title )
+		strncpy( st->menuTitle, title, sizeof( st->menuTitle ) - 1 );
+	st->menuTitle[sizeof( st->menuTitle ) - 1] = '\0';
 	EFW_SendEfwShowChunks( pPlayer, 0, title ? title : "" );
 	if( nLines < 0 )
 		nLines = 0;
 	if( nLines > 6 )
 		nLines = 6;
+	for( i = 0; i < EFW_MENU_LINES; i++ )
+		st->menuText[i][0] = '\0';
 	for( i = 0; i < nLines; i++ )
+	{
+		if( lines[i] )
+			strncpy( st->menuText[i], lines[i], sizeof( st->menuText[i] ) - 1 );
+		st->menuText[i][sizeof( st->menuText[i] ) - 1] = '\0';
 		EFW_SendEfwShowChunks( pPlayer, i + 1, lines[i] ? lines[i] : "" );
+	}
+	EFW_DebugPrint( ">>> EFWShow lines=%d %s", nLines, st->menuTitle[0] ? st->menuTitle : "" );
+	EFW_HtmlVguiSync();
 }
 
 void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text )

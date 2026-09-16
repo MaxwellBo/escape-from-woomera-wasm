@@ -726,11 +726,30 @@ void EFW_HtmlVguiSync( void )
 	if( !pPlayer )
 		return;
 	memset( btns, 0, sizeof( btns ) );
-	for( i = 0; i < st->scanCount; i++ )
+	/* FUN_100c6e60 ShowMenu CommandButtons. TalkScan's world widgets
+	   must not CLR the topic list while a conversation is up. */
+	if( st->talkActive && st->menuCount > 0 )
 	{
-		int x = 200;
-		int y = EFW_HTML_SH - 32 * ( st->scanCount - i ) - 24;
-		EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, x, y );
+		int x = 320;
+		int y = 220;
+		for( i = 0; i < st->menuCount && i < 6; i++ )
+		{
+			char label[192];
+			char cmd[32];
+			snprintf( label, sizeof( label ), "Press %d  %s", i + 1,
+				st->menuText[i][0] ? st->menuText[i] : st->menuTitle );
+			snprintf( cmd, sizeof( cmd ), "menuselect %d", i + 1 );
+			EFW_HtmlVguiAdd( btns, &n, x, y, label, cmd );
+		}
+	}
+	else
+	{
+		for( i = 0; i < st->scanCount; i++ )
+		{
+			int x = 200;
+			int y = EFW_HTML_SH - 32 * ( st->scanCount - i ) - 24;
+			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, x, y );
+		}
 	}
 	sig[0] = '\0';
 	used = 0;
