@@ -576,7 +576,12 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 				if( g_storyCode )
 					EFW_ClearStoryboard();
 				if( g_captionLen )
+				{
+					/* FUN_10048460 / FUN_100485d0 Panel dtor ClientCmd pause 0. */
+					gEngfuncs.Con_Printf( ">>> FUN_10048460 efw_pause 0\n" );
+					gEngfuncs.Con_Printf( ">>> FUN_100485d0 efw_pause 0\n" );
 					EFW_ClearCaption();
+				}
 			}
 			s_lastPause = paused;
 		}

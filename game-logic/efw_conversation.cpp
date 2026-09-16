@@ -81,7 +81,16 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		FREE_FILE( buf );
 	/* FUN_100c2660 returns DAT_10132460 after FUN_100c1dc0 scanner,
 	   FUN_100c2360 0x4000 buffer, FUN_100be970 yyparse. */
-	EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
+	{
+		static int s_parse;
+		if( !s_parse )
+		{
+			s_parse = 1;
+			EFW_DebugPrint( ">>> FUN_100c2660 %s questions=%d", scriptName, slot->script.questionCount );
+		}
+		else
+			EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
+	}
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
@@ -431,6 +440,17 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st = EFW_Dll();
 	if( st->talkActive && st->talkNpc == pNpc && st->menuMode != 0 )
 		return;
+	{
+		/* FUN_100c6420: MapLevel then FUN_100b9990 conversation match. */
+		static int s_talk;
+		if( !s_talk )
+		{
+			s_talk = 1;
+			EFW_DebugPrint( ">>> FUN_100c6420 %s", STRING( pNpc->pev->targetname ) );
+			EFW_DebugPrint( ">>> FUN_100b9990 %s", STRING( pNpc->pev->targetname ) );
+		}
+	}
+	(void)EFW_MapLevel();
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
@@ -457,6 +477,14 @@ void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	script = EFW_ParseFile( npc );
 	if( script )
 	{
+		{
+			static int s_walk;
+			if( !s_walk )
+			{
+				s_walk = 1;
+				EFW_DebugPrint( ">>> FUN_100bdc80 UNWANTED_ITEM %s", npc ? npc : "?" );
+			}
+		}
 		qi = EfwScript_FindQuestion( script, "UNWANTED_ITEM" );
 		if( qi >= 0 )
 		{

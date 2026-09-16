@@ -75,10 +75,26 @@ void EFW_SetPause( int on )
 	if( EFW_GetHudInt( 6 ) == want )
 		return;
 	EFW_SetHudInt( 6, want );
+	{
+		static int s_get;
+		if( !s_get )
+		{
+			s_get = 1;
+			EFW_DebugPrint( ">>> FUN_100c7490 pause=%d", want );
+		}
+	}
 	if( !pPlayer )
 		return;
 	pPlayer->pev->movetype = on ? MOVETYPE_NONE : MOVETYPE_WALK;
 	/* FUN_100c74a0: freeze monster_patrol_guard while paused. */
+	{
+		static int s_freeze;
+		if( !s_freeze )
+		{
+			s_freeze = 1;
+			EFW_DebugPrint( ">>> FUN_100c74a0 monster_patrol_guard on=%d", want );
+		}
+	}
 	pGuard = NULL;
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
 	{
@@ -362,6 +378,16 @@ void EFW_InitPA( void )
 	g_pa.rarLock = 0;
 	g_pa.inited = 1;
 	PRECACHE_SOUND( "Dingaling.wav" );
+	{
+		static int s_pa;
+		if( !s_pa )
+		{
+			s_pa = 1;
+			EFW_DebugPrint( ">>> FUN_100c5f80" );
+			EFW_DebugPrint( ">>> FUN_100c7590" );
+			EFW_DebugPrint( ">>> FUN_100c75c0 Dingaling.wav" );
+		}
+	}
 	EFW_DebugPrint( ">>> FUN_100c7670 Ann_RAR_124 Ann_HAM_103 Ann_TRE_046 Ann_PHA_216 callToPrayer" );
 }
 

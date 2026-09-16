@@ -158,6 +158,14 @@ static void *EFW_NewCmdBtn( CBasePlayer *pPlayer, int index )
 	EfwCmdBtn *b = (EfwCmdBtn *)calloc( 1, sizeof( EfwCmdBtn ) );
 	if( !b )
 		return NULL;
+	{
+		static int s_btn;
+		if( !s_btn )
+		{
+			s_btn = 1;
+			EFW_DebugPrint( ">>> FUN_100b9990 CommandButton idx=%d", index );
+		}
+	}
 	b->vtable = (void *)0x100f705c;
 	b->player = pPlayer;
 	b->question = (void *)(long)( index + 1 );
@@ -594,6 +602,78 @@ int EFW_HasKeyword( const char *word )
 	return 0;
 }
 
+#define EFW_DROP_MAX 16
+static void *g_dropWep[EFW_DROP_MAX]; /* DAT_10132470 pairs */
+static void *g_dropOwner[EFW_DROP_MAX];
+static int g_dropN; /* DAT_10132c70 */
+
+void EFW_DropTableReset( void )
+{
+	static int s_reset;
+	if( !s_reset )
+	{
+		s_reset = 1;
+		EFW_DebugPrint( ">>> FUN_100c2bf0" );
+	}
+	g_dropN = 0;
+	memset( g_dropWep, 0, sizeof( g_dropWep ) );
+	memset( g_dropOwner, 0, sizeof( g_dropOwner ) );
+}
+
+void *EFW_DropTableFind( void *weapon )
+{
+	int i;
+	static int s_find;
+	if( !s_find )
+	{
+		s_find = 1;
+		EFW_DebugPrint( ">>> FUN_100c2c00" );
+	}
+	if( !weapon )
+		return NULL;
+	for( i = 0; i < g_dropN; i++ )
+	{
+		if( g_dropWep[i] == weapon )
+			return &g_dropWep[i];
+	}
+	return NULL;
+}
+
+void EFW_DropTablePush( void *owner, void *weapon )
+{
+	static int s_push;
+	if( !s_push )
+	{
+		s_push = 1;
+		EFW_DebugPrint( ">>> FUN_100c2e90" );
+	}
+	if( g_dropN >= EFW_DROP_MAX )
+		return;
+	g_dropWep[g_dropN] = weapon;
+	g_dropOwner[g_dropN] = owner;
+	g_dropN++;
+}
+
+int EFW_DropTableHas( CBasePlayer *pPlayer, int weaponId )
+{
+	int i;
+	static int s_hasDrop;
+	if( !s_hasDrop )
+	{
+		s_hasDrop = 1;
+		EFW_DebugPrint( ">>> FUN_100c2ee0 id=%d", weaponId );
+	}
+	(void)EFW_DropTableFind( pPlayer ? pPlayer->m_pActiveItem : NULL );
+	for( i = 0; i < g_dropN; i++ )
+	{
+		CBasePlayerItem *pItem = (CBasePlayerItem *)g_dropWep[i];
+		if( pItem && pItem->m_iId == weaponId
+			&& ( !pPlayer || g_dropOwner[i] == pPlayer ) )
+			return 1;
+	}
+	return 0;
+}
+
 int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
 {
 	{
@@ -603,11 +683,15 @@ int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
 			s_has = 1;
 			EFW_DebugPrint( ">>> FUN_100c2f70 %s", classname ? classname : "-" );
 			EFW_DebugPrint( ">>> FUN_100c2dc0 %s", classname ? classname : "-" );
+			EFW_DebugPrint( ">>> FUN_100c2ee0 %s", classname ? classname : "-" );
+			EFW_DebugPrint( ">>> FUN_100c2c00 %s", classname ? classname : "-" );
 		}
 	}
 	if( !pPlayer || !classname )
 		return 0;
 	if( pPlayer->HasNamedPlayerItem( classname ) )
+		return 1;
+	if( EFW_DropTableHas( pPlayer, EFW_WeaponTypeId( classname ) ) )
 		return 1;
 	if( !strcmp( classname, "weapon_efw_Pliers" ) && ( g_efw.items & EFW_ITEM_PLIERS ) )
 		return 1;
@@ -732,6 +816,14 @@ void EFW_MarkSeen( const char *npc, const char *topic )
 /* FUN_100c7380: EFWShow WRITE_BYTE(line) + 30-char chunk. 0xff clears. */
 static void EFW_SendEfwShow( CBasePlayer *pPlayer, int code, const char *chunk )
 {
+	{
+		static int s_show;
+		if( !s_show )
+		{
+			s_show = 1;
+			EFW_DebugPrint( ">>> FUN_100c7380 code=0x%x", code & 0xff );
+		}
+	}
 	if( !pPlayer || !gmsgEFWShow )
 		return;
 	MESSAGE_BEGIN( MSG_ONE, gmsgEFWShow, NULL, pPlayer->pev );
@@ -842,6 +934,14 @@ void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *
 void EFW_CloseMenu( CBasePlayer *pPlayer )
 {
 	/* FUN_100c7430 → ShowMenu(0, nulls) → FUN_100c6d70(0,0,0,0,0,0). */
+	{
+		static int s_close;
+		if( !s_close )
+		{
+			s_close = 1;
+			EFW_DebugPrint( ">>> FUN_100c7430" );
+		}
+	}
 	EFW_VguiAssignSlots( NULL, NULL, NULL, NULL, NULL, NULL );
 	if( !pPlayer )
 		return;
@@ -1187,6 +1287,10 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	}
 	EFW_SetHudFloat( 0, 100.0f ); /* FUN_100c8180(0, 0x42c80000) */
 	EFW_SetHudFloat( 1, 80.0f );  /* FUN_100c8180(1, 0x42a00000) */
+	/* FUN_100c6740 tail: FUN_100c2bf0 zeros the drop-item table. */
+	EFW_DropTableReset();
+	(void)EFW_DropTableFind( NULL );
+	(void)EFW_DropTableHas( pPlayer, WEAPON_EFW_PLIERS );
 	g_efw.lastTime = gpGlobals->time;
 	g_efw.hideDist = EFW_HIDE_DIST;
 	g_efw.diaryPending = -1;
@@ -1194,6 +1298,8 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	EFW_LoadAllConversations();
 	/* FUN_100c6950 CloseTalk after LoadAll (DAT_1013488c/80 = 0). */
 	EFW_CloseTalk();
+	/* FUN_100c6a60 getter leftover: FUN_100c7450 / FUN_100c7420 after CloseTalk. */
+	EFW_PollMenuKeys();
 	/* FUN_100c3430: conversation engine checks seeded ESCAPE after LoadAll. */
 	(void)EFW_HasKeyword( "ESCAPE" );
 	(void)EFW_HasKeyword( "GREET" );
@@ -1443,6 +1549,17 @@ static void EFW_HostFwd( void )
 			EFW_DebugPrint( ">>> efw_Talk (not found)" );
 		return;
 	}
+	if( !strcmp( pcmd, "drop" ) )
+	{
+		EFW_DebugPrint( ">>> FUN_100c4580" );
+		EFW_DropTablePush( g_efw.player, NULL );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_spider" ) )
+	{
+		EFW_Spider( g_efw.player );
+		return;
+	}
 	if( !strcmp( pcmd, "efw_set_state" ) )
 	{
 		if( CMD_ARGC() > 1 )
@@ -1632,6 +1749,16 @@ void EFW_PollMenuKeys( void )
 	CBasePlayer *pPlayer;
 	int slot;
 
+	{
+		static int s_poll;
+		if( !s_poll )
+		{
+			s_poll = 1;
+			EFW_DebugPrint( ">>> FUN_100c7450 talkActive=%d", g_efw.talkActive );
+			EFW_DebugPrint( ">>> FUN_100c7420 npc=%s",
+				g_efw.talkNpc ? STRING( g_efw.talkNpc->pev->targetname ) : "-" );
+		}
+	}
 	if( !g_efw.talkActive )
 		return;
 	pPlayer = EFW_Player();

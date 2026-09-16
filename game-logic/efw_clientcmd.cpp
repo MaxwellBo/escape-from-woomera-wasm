@@ -559,6 +559,14 @@ void EFW_IdTagPlaceVirtual( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 void EFW_Spider( CBasePlayer *pPlayer )
 {
 	/* ClientCommand 0x1001b450: FUN_100c7820 (scanCount>0) else "Ignoring spider". */
+	{
+		static int s_spider;
+		if( !s_spider )
+		{
+			s_spider = 1;
+			EFW_DebugPrint( ">>> FUN_100c7820 scan=%d", EFW_Dll()->scanCount );
+		}
+	}
 	if( !pPlayer )
 		return;
 	if( EFW_Dll()->scanCount <= 0 )
@@ -674,6 +682,10 @@ int EFW_ClientCommand( edict_t *pEntity )
 			pEnt = EFW_AimEntity( pPlayer, 384.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 384.0f );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_StartTalk( pPlayer, pEnt );
 		else
@@ -760,8 +772,10 @@ int EFW_ClientCommand( edict_t *pEntity )
 				{
 					s_drop = 1;
 					EFW_DebugPrint( ">>> FUN_100c4580" );
+					EFW_DebugPrint( ">>> FUN_100c2e90" );
 				}
 			}
+			EFW_DropTablePush( pPlayer, pItem );
 			EFW_StripWeapon( pPlayer, cn, bit );
 		}
 		else

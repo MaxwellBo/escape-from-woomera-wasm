@@ -253,8 +253,10 @@ void CEfwWeapon::Holster( int skiplocal )
 		{
 			s_holster = 1;
 			EFW_DebugPrint( ">>> FUN_100c4580" );
+			EFW_DebugPrint( ">>> FUN_100c2e90" );
 		}
 	}
+	EFW_DropTablePush( m_pPlayer, this );
 #endif
 	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.4f;
 	SendWeaponAnim( 0 );

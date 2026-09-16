@@ -566,6 +566,14 @@ void CPatrolGuard::PatrolThink( void )
 	if( !pev->modelindex )
 		return;
 	/* FUN_100c7490 / DAT_101348ac pause. */
+	{
+		static int s_pauseGet;
+		if( !s_pauseGet )
+		{
+			s_pauseGet = 1;
+			EFW_DebugPrint( ">>> FUN_100c7490 pause=%d", EFW_GetHudInt( 6 ) );
+		}
+	}
 	if( EFW_GetHudInt( 6 ) )
 	{
 		pev->framerate = 0.0f;

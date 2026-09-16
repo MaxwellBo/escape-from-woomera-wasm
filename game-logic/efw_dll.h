@@ -108,6 +108,10 @@ void EFW_CloseMenu( CBasePlayer *pPlayer );
 void EFW_Print( CBasePlayer *pPlayer, const char *text );
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName );
 int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname ); /* 0x100c2f70 */
+void EFW_DropTableReset( void ); /* FUN_100c2bf0 DAT_10132c70 = 0 */
+void EFW_DropTablePush( void *owner, void *weapon ); /* FUN_100c2e90 Holster tail */
+void *EFW_DropTableFind( void *weapon ); /* FUN_100c2c00 */
+int EFW_DropTableHas( CBasePlayer *pPlayer, int weaponId ); /* FUN_100c2ee0 */
 int EFW_HasSeen( const char *npc, const char *topic );
 void EFW_MarkSeen( const char *npc, const char *topic );
 void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action );
