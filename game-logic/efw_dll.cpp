@@ -49,7 +49,13 @@ void EFW_DebugPrint( const char *fmt, ... )
 	va_start( args, fmt );
 	vsnprintf( buf, sizeof( buf ), fmt, args );
 	va_end( args );
-	ALERT( at_console, "%s\n", buf );
+	ALERT( at_error, "%s\n", buf );
+	if( g_engfuncs.pfnServerPrint )
+	{
+		char line[260];
+		snprintf( line, sizeof( line ), "%s\n", buf );
+		g_engfuncs.pfnServerPrint( line );
+	}
 }
 
 int EFW_FStrEq( const char *a, const char *b )

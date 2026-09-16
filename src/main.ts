@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll44`;
+    return `${url}?v=efw-dll45`;
   return url;
 }
 
@@ -704,6 +704,8 @@ async function boot() {
       '+sv_lan',
       '1',
       '+r_drawentities',
+      '0',
+      '+r_drawworld',
       '0',
       '+r_fullbright',
       '1',
