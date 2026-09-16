@@ -48,6 +48,8 @@ static int g_storyPauseSent;
 static char g_storyChange[64];
 static float g_storyFade; /* DAT_100baf10 */
 static int g_weaponMask;
+static int g_contextMode; /* DAT_100bc338; FUN_10046370 / FUN_100463c0 */
+static float g_contextDismissAt; /* DAT_100bc9f4; 0.4s debounce on 0x48 */
 
 #ifndef K_MOUSE1
 #define K_MOUSE1 107
@@ -209,11 +211,24 @@ static void EFW_OpenStoryboard( int code )
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level3", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x48:
-		/* FUN_10048650: 0xd4 VGUI panel (debounced 0.4s), not a storyboard sprite.
-		   Server already sent EFW_Cntxt; HUD/HTML CommandButtons are the stand-in. */
-		g_storyCode = 0;
-		g_hStory = 0;
-		return;
+		/* FUN_10047830: 0.4s debounce on DAT_100bc9f4, then FUN_10048650
+		   0xd4 Panel. FUN_10048710: ClientCmd efw_pause 1 + FUN_10046370. */
+		{
+			float now = gHUD.m_flTime;
+			float dt = now - g_contextDismissAt;
+			g_storyCode = 0;
+			g_hStory = 0;
+			if( dt >= 0.0f && dt <= 0.4f )
+				return;
+			g_contextMode = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10046370 n=%d\n", g_scanCount );
+			if( g_storyPauseSent != code )
+			{
+				g_storyPauseSent = code;
+				gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
+			}
+			return;
+		}
 	default:
 		g_hStory = 0;
 		return;
@@ -231,6 +246,18 @@ static void EFW_OpenStoryboard( int code )
 }
 
 /* FUN_10043a10 / Panel dtor 0x10045899: DAT_1007ab5c = -1 so tiles stop. */
+static void EFW_LeaveContext( void )
+{
+	/* FUN_10048740: ClientCmd efw_pause 0, then FUN_100463c0. */
+	if( !g_contextMode )
+		return;
+	g_contextMode = 0;
+	g_contextDismissAt = gHUD.m_flTime;
+	g_storyPauseSent = 0;
+	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_100463c0\n" );
+}
+
 static void EFW_ClearStoryboard( void )
 {
 	g_storyCode = 0;
@@ -239,6 +266,7 @@ static void EFW_ClearStoryboard( void )
 	g_storyFade = 0.0f;
 	g_menuCode = 0;
 	g_storyChange[0] = '\0';
+	EFW_LeaveContext();
 }
 
 static void EFW_DismissStoryboard( void )
@@ -312,6 +340,34 @@ int EFW_ClientKey( int down, int keynum )
 		EFW_DismissStoryboard();
 		return 0;
 	}
+	if( g_contextMode && ( keynum == K_MOUSE1 || keynum == K_MOUSE2 ) )
+	{
+		int best = -1;
+		int bestD = 80 * 80;
+		int cx = ScreenWidth / 2;
+		int cy = ScreenHeight / 2;
+		char cmd[96];
+		for( i = 0; i < g_vguiN; i++ )
+		{
+			EfwVguiBtn *b = &g_vgui[i];
+			int mx = b->x + b->w / 2;
+			int my = b->y + b->h / 2;
+			int d = ( mx - cx ) * ( mx - cx ) + ( my - cy ) * ( my - cy );
+			if( d < bestD && b->cmd[0] )
+			{
+				bestD = d;
+				best = i;
+			}
+		}
+		if( best >= 0 )
+		{
+			snprintf( cmd, sizeof( cmd ), "%s\n", g_vgui[best].cmd );
+			gEngfuncs.pfnServerCmd( cmd );
+			return 0;
+		}
+		EFW_LeaveContext();
+		return 0;
+	}
 	if( keynum == K_MOUSE1 || keynum == K_MOUSE2 )
 	{
 		/* Original VGUI CommandButtons eat the click. Under pointer-lock
@@ -367,6 +423,7 @@ int CHudEfw::Init( void )
 	g_menuOn = 0;
 	g_scanCount = 0;
 	g_storyCode = 0;
+	g_contextMode = 0;
 	g_weaponId = -1;
 	g_weaponMask = 0;
 	g_vguiN = 0;
@@ -409,6 +466,7 @@ void CHudEfw::Reset( void )
 	g_menuOn = 0;
 	g_scanCount = 0;
 	g_storyCode = 0;
+	g_contextMode = 0;
 	memset( g_menuLine, 0, sizeof( g_menuLine ) );
 	memset( g_scan, 0, sizeof( g_scan ) );
 }
@@ -819,7 +877,25 @@ static void EFW_DrawInteractPrompt( void )
 	const char *name;
 	static char s_interact[32];
 	static int s_wasStory;
+	static int s_noneLog;
 
+	if( g_contextMode )
+	{
+		if( g_vguiN <= 0 )
+		{
+			gHUD.DrawHudString( ScreenWidth / 2 - 75, ScreenHeight / 2 - 100,
+				ScreenWidth, "No interactive objects", 255, 127, 127 );
+			if( !s_noneLog )
+			{
+				s_noneLog = 1;
+				gEngfuncs.Con_Printf( ">>> FUN_10046590 none\n" );
+			}
+		}
+		else
+			s_noneLog = 0;
+		return;
+	}
+	s_noneLog = 0;
 	if( g_storyCode )
 	{
 		s_wasStory = 1;

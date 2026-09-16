@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll93`;
+    return `${url}?v=efw-dll94`;
   return url;
 }
 
@@ -143,8 +143,9 @@ let storyNext = '';
 let storyPaused = false;
 
 function storyboardPauses(code: number): boolean {
-  /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu. */
-  return code === 0x3f || code === 0x43 || (code >= 0x46 && code <= 0x52 && code !== 0x48);
+  /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu.
+     0x48 FUN_10048710 also ClientCmd efw_pause 1. */
+  return code === 0x3f || code === 0x43 || (code >= 0x46 && code <= 0x52);
 }
 
 function dismissEfwStory() {
@@ -168,8 +169,15 @@ function dismissEfwStory() {
 }
 
 function showEfwStory(code: number, fallback?: string) {
-  if (code === 0x48)
+  if (code === 0x48) {
+    /* FUN_10048650: no storyboard SPR. FUN_10048710 pauses and FUN_10046370. */
+    if (!storyPaused) {
+      storyPaused = true;
+      runEngineCmd('pausable 0');
+      runGameCmd('efw_pause 1');
+    }
     return;
+  }
   const spec = EFW_STORY[code];
   const layer = document.getElementById('efw-story');
   const text = document.getElementById('efw-story-text');
@@ -275,6 +283,25 @@ function applyDiaryHud(text: string): boolean {
   return false;
 }
 
+function applyContextHud(text: string): boolean {
+  const none = document.getElementById('efw-none');
+  if (text.includes('>>> FUN_10046370')) {
+    const interact = document.getElementById('efw-interact');
+    if (interact) interact.hidden = true;
+    if (none) none.hidden = true;
+    return false;
+  }
+  if (text.includes('>>> FUN_100463c0')) {
+    if (none) none.hidden = true;
+    return false;
+  }
+  if (text.includes('>>> FUN_10046590 none')) {
+    if (none) none.hidden = false;
+    return false;
+  }
+  return false;
+}
+
 function applyInteractHud(text: string): boolean {
   const m = text.match(/>>> FUN_10046590 interact=(.*)$/);
   if (!m) return false;
@@ -336,6 +363,7 @@ function log(text: string) {
   if (!normalized) return;
   applyHopeHud(normalized);
   applyDiaryHud(normalized);
+  applyContextHud(normalized);
   applyInteractHud(normalized);
   applyInvHud(normalized);
   applyPrevQuestion(normalized);
