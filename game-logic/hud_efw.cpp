@@ -2,6 +2,8 @@
 #include "cl_util.h"
 #include "parsemsg.h"
 #include "triangleapi.h"
+#include "screenfade.h"
+#include "shake.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -26,6 +28,9 @@ struct EfwScanSlot
 
 static float g_hope = -1;
 static float g_clientHudFloat[2]; /* DAT_100bc498; FUN_10047650 / FUN_10047660 */
+static int g_clientHudInt[7]; /* DAT_100bc4a0; FUN_10047670 */
+static float g_hudDrawTime; /* DAT_100a95ac; FUN_1001db00 flTime */
+static float g_contextOpenedAt; /* DAT_100bc354; FUN_10046370 */
 static unsigned char g_panel48[0xd4]; /* FUN_10048650 operator_new(0xd4) Panel */
 static int g_panel48On;
 static int g_diaryPage;
@@ -171,6 +176,265 @@ static float EFW_GetClientHudFloat( int idx )
 	return v;
 }
 
+/* FUN_10044870: return *DAT_1007f7f8 (gHUD.m_flTime). */
+static float EFW_ClientTime( void )
+{
+	float t = gHUD.m_flTime;
+	static int s_logged;
+	static float s_loggedT = -1.0f;
+
+	if( !s_logged || ( s_loggedT <= 0.0f && t > 0.0f ) )
+	{
+		s_logged = 1;
+		s_loggedT = t;
+		gEngfuncs.Con_Printf( ">>> FUN_10044870 t=%.2f\n", t );
+	}
+	return t;
+}
+
+/* FUN_10047670: return *(int*)(DAT_100bc4a0 + idx*4). */
+static int EFW_GetClientHudInt( int idx )
+{
+	int v = 0;
+	static int s_mask;
+
+	if( idx >= 0 && idx < 7 )
+		v = g_clientHudInt[idx];
+	if( idx >= 0 && idx < 7 && ( s_mask & ( 1 << idx ) ) == 0 )
+	{
+		s_mask |= ( 1 << idx );
+		gEngfuncs.Con_Printf( ">>> FUN_10047670 idx=%d v=%d\n", idx, v );
+	}
+	return v;
+}
+
+static void EFW_SetClientHudInt( int idx, int v )
+{
+	if( idx >= 0 && idx < 7 )
+		g_clientHudInt[idx] = v;
+}
+
+/* DAT_10078890 / DAT_100788f0 / DAT_10078940 / DAT_10078950 from client.dll .data. */
+static const float kPaletteDay[12] = {
+	100.0f, 50.0f, 20.0f, 0.0f,
+	100.0f, 50.0f, 20.0f, 0.0f,
+	100.0f, 50.0f, 20.0f, 0.0f
+};
+static const float kPaletteNight[12] = {
+	0.0f, 0.0f, 90.0f, 170.0f,
+	100.0f, 20.0f, 30.0f, 80.0f,
+	100.0f, 50.0f, 20.0f, 0.0f
+};
+static const float kPaletteDawn[4] = { 0.0f, 0.0f, 0.0f, 255.0f };
+static const float kPaletteDest[4] = { 0.0f, 0.0f, 0.0f, 80.0f };
+static const float kPaletteT0 = 60.0f; /* DAT_10078960 */
+static const float kPaletteTSpan = 90.0f; /* DAT_10078964 */
+static const float kDawnT0 = 2.0f; /* DAT_10078968 */
+static const float kDawnTSpan = 2.0f; /* DAT_1007896c */
+
+/* FUN_1001d960: out = (b-a)*t + a for 4 floats. */
+static void EFW_Lerp4( float *out, float t, const float *a, const float *b )
+{
+	static int s_logged;
+
+	out[0] = ( b[0] - a[0] ) * t + a[0];
+	out[1] = ( b[1] - a[1] ) * t + a[1];
+	out[2] = ( b[2] - a[2] ) * t + a[2];
+	out[3] = ( b[3] - a[3] ) * t + a[3];
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001d960 t=%.2f\n", t );
+	}
+}
+
+/* FUN_1001d9e0: 3-stop palette. t<1 stops 0–1; else t-1 stops 1–2. Clamp 0..2. */
+static void EFW_Palette3( float *out, const float *stops, float t )
+{
+	const float *a;
+	const float *b;
+	static int s_logged;
+	float loggedT;
+
+	if( t < 0.0f )
+		t = 0.0f;
+	if( t > 2.0f )
+		t = 2.0f;
+	loggedT = t;
+	if( t >= 1.0f )
+	{
+		t = t - 1.0f;
+		a = stops + 4;
+		b = stops + 8;
+	}
+	else
+	{
+		a = stops;
+		b = stops + 4;
+	}
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001d9e0 t=%.2f\n", loggedT );
+	}
+	EFW_Lerp4( out, t, a, b );
+}
+
+/* FUN_10041a30: DAT_100baed8 - DAT_100baedc conversation depth. */
+static int EFW_MenuDepth( void )
+{
+	int i;
+	int n = 0;
+
+	for( i = 0; i <= 6; i++ )
+	{
+		if( g_menuLine[i][0] )
+			n++;
+	}
+	return n;
+}
+
+/* FUN_10046550: 2*(now - DAT_100bc354), clamp 0.0078125..0.75. */
+static float EFW_ContextPulse( void )
+{
+	float dt;
+	float v;
+
+	dt = EFW_ClientTime() - g_contextOpenedAt;
+	v = dt + dt;
+	if( v > 0.75f )
+		v = 0.75f;
+	if( v < 0.0078125f )
+		v = 0.0078125f;
+	return v;
+}
+
+static int EFW_ClampByte( float v )
+{
+	int n = (int)v;
+
+	if( n < 0 )
+		n = 0;
+	if( n > 255 )
+		n = 255;
+	return n;
+}
+
+/* FUN_1001e4c0: HUD color/gamma via 3-stop palette + ScreenFade STAYOUT|OUT. */
+static void EFW_HudColor( float param )
+{
+	float stops[12];
+	float cur[4];
+	float outc[4];
+	float tmp[4];
+	float t;
+	float dawnT;
+	int lvl;
+	int r, g, b, a;
+	screenfade_t sf;
+	static int s_pack = -1;
+	int pack;
+
+	if( param < 0.0f )
+		param = 0.0f;
+	if( param > 1.0f )
+		param = 1.0f;
+	lvl = EFW_GetClientHudInt( 3 );
+	if( lvl == 2 )
+		memcpy( stops, kPaletteNight, sizeof( stops ) );
+	else
+		memcpy( stops, kPaletteDay, sizeof( stops ) );
+	t = ( g_hudDrawTime - kPaletteT0 ) / kPaletteTSpan;
+	t = t + t;
+	EFW_Palette3( cur, stops, t );
+	EFW_Lerp4( outc, 1.0f - param, cur, kPaletteDest );
+	if( g_hudDrawTime < kDawnT0 + kDawnTSpan )
+	{
+		dawnT = ( g_hudDrawTime - kDawnT0 ) / kDawnTSpan;
+		if( dawnT < 0.0f )
+			dawnT = 0.0f;
+		if( dawnT > 1.0f )
+			dawnT = 1.0f;
+		EFW_Lerp4( tmp, dawnT, kPaletteDawn, outc );
+		memcpy( outc, tmp, sizeof( outc ) );
+	}
+	r = EFW_ClampByte( outc[0] );
+	g = EFW_ClampByte( outc[1] );
+	b = EFW_ClampByte( outc[2] );
+	a = EFW_ClampByte( outc[3] );
+	if( g_contextMode )
+		a = EFW_ClampByte( EFW_ContextPulse() * 255.0f );
+	memset( &sf, 0, sizeof( sf ) );
+	if( gEngfuncs.pfnGetScreenFade )
+		gEngfuncs.pfnGetScreenFade( &sf );
+	sf.fader = (byte)r;
+	sf.fadeg = (byte)g;
+	sf.fadeb = (byte)b;
+	sf.fadealpha = (byte)a;
+	sf.fadeFlags = FFADE_OUT | FFADE_STAYOUT;
+	if( gEngfuncs.pfnSetScreenFade )
+		gEngfuncs.pfnSetScreenFade( &sf );
+	pack = ( ( r & 255 ) << 16 ) | ( ( g & 255 ) << 8 ) | ( b & 255 );
+	pack = pack + ( a / 32 ) * 1 + (int)( param * 10.0f + 0.5f ) * 1000000 + lvl * 10000000;
+	if( pack != s_pack )
+	{
+		s_pack = pack;
+		gEngfuncs.Con_Printf(
+			">>> FUN_1001e4c0 p=%.2f lvl=%d rgb=%d,%d,%d a=%d\n",
+			param, lvl, r, g, b, a );
+	}
+}
+
+/* FUN_1001e8d0: walk string backward, subtract DAT_100a4ddc widths, DrawHudChar. */
+static int EFW_DrawHudStringRight( int xmax, int y, int xmin, const char *text, int r, int g, int b )
+{
+	const char *end;
+	int x;
+	int w;
+	int c;
+	static int s_logged;
+
+	if( !text || !text[0] )
+		return xmax;
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e8d0 n=%d xmin=%d\n", (int)strlen( text ), xmin );
+	}
+	end = text;
+	while( *end )
+		end++;
+	end--;
+	x = xmax;
+	TextMessageDrawChar( 0, 0, 0, 0, 0, 0 );
+	while( end >= text )
+	{
+		c = (unsigned char)*end;
+		w = gHUD.m_scrinfo.charWidths[c];
+		if( x - w < xmin )
+			break;
+		x -= w;
+		TextMessageDrawChar( x, y, c, r, g, b );
+		end--;
+	}
+	return x;
+}
+
+/* FUN_1001e880: sprintf DAT_100789f4 "%d" then FUN_1001e8d0. */
+static void EFW_DrawHudNumberRight( int xmax, int y, int xmin, int n, int r, int g, int b )
+{
+	char buf[32];
+	static int s_logged;
+
+	snprintf( buf, sizeof( buf ), "%d", n );
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e880 n=%d\n", n );
+	}
+	EFW_DrawHudStringRight( xmax, y, xmin, buf, r, g, b );
+}
+
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
@@ -191,21 +455,21 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 	memcpy( &g_clientHudFloat[0], blob, sizeof( float ) );
 	memcpy( &g_hope, blob + 4, sizeof( float ) );
 	EFW_SetClientHudFloat( 1, g_hope );
-	memcpy( &g_diaryPage, blob + 12, sizeof( int ) );
-	memcpy( &g_mapLevel, blob + 8 + 3 * 4, sizeof( int ) );
-	memcpy( &g_weaponId, blob + 8 + 4 * 4, sizeof( int ) );
+	memcpy( g_clientHudInt, blob + 8, sizeof( g_clientHudInt ) );
+	g_diaryPage = g_clientHudInt[1];
+	g_mapLevel = g_clientHudInt[3];
+	g_weaponId = g_clientHudInt[4];
 	g_weaponMask = ( (unsigned)g_weaponId ) >> 16;
 	g_weaponId = g_weaponId & 0xffff;
 	if( g_weaponId == 0xffff )
 		g_weaponId = -1;
 	{
-		int openFlag = 0;
+		int openFlag = g_clientHudInt[5];
 		int paused = 0;
-		memcpy( &openFlag, blob + 8 + 5 * 4, sizeof( int ) );
 		g_diaryOpen = openFlag != 0;
 		/* hudInt[6] pause. HTML Continue is FUN_100485d0 ClientCmd
 		   efw_pause 0; Panel dtor then clears DAT_1007ab5c. */
-		memcpy( &paused, blob + 8 + 6 * 4, sizeof( int ) );
+		paused = g_clientHudInt[6];
 		{
 			static int s_lastPause = -1;
 			/* Falling edge of hudInt[6]: Panel dtor DAT_1007ab5c = -1. */
@@ -322,7 +586,7 @@ static void EFW_OpenCaption( int code )
 	strncpy( g_caption, text, sizeof( g_caption ) - 1 );
 	g_caption[sizeof( g_caption ) - 1] = '\0';
 	g_captionLen = (int)strlen( g_caption );
-	g_captionAt = gHUD.m_flTime;
+	g_captionAt = EFW_ClientTime();
 	g_captionAge = 0.0f;
 	g_storyCode = 0;
 	g_hStory = 0;
@@ -398,7 +662,7 @@ static void EFW_OpenStoryboard( int code )
 		   + FUN_10048650 Panel. FUN_10048710: setVisible(1), ClientCmd
 		   efw_pause 1, FUN_10046370. */
 		{
-			float now = gHUD.m_flTime;
+			float now = EFW_ClientTime();
 			float dt = now - g_contextDismissAt;
 			g_storyCode = 0;
 			g_hStory = 0;
@@ -413,6 +677,7 @@ static void EFW_OpenStoryboard( int code )
 			*(int *)( g_panel48 + 0xd0 ) = 0;
 			g_panel48On = 1;
 			g_contextMode = 1;
+			g_contextOpenedAt = now; /* FUN_10046370 DAT_100bc354 */
 			gEngfuncs.Con_Printf(
 				">>> FUN_10048650 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
 				ScreenWidth, ScreenHeight );
@@ -451,7 +716,7 @@ static void EFW_LeaveContext( void )
 		return;
 	g_contextMode = 0;
 	g_panel48On = 0;
-	g_contextDismissAt = gHUD.m_flTime;
+	g_contextDismissAt = EFW_ClientTime();
 	g_storyPauseSent = 0;
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_100463c0\n" );
@@ -625,6 +890,9 @@ int CHudEfw::Init( void )
 	g_hope = -1;
 	g_clientHudFloat[0] = 0.0f;
 	g_clientHudFloat[1] = -1.0f;
+	memset( g_clientHudInt, 0, sizeof( g_clientHudInt ) );
+	g_hudDrawTime = 0.0f;
+	g_contextOpenedAt = 0.0f;
 	g_panel48On = 0;
 	memset( g_panel48, 0, sizeof( g_panel48 ) );
 	g_diaryPage = 0;
@@ -657,6 +925,7 @@ int CHudEfw::Init( void )
 	EFW_LoadTextScheme();
 	EFW_ClientRegisterDefaults();
 	g_mapLevel = EFW_MapLevelFromName();
+	EFW_SetClientHudInt( 3, g_mapLevel );
 	return 1;
 }
 
@@ -664,6 +933,7 @@ int CHudEfw::VidInit( void )
 {
 	gEngfuncs.Con_Printf( "efw: HUD_VidInit\n" );
 	g_mapLevel = EFW_MapLevelFromName();
+	EFW_SetClientHudInt( 3, g_mapLevel );
 	g_hDiary = 0;
 	g_hLogo = 0;
 	g_loadedPage = -1;
@@ -689,6 +959,9 @@ void CHudEfw::Reset( void )
 	g_hope = -1;
 	g_clientHudFloat[0] = 0.0f;
 	g_clientHudFloat[1] = -1.0f;
+	memset( g_clientHudInt, 0, sizeof( g_clientHudInt ) );
+	g_hudDrawTime = 0.0f;
+	g_contextOpenedAt = 0.0f;
 	g_panel48On = 0;
 	g_talkPrompt = 0;
 	g_menuOn = 0;
@@ -1474,10 +1747,14 @@ static void EFW_DrawLetterbox( float flTime )
 	}
 	h = ScreenHeight;
 	w = ScreenWidth;
-	if( flTime > g_captionAt )
-		g_captionAge = flTime - g_captionAt;
-	else
-		g_captionAge += 0.05f;
+	(void)flTime;
+	{
+		float now = EFW_ClientTime();
+		if( now > g_captionAt )
+			g_captionAge = now - g_captionAt;
+		else
+			g_captionAge += 0.05f;
+	}
 	fade = g_captionAge * 3.3333333f;
 	if( fade > 1.0f )
 		fade = 1.0f;
@@ -1561,9 +1838,16 @@ static void EFW_TickHudFades( void )
 	int menuOn = ( g_menuOn && !g_contextMode ) ? 1 : 0;
 	int diaryOn = ( g_diaryOpen && !g_menuOn && !g_contextMode ) ? 1 : 0;
 	float targetDiary = diaryOn ? 1.0f : 0.0f;
-	int page = g_diaryPage;
+	int page;
 	static int s_fadeLog = -1;
 	int packed;
+
+	/* FUN_1001db00: FUN_10047670(1) page, (2) flags, (5) diaryOpen. */
+	page = EFW_GetClientHudInt( 1 );
+	EFW_GetClientHudInt( 2 );
+	EFW_GetClientHudInt( 5 );
+	if( page == 0 )
+		page = g_diaryPage;
 
 	g_menuVeil = EFW_LerpHudFade( g_menuVeil, menuOn ? 1.0f : 0.0f );
 	g_invFade = EFW_LerpHudFade( g_invFade, targetDiary );
@@ -1674,10 +1958,10 @@ static void EFW_DrawArtsClock( float flTime )
 		flTime = 0.0f;
 	secs = (int)flTime;
 	t15 = secs / 15;
-	hour = ( g_mapLevel == 1 ? 5 : 7 ) + t15 / 15;
+	hour = ( EFW_GetClientHudInt( 3 ) == 1 ? 5 : 7 ) + t15 / 15;
 	mins = t15 % 60;
 	snprintf( clock, sizeof( clock ), "%2d.%02d %s", hour, mins,
-		g_mapLevel == 1 ? "pm" : "am" );
+		EFW_GetClientHudInt( 3 ) == 1 ? "pm" : "am" );
 	t0 = 5.0f;
 	fade = 1.0f - ( flTime - t0 ) * 0.2f;
 	if( fade < 0.0f )
@@ -1707,7 +1991,8 @@ static void EFW_DrawArtsClock( float flTime )
 			dw = 64;
 	}
 	x = ScreenWidth - dw - 5;
-	gHUD.DrawHudString( x - 72, 5, ScreenWidth - 8, clock, rgb, rgb, rgb );
+	/* FUN_1001e8d0 right-align at logo left (PE clock sprintf was unused). */
+	EFW_DrawHudStringRight( x - 4, 5, 8, clock, rgb, rgb, rgb );
 	if( !g_hLogo )
 		return;
 	rc.left = 0;
@@ -1724,7 +2009,6 @@ int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
 	int r, g, b;
-	char label[32];
 	int hope;
 
 	s_drawN++;
@@ -1749,7 +2033,21 @@ int CHudEfw::Draw( float flTime )
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 		return 1;
 
+	g_hudDrawTime = flTime;
 	g_mapLevel = EFW_MapLevelFromName();
+	EFW_SetClientHudInt( 3, g_mapLevel );
+	(void)EFW_ClientTime();
+	/* FUN_1001db00: FUN_1001e4c0(1.0) then menu darken from FUN_10041a30. */
+	EFW_HudColor( 1.0f );
+	if( g_menuOn && !g_contextMode )
+	{
+		float depth = (float)EFW_MenuDepth() * 0.1f;
+		if( depth < 0.0f )
+			depth = 0.0f;
+		if( depth > 1.0f )
+			depth = 1.0f;
+		EFW_HudColor( 1.0f - depth * 0.35000002f );
+	}
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	{
@@ -1759,8 +2057,8 @@ int CHudEfw::Draw( float flTime )
 		{
 			/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
 			EFW_DrawHopeTicks( hope / 10 );
-			snprintf( label, sizeof( label ), "HOPE  %d", hope );
-			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, ScreenWidth - 8, label, 200, 0, 0 );
+			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, 0x14 + 0x1c + 6 + 40, "HOPE", 200, 0, 0 );
+			EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40, hope, 200, 0, 0 );
 			{
 				static int s_hopeDraw;
 				s_hopeDraw++;

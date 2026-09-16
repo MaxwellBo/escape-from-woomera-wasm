@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll103b`;
+    return `${url}?v=efw-dll104`;
   return url;
 }
 
@@ -349,6 +349,17 @@ function applyHopeHud(text: string): boolean {
   return false;
 }
 
+function applyHudColor(text: string): boolean {
+  const m = text.match(/>>> FUN_1001e4c0 p=([\d.]+) lvl=(\d+) rgb=(\d+),(\d+),(\d+) a=(\d+)/);
+  if (!m) return false;
+  const layer = document.getElementById('efw-vgui');
+  if (layer) {
+    layer.dataset.hudColor = `${m[3]},${m[4]},${m[5]},${m[6]}`;
+    layer.dataset.hudLevel = m[2];
+  }
+  return false;
+}
+
 function applyClockHud(text: string): boolean {
   const scheme = text.match(/>>> FUN_100352e0 scheme=(.+) font=(.+) size=(\d+)/);
   if (scheme) {
@@ -521,6 +532,7 @@ function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
   applyHopeHud(normalized);
+  applyHudColor(normalized);
   applyClockHud(normalized);
   applyDiaryHud(normalized);
   applyContextHud(normalized);
