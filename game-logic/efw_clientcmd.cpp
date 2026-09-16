@@ -754,6 +754,14 @@ int EFW_ClientCommand( edict_t *pEntity )
 			/* FUN_10081f40 DropPlayerItem is a no-op in hlsdk SP
 			   (IsMultiplayer). PE still strips the held item. */
 			EFW_DebugPrint( ">>> drop %s", cn );
+			{
+				static int s_drop;
+				if( !s_drop )
+				{
+					s_drop = 1;
+					EFW_DebugPrint( ">>> FUN_100c4580" );
+				}
+			}
 			EFW_StripWeapon( pPlayer, cn, bit );
 		}
 		else

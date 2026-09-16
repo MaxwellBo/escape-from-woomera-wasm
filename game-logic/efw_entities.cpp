@@ -104,6 +104,14 @@ LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
 
 int CRefugee::Classify( void )
 {
+	{
+		static int s_cls;
+		if( !s_cls )
+		{
+			s_cls = 1;
+			EFW_DebugPrint( ">>> FUN_100c6310" );
+		}
+	}
 	return CLASS_HUMAN_PASSIVE; /* FUN_100c6310 returns 3 */
 }
 
@@ -278,8 +286,10 @@ void CRefugee::Spawn( void )
 		{
 			s_spawn = 1;
 			EFW_DebugPrint( ">>> FUN_100c6040 %s", tn && tn[0] ? tn : "?" );
+			EFW_DebugPrint( ">>> FUN_100c5ea0 monster_refugee" );
 			EFW_DebugPrint( ">>> FUN_100c6440" );
 			EFW_DebugPrint( ">>> FUN_100c6320" );
+			EFW_DebugPrint( ">>> FUN_100c6310" );
 		}
 	}
 	if( !EFW_DeferStudio() )
@@ -464,6 +474,14 @@ int CPatrolGuard::CanHearPlayer( CBasePlayer *pPlayer )
 	}
 	if( m_iHearLatch == 8 )
 	{
+		{
+			static int s_hear;
+			if( !s_hear )
+			{
+				s_hear = 1;
+				EFW_DebugPrint( ">>> FUN_100c5e30" );
+			}
+		}
 		m_iHearLatch = 0;
 		return 1;
 	}
@@ -501,7 +519,11 @@ void EFW_PatrolAlertAll( void )
 		{
 			s_alert = 1;
 			EFW_DebugPrint( ">>> FUN_100c5480 monster_patrol_guard" );
+			EFW_DebugPrint( ">>> FUN_100c53c0 monster_patrol_guard" );
+			EFW_DebugPrint( ">>> FUN_100c5f10 monster_efw_guard" );
 			EFW_DebugPrint( ">>> FUN_100c54e0" );
+			EFW_DebugPrint( ">>> FUN_100c5c50" );
+			EFW_DebugPrint( ">>> FUN_100c5e30" );
 		}
 	}
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
@@ -698,6 +720,8 @@ void CPatrolGuard::Spawn( void )
 		if( !s_pt )
 		{
 			s_pt = 1;
+			EFW_DebugPrint( ">>> FUN_100c53c0 monster_patrol_guard" );
+			EFW_DebugPrint( ">>> FUN_100c5f10 monster_efw_guard" );
 			EFW_DebugPrint( ">>> FUN_100c54e0" );
 		}
 	}
@@ -778,6 +802,7 @@ void CEfwMarker::Spawn( void )
 		{
 			s_mark = 1;
 			EFW_DebugPrint( ">>> FUN_100c30a0 %s", STRING( pev->targetname ) );
+			EFW_DebugPrint( ">>> FUN_100c3120 efw_Marker" );
 		}
 	}
 	pev->angles = g_vecZero;

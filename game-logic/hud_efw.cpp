@@ -689,6 +689,8 @@ static void EFW_OpenCaption( int code )
 	g_storyCode = 0;
 	g_hStory = 0;
 	gEngfuncs.Con_Printf( ">>> FUN_10048790 n=%d code=0x%x %s\n", g_captionLen, code, g_caption );
+	gEngfuncs.Con_Printf( ">>> FUN_10048430 efw_pause 1\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_10048590 efw_pause 1\n" );
 	/* FUN_100463c0 copies FUN_100464c0 into DAT_100bc360 after a click.
 	   Caption Panel also leaves the interact icon, so start the 2s fly. */
 	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
@@ -704,6 +706,8 @@ static void EFW_DismissCaption( void )
 	/* Caption InputSignal: same pause-0 path as FUN_100485d0 without a
 	   stored changelevel (FUN_10048790 param_9 == 0). */
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_10048460 efw_pause 0\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_100485d0 efw_pause 0\n" );
 	g_storyPauseSent = 0;
 	EFW_ClearCaption();
 }
@@ -786,6 +790,8 @@ static void EFW_OpenStoryboard( int code )
 				">>> FUN_10048650 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
 				ScreenWidth, ScreenHeight );
 			gEngfuncs.Con_Printf( ">>> FUN_10048710 pause=1\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_10048430 efw_pause 1\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_10048590 efw_pause 1\n" );
 			gEngfuncs.Con_Printf( ">>> FUN_10046370 n=%d\n", g_scanCount );
 			if( g_storyPauseSent != code )
 			{
@@ -806,9 +812,9 @@ static void EFW_OpenStoryboard( int code )
 	if( g_storyPauseSent != code )
 	{
 		g_storyPauseSent = code;
+		gEngfuncs.Con_Printf( ">>> FUN_10048590 efw_pause 1\n" );
 		gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
 	}
-	g_storyFade = 0.0f; /* FUN_10048590 DAT_100baf10 = 0 */
 	g_hStory = EFW_LoadSpr( spr );
 }
 
@@ -841,6 +847,8 @@ static void EFW_LeaveContext( void )
 	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_10048740 pause=0 t=%.2f\n", g_contextDismissAt );
+	gEngfuncs.Con_Printf( ">>> FUN_10048460 efw_pause 0\n" );
+	gEngfuncs.Con_Printf( ">>> FUN_100485d0 efw_pause 0\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_100463c0\n" );
 }
 

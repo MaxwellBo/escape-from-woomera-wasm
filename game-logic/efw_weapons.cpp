@@ -86,23 +86,50 @@ void CEfwWeapon::Spawn( void )
 		{
 			s_stub |= def->itemBit;
 			if( def->itemBit == EFW_ITEM_IDTAG )
+			{
+				EFW_DebugPrint( ">>> FUN_100c48c0 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044600 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_REDCARD )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4930 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044670 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_PHONE )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4850 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044590 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_POWDER )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4a80 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_100447c0 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_PLIERS )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4700 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044440 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_LEVER )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4770 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_100444b0 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_BRANCH )
+			{
+				EFW_DebugPrint( ">>> FUN_100c47e0 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044520 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_GREENCARD )
+			{
+				EFW_DebugPrint( ">>> FUN_100c49a0 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_100446e0 %s", def->wmodel );
+			}
 			else if( def->itemBit == EFW_ITEM_BLUECARD )
+			{
+				EFW_DebugPrint( ">>> FUN_100c4a10 %s", def->wmodel );
 				EFW_DebugPrint( ">>> FUN_10044750 %s", def->wmodel );
+			}
 		}
 	}
 #endif
@@ -219,6 +246,16 @@ BOOL CEfwWeapon::Deploy()
 
 void CEfwWeapon::Holster( int skiplocal )
 {
+#ifndef CLIENT_DLL
+	{
+		static int s_holster;
+		if( !s_holster )
+		{
+			s_holster = 1;
+			EFW_DebugPrint( ">>> FUN_100c4580" );
+		}
+	}
+#endif
 	m_pPlayer->m_flNextAttack = UTIL_WeaponTimeBase() + 0.4f;
 	SendWeaponAnim( 0 );
 }

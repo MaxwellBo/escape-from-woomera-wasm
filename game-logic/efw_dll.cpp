@@ -61,6 +61,14 @@ CBasePlayer *EFW_Player( void )
 
 void EFW_SetPlayer( CBasePlayer *pPlayer )
 {
+	{
+		static int s_set;
+		if( !s_set )
+		{
+			s_set = 1;
+			EFW_DebugPrint( ">>> FUN_100c6970" );
+		}
+	}
 	g_efw.player = pPlayer;
 }
 
@@ -469,6 +477,14 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 
 int EFW_DiaryCount( void )
 {
+	{
+		static int s_n;
+		if( !s_n )
+		{
+			s_n = 1;
+			EFW_DebugPrint( ">>> FUN_100c6880 n=%d", g_efw.diaryCount );
+		}
+	}
 	return g_efw.diaryCount;
 }
 
@@ -1227,6 +1243,7 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	/* FUN_100c27f0 always MapLevel-checks; only materializes on level 2. */
 	EFW_SpawnFenceTag();
 	g_efw.inited = 1;
+	(void)EFW_DiaryCount();
 	EFW_SendHudState();
 }
 
