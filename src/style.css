@@ -87,12 +87,14 @@ canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 }
 .efw-hope-ticks i.on { background: rgb(200, 0, 0); }
 
-/* FUN_1001db00 diary SPR at bottom-right of the framebuffer. */
+/* FUN_1001db00 diary SPR wipe: clip from the top so the card grows up from the bottom. */
 .efw-diary {
   position: absolute; right: 16px; bottom: 16px; z-index: 6;
   width: 220px; background: rgba(8, 5, 3, 0.88);
   border: 1px solid var(--accent); border-radius: 4px;
   padding: 8px 10px; pointer-events: auto;
+  opacity: var(--efw-diary-fade, 1);
+  clip-path: inset(calc((1 - var(--efw-diary-fade, 1)) * 100%) 0 0 0);
 }
 .efw-diary[hidden] { display: none; }
 .efw-diary span { display: block; color: var(--accent); font-size: 13px; letter-spacing: 0.08em; }
@@ -138,14 +140,17 @@ canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
   padding: 4px 12px; font-size: 13px; white-space: nowrap;
 }
 
-/* FUN_10043dd0: diary-open inventory strip, 64x64 tiles from x=60. */
+/* FUN_10043dd0: diary-open inventory strip, 64x64 tiles from x=60.
+   param_1 slides in from the right; items only when fade==1.0. */
 .efw-inv {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 6;
   height: 190px; pointer-events: none;
   background: rgba(51, 51, 51, 0.8);
   display: flex; align-items: flex-start; padding: 8px 60px 0; gap: 64px;
+  transform: translateX(calc((1 - var(--efw-fade, 0)) * 100%));
 }
 .efw-inv[hidden] { display: none; }
+.efw-inv:not(.full) i { visibility: hidden; }
 .efw-inv i {
   display: flex; flex-direction: column; align-items: center; gap: 6px;
   width: 64px; color: #fff; font-size: 11px; font-style: normal;

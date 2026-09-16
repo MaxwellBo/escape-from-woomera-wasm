@@ -36,6 +36,24 @@ void EfwScript_Clear( EfwScript *script )
 	memset( script, 0, sizeof( *script ) );
 }
 
+static EfwScript_ErrorFn s_errorFn;
+
+void EfwScript_SetErrorFn( EfwScript_ErrorFn fn )
+{
+	s_errorFn = fn;
+}
+
+/* FUN_100c2620: bison yyerror → "ERROR: %s, line: %i". */
+static void EfwYyError( const char *msg, int line )
+{
+	if( !msg )
+		msg = "parse error";
+	if( s_errorFn )
+		s_errorFn( msg, line );
+	else
+		printf( "ERROR: %s, line: %i\n", msg, line );
+}
+
 int EfwFlags_Has( const char *flags, const char *token )
 {
 	const char *p;
@@ -147,6 +165,7 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	char line[1024];
 	int i;
 	int lineLen;
+	int lineNo;
 	const char *p;
 	const char *end;
 	EfwQuestion *q;
@@ -164,11 +183,13 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	end = src + len;
 	inUnwanted = 0;
 	q = NULL;
+	lineNo = 0;
 
 	p = src;
 	while( p < end )
 	{
 		lineLen = 0;
+		lineNo++;
 		while( p < end && *p != '\n' && lineLen < (int)sizeof( line ) - 1 )
 		{
 			line[lineLen++] = *p;
@@ -246,6 +267,8 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 			continue;
 		}
 
+		/* FUN_100c2620: bison yyerror on tokens outside Q/A/#/UNWANTED. */
+		EfwYyError( "parse error", lineNo );
 		(void)inUnwanted;
 	}
 

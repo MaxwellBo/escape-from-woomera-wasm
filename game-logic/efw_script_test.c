@@ -31,6 +31,15 @@ static int expect_action( const EfwReply *r, int i, const char *want )
 	return 0;
 }
 
+static char s_capMsg[64];
+static int s_capLine;
+
+static void capture_yyerror( const char *msg, int line )
+{
+	snprintf( s_capMsg, sizeof( s_capMsg ), "%s", msg ? msg : "" );
+	s_capLine = line;
+}
+
 int main( void )
 {
 	EfwScript s;
@@ -74,6 +83,25 @@ int main( void )
 			printf( "UNWANTED_ITEM FirstTime flag missing\n" );
 			fail++;
 		}
+	}
+
+	{
+		static const char kBad[] =
+			"Q<GREET>: Hello.\n"
+			"A: hi.\n"
+			"GARBAGE TOKEN\n";
+		s_capMsg[0] = '\0';
+		s_capLine = -1;
+		EfwScript_SetErrorFn( capture_yyerror );
+		EfwScript_Parse( &s, "yyerror", kBad, -1 );
+		EfwScript_SetErrorFn( NULL );
+		if( s_capLine != 3 || strcmp( s_capMsg, "parse error" ) != 0 )
+		{
+			printf( "FUN_100c2620 got '%s' line %d want parse error line 3\n", s_capMsg, s_capLine );
+			fail++;
+		}
+		else
+			printf( "ERROR: %s, line: %i\n", s_capMsg, s_capLine );
 	}
 
 	if( fail )

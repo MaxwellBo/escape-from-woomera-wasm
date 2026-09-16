@@ -865,6 +865,14 @@ int EFW_ClientCommand( edict_t *pEntity )
 		EFW_ToggleDiary();
 		return 1;
 	}
+	if( FStrEq( pcmd, "efw_yyerror" ) )
+	{
+		/* FUN_100c2620: bison yyerror via the Q/A parser on a junk token. */
+		EfwScript dummy;
+		EfwScript_SetErrorFn( EFW_YyError );
+		EfwScript_Parse( &dummy, "yyerror", "GARBAGE TOKEN\n", -1 );
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_diary_next" ) )
 	{
 		EFW_StepDiary( 1 );

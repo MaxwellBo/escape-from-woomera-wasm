@@ -71,6 +71,13 @@ void EFW_DebugPrint( const char *fmt, ... )
 	}
 }
 
+void EFW_YyError( const char *msg, int line )
+{
+	/* FUN_100c2620 bison yyerror. Format at 0x1011c610. */
+	EFW_DebugPrint( "ERROR: %s, line: %i", msg ? msg : "parse error", line );
+	EFW_DebugPrint( ">>> FUN_100c2620" );
+}
+
 int EFW_FStrEq( const char *a, const char *b )
 {
 	if( !a || !b )
@@ -940,7 +947,8 @@ static void EFW_RegisterHostCmds( void )
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
-		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse", NULL
+		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
+		"efw_yyerror", NULL
 	};
 	int i;
 	if( done )

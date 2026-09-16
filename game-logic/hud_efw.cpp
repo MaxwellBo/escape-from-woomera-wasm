@@ -54,6 +54,10 @@ static char g_caption[1024]; /* DAT_100baf04; FUN_10048790 */
 static int g_captionLen; /* DAT_100baf08 */
 static float g_captionAt; /* DAT_100baf14 */
 static float g_captionAge;
+static float g_menuVeil; /* DAT_100a95b8; FUN_1001db00 conversation veil */
+static float g_invFade; /* DAT_100a95bc; FUN_10043dd0(fade) */
+static float g_diaryFade; /* DAT_100a95c4; diary SPR wipe */
+static int g_diaryFadePage; /* DAT_100a95c0 */
 
 #ifndef K_MOUSE1
 #define K_MOUSE1 107
@@ -519,6 +523,10 @@ int CHudEfw::Init( void )
 	g_storyCode = 0;
 	g_contextMode = 0;
 	EFW_ClearCaption();
+	g_menuVeil = 0.0f;
+	g_invFade = 0.0f;
+	g_diaryFade = 0.0f;
+	g_diaryFadePage = 0;
 	g_weaponId = -1;
 	g_weaponMask = 0;
 	g_vguiN = 0;
@@ -545,6 +553,10 @@ int CHudEfw::VidInit( void )
 	g_hGrey = 0;
 	g_hAscale = 0;
 	g_storyFade = 0.0f;
+	g_menuVeil = 0.0f;
+	g_invFade = 0.0f;
+	g_diaryFade = 0.0f;
+	g_diaryFadePage = 0;
 	/* SPR_Load on the software renderer can stall the first ClientFrame.
 	   Defer bubble/hide/give icons until Draw has returned a few times. */
 	g_hBubble = 0;
@@ -922,20 +934,34 @@ static void EFW_DrawInvIcon( int x, int y, HSPRITE icon )
 }
 
 /* FUN_10043dd0: bottom inventory strip when the diary fade is up.
-   Walks DAT_100a37a8 weapon slots; x starts at 60, +128 per owned item. */
-static void EFW_DrawInventoryStrip( void )
+   Walks DAT_100a37a8 weapon slots; x starts at 60, +128 per owned item.
+   param_1 slides the strip in from the right; items only when fade==1.0. */
+static void EFW_DrawInventoryStrip( float fade )
 {
 	int id;
 	int n;
 	int x;
 	int y;
+	int x0;
 	int namesN;
 	char names[160];
 	static int s_invLog = -1;
+	int packed;
 
-	if( !g_diaryOpen )
+	if( fade <= 0.0f )
 		return;
-	FillRGBA( 0, ScreenHeight - 190, ScreenWidth, 190, 51, 51, 51, 204 );
+	x0 = (int)( (float)ScreenWidth * ( 1.0f - fade ) );
+	FillRGBA( x0, ScreenHeight - 190, ScreenWidth - x0, 190, 51, 51, 51, 204 );
+	if( fade < 1.0f )
+	{
+		packed = (int)( fade * 10.0f + 0.5f );
+		if( packed != s_invLog )
+		{
+			s_invLog = packed;
+			gEngfuncs.Con_Printf( ">>> FUN_10043dd0 fade=%.2f\n", fade );
+		}
+		return;
+	}
 	x = 60;
 	y = ScreenHeight - 190;
 	n = 0;
@@ -955,10 +981,10 @@ static void EFW_DrawInventoryStrip( void )
 		n++;
 		x += 128;
 	}
-	if( n != s_invLog )
+	if( ( 100 + n ) != s_invLog )
 	{
-		s_invLog = n;
-		gEngfuncs.Con_Printf( ">>> FUN_10043dd0 n=%d %s\n", n, names );
+		s_invLog = 100 + n;
+		gEngfuncs.Con_Printf( ">>> FUN_10043dd0 fade=1.00 n=%d %s\n", n, names );
 	}
 }
 
@@ -1214,6 +1240,122 @@ static void EFW_DrawLetterbox( float flTime )
 	}
 }
 
+/* FUN_1001db00: ((target-old)*0.2+old-0.5)*1.03+0.5, clamp 0..1. */
+static float EFW_LerpHudFade( float oldv, float target )
+{
+	float v = ( ( ( target - oldv ) * 0.2f + oldv ) - 0.5f ) * 1.03f + 0.5f;
+	if( v < 0.0f )
+		v = 0.0f;
+	if( v > 1.0f )
+		v = 1.0f;
+	return v;
+}
+
+static void EFW_DrawDiarySpr( int page, float fade )
+{
+	int dw, dh, dx, dy, vis;
+	wrect_t rc;
+
+	if( fade <= 0.0f )
+		return;
+	if( g_loadedPage != page )
+	{
+		g_hDiary = 0;
+		EFW_LoadDiarySprite( page, &g_hDiary );
+		g_loadedPage = page;
+	}
+	if( !g_hDiary )
+		return;
+	dw = SPR_Width( g_hDiary, 0 );
+	dh = SPR_Height( g_hDiary, 0 );
+	if( dw < 1 )
+		dw = 256;
+	if( dh < 1 )
+		dh = 256;
+	/* FUN_1001d750: x = width-sprW, y = height-sprW, y2 = y + sprH*fade. */
+	dx = ScreenWidth - dw;
+	dy = ScreenHeight - dw;
+	vis = (int)( (float)dh * fade );
+	if( vis < 1 )
+		return;
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = dw;
+	rc.bottom = vis;
+	SPR_Set( g_hDiary, 255, 255, 255 );
+	SPR_DrawHoles( 0, dx, dy, &rc );
+}
+
+/* DAT_100a95b8 veil, DAT_100a95bc inventory, DAT_100a95c4 diary SPR. */
+static void EFW_TickHudFades( void )
+{
+	int menuOn = ( g_menuOn && !g_contextMode ) ? 1 : 0;
+	int diaryOn = ( g_diaryOpen && !g_menuOn && !g_contextMode ) ? 1 : 0;
+	float targetDiary = diaryOn ? 1.0f : 0.0f;
+	int page = g_diaryPage;
+	static int s_fadeLog = -1;
+	int packed;
+
+	g_menuVeil = EFW_LerpHudFade( g_menuVeil, menuOn ? 1.0f : 0.0f );
+	g_invFade = EFW_LerpHudFade( g_invFade, targetDiary );
+	g_diaryFade = EFW_LerpHudFade( g_diaryFade, targetDiary );
+	if( g_diaryFadePage >= 1 && page >= 1 && g_diaryFadePage != page && g_diaryFade == 1.0f )
+		g_diaryFade = 0.0f;
+	else
+	{
+		if( g_diaryFade > 0.99f && page > 0 )
+			g_diaryFadePage = page;
+		if( g_diaryFade < 0.01f && page == 0 )
+			g_diaryFadePage = 0;
+	}
+	packed = ( (int)( g_diaryFade * 10.0f + 0.5f ) ) * 1000
+		+ ( (int)( g_invFade * 10.0f + 0.5f ) ) * 100
+		+ ( (int)( g_menuVeil * 10.0f + 0.5f ) ) * 10
+		+ ( g_diaryOpen ? 1 : 0 );
+	if( packed != s_fadeLog )
+	{
+		s_fadeLog = packed;
+		gEngfuncs.Con_Printf(
+			">>> FUN_1001db00 diaryfade=%.2f inv=%.2f veil=%.2f page=%d\n",
+			g_diaryFade, g_invFade, g_menuVeil, page );
+	}
+}
+
+static void EFW_DrawMenuVeil( void )
+{
+	int w;
+	if( g_menuVeil <= 0.0f )
+		return;
+	w = (int)( (float)ScreenWidth * g_menuVeil * 1.1f );
+	if( w < 1 )
+		return;
+	FillRGBA( 0, ScreenHeight - 0x140, w, 0x140, 51, 0, 0, 255 );
+}
+
+static void EFW_DrawDiaryWipe( void )
+{
+	int cur = g_diaryPage;
+	int prev = g_diaryFadePage;
+	char dlabel[32];
+
+	if( g_diaryFade <= 0.0f && g_invFade <= 0.0f )
+		return;
+	if( cur == 0 )
+	{
+		prev = 0;
+		cur = g_diaryFadePage;
+	}
+	if( prev != cur && prev > 0 )
+		EFW_DrawDiarySpr( prev, 1.0f );
+	if( g_diaryFade > 0.0f )
+		EFW_DrawDiarySpr( cur, g_diaryFade );
+	if( g_diaryOpen )
+	{
+		snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
+		gHUD.DrawHudString( ScreenWidth - 160, 32, ScreenWidth - 8, dlabel, 200, 0, 0 );
+	}
+}
+
 /* FUN_1001daa0: 10×(28×6) ticks at (20,120), stacked up by 12px.
    Filled (200,0,0,255) while ticks >= i; else (200,200,200,10). */
 static void EFW_DrawHopeTicks( int ticks )
@@ -1306,6 +1448,9 @@ int CHudEfw::Draw( float flTime )
 	if( g_menuCode == 0x4d && !g_hStory )
 		gHUD.DrawHudString( 16, 48, ScreenWidth - 16, "Run out of hope!", r, g, b );
 
+	EFW_TickHudFades();
+	EFW_DrawMenuVeil();
+
 	if( g_menuOn )
 	{
 		int row = 48;
@@ -1340,39 +1485,7 @@ int CHudEfw::Draw( float flTime )
 		}
 	}
 
-	if( g_diaryOpen && !g_menuOn )
-		EFW_DrawInventoryStrip();
-
-	if( g_diaryOpen && g_diaryPage >= 0 )
-	{
-		int dw, dh, dx, dy;
-		wrect_t rc;
-		char dlabel[32];
-		if( g_loadedPage != g_diaryPage )
-		{
-			g_hDiary = 0;
-			EFW_LoadDiarySprite( g_diaryPage, &g_hDiary );
-			g_loadedPage = g_diaryPage;
-		}
-		snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
-		gHUD.DrawHudString( ScreenWidth - 160, 32, ScreenWidth - 8, dlabel, r, g, b );
-		if( g_hDiary )
-		{
-			dw = SPR_Width( g_hDiary, 0 );
-			dh = SPR_Height( g_hDiary, 0 );
-			if( dw < 1 )
-				dw = 256;
-			if( dh < 1 )
-				dh = 256;
-			dx = ScreenWidth - dw - 16;
-			dy = 48;
-			rc.left = 0;
-			rc.top = 0;
-			rc.right = dw;
-			rc.bottom = dh;
-			SPR_Set( g_hDiary, 255, 255, 255 );
-			SPR_DrawHoles( 0, dx, dy, &rc );
-		}
-	}
+	EFW_DrawInventoryStrip( g_invFade );
+	EFW_DrawDiaryWipe();
 	return 1;
 }

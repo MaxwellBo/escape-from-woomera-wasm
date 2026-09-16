@@ -38,7 +38,10 @@ typedef struct
 	int questionCount;
 } EfwScript;
 
+typedef void (*EfwScript_ErrorFn)( const char *msg, int line );
+
 void EfwScript_Clear( EfwScript *script );
+void EfwScript_SetErrorFn( EfwScript_ErrorFn fn ); /* FUN_100c2620 bison yyerror */
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );
