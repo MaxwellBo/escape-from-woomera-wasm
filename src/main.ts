@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll71`;
+    return `${url}?v=efw-dll72`;
   return url;
 }
 
@@ -418,6 +418,10 @@ function onServerActivateSeen() {
       runEngineCmd('togglemenu');
       menuDismissed = true;
       log('listen: togglemenu after ServerActivate (dismiss libmenu)');
+    } else {
+      /* Leave key_console so the software renderer presents the BSP. */
+      runEngineCmd('toggleconsole');
+      log('listen: toggleconsole after CHANGE_LEVEL (back to game)');
     }
   }, 250);
   setTimeout(() => {
