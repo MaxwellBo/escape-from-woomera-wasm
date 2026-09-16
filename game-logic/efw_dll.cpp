@@ -801,6 +801,7 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.lastTime = gpGlobals->time;
 	g_efw.hideDist = EFW_HIDE_DIST;
 	g_efw.diaryPending = -1;
+	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
 	EFW_LoadAllConversations();
 	EFW_AddDiary( 0, 2 );
 	EFW_AddDiary( 1, 2 );

@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll66`;
+    return `${url}?v=efw-dll68`;
   return url;
 }
 
@@ -192,6 +192,8 @@ function log(text: string) {
   if (!normalized) return;
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
+  if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
+    logChangeLevelProgress(normalized);
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
     resumeAfterFirstClientFrame();
   if (applyEfwStory(normalized)) return;
@@ -311,6 +313,11 @@ function startHostPumps() {
   }, 120);
 }
 
+function logChangeLevelProgress(line: string) {
+  if (line.includes('CHANGE_LEVEL returned'))
+    log('listen: pfnChangeLevel returned — waiting for SV_ExecChangeLevel (no resumeMainLoop)');
+}
+
 function loadMap(name: string, reason: string) {
   if (startedMap === name) {
     log(`skip duplicate map ${name} (${reason})`);
@@ -332,35 +339,27 @@ function loadMap(name: string, reason: string) {
     clearInterval(pumpTimer);
     pumpTimer = null;
   }
+  /* resumeMainLoop() increments currentlyRunningMainloop and kills the
+     rAF runner. dll65/66 kicked resume 80–2500ms after pfnChangeLevel
+     and Host stayed RUNFRAME (StartFrame live=30) then went silent.
+     COM_Frame only runs SV_ExecChangeLevel on the *next* rAF after
+     Host_RunFrame promotes STATE_CHANGELEVEL — leave that runner alone. */
+  runEngineCmd('pausable 0');
+  runEngineCmd('unpause');
+  runEngineCmd('cancelselect');
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
   runEngineCmd('sv_validate_changelevel');
-  /* Xash drops CHANGE_LEVEL when sv.framecount < 15 if validate is on.
-     Pump COM_Frames first so the queue is accepted, then pfnChangeLevel
-     only (no console `changelevel`). */
-  const kick = (ms: number, tag: string) => {
-    setTimeout(() => {
-      if (listenReady)
-        return;
-      lastResumeMs = 0;
-      log(`listen: CHANGE_LEVEL kick resume ${tag} t=${ms}ms`);
-      resumeEngineLoop();
-    }, ms);
-  };
-  kick(0, 'pump0');
-  kick(400, 'pump1');
-  kick(900, 'pump2');
-  kick(1400, 'pump3');
   setTimeout(() => {
     if (listenReady)
       return;
     log(`listen: pfnChangeLevel ${name}`);
+    runEngineCmd('pausable 0');
+    runEngineCmd('unpause');
     runEngineCmd('sv_validate_changelevel 0');
     runEngineCmd(`efw_changelevel ${name}`);
-    kick(80, 'plaque');
-    kick(500, 'exec');
-  }, 1500);
+  }, 200);
   if (changeWatch)
     clearTimeout(changeWatch);
   changeWatch = setTimeout(() => {
@@ -391,20 +390,20 @@ function onServerActivateSeen() {
     changeWatch = null;
   }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
-  /* Client must be connected for pfnChangeLevel. Keep r_norefresh 1 so
-     the first ClientFrame returns; resume() is throttled so Host_Frame
-     can finish STATE_CHANGELEVEL. */
-  runEngineCmd('r_drawentities 0');
-  runEngineCmd('r_drawworld 0');
+  /* Keep r_norefresh 1 until HUD_Redraw has looped; software has no
+     r_drawworld. Host_Frame now returns so HostPump is not required. */
   runEngineCmd('r_drawviewmodel 0');
-  runEngineCmd('r_drawparticles 0');
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
   runEngineCmd('pausable 0');
+  runEngineCmd('unpause');
+  runEngineCmd('cancelselect');
+  runEngineCmd('scr_loading 0');
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
+    runEngineCmd('cancelselect');
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
@@ -422,9 +421,9 @@ function onServerActivateSeen() {
     if (changeWatch) return;
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
+    runEngineCmd('scr_loading 0');
     log('listen: r_norefresh 0 (soft world present)');
-  }, 12000);
-  startHostPumps();
+  }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
       runEngineCmd('pausable 0');
@@ -892,8 +891,6 @@ async function boot() {
       '1',
       '+r_drawentities',
       '0',
-      '+r_drawworld',
-      '0',
       '+r_drawviewmodel',
       '0',
       '+r_drawparticles',
@@ -940,6 +937,19 @@ async function boot() {
     log('boot: init() with in-process loopback net');
     await engine.init();
     log('boot: init ok');
+    {
+      const mod = (engine.em as { Module?: {
+        pauseMainLoop?: () => void;
+        resumeMainLoop?: () => void;
+      } } | undefined)?.Module;
+      if (mod?.pauseMainLoop) {
+        const origPause = mod.pauseMainLoop.bind(mod);
+        mod.pauseMainLoop = () => {
+          log('listen: MainLoop.pause');
+          origPause();
+        };
+      }
+    }
 
     const FS = (engine.em as unknown as { FS?: WasmFS })?.FS;
     if (!FS) throw new Error('WASM filesystem unavailable after init');

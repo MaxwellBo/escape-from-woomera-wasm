@@ -102,14 +102,20 @@ void EFW_ClearQueuedChangeLevel( void )
 
 void EFW_RunQueuedChangeLevel( void )
 {
+	char cmd[80];
+
 	if( !s_queuedChange )
 		return;
 	s_queuedChange = 0;
 	EFW_DebugPrint( ">>> CHANGE_LEVEL StartFrame %s time=%.2f", s_queuedMap, gpGlobals->time );
-	/* PE ClientCommand: pfnChangeLevel. Xash COM_ChangeLevel sets
-	   Host nextstate = STATE_CHANGELEVEL; Exec runs on the next COM_Frame. */
+	/* PE ClientCommand 0x1001b325: pfnChangeLevel(Cmd_Argv(1), NULL). */
 	CHANGE_LEVEL( s_queuedMap, NULL );
 	EFW_DebugPrint( ">>> CHANGE_LEVEL returned %s", s_queuedMap );
+	/* Cbuf so Host executes changelevel at the start of the next Host_Frame
+	   if COM_ChangeLevel's nextstate was a silent no-op. */
+	snprintf( cmd, sizeof( cmd ), "changelevel %s\n", s_queuedMap );
+	SERVER_COMMAND( cmd );
+	EFW_DebugPrint( ">>> SERVER_COMMAND changelevel %s", s_queuedMap );
 }
 
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer )
