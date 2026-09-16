@@ -174,22 +174,58 @@ static int EFW_LookUse114( CBaseEntity *pEnt, CBasePlayer *pPlayer )
 	return 0;
 }
 
+static int EFW_LookUseTry( CBasePlayer *pPlayer, CBaseEntity *pEnt, const Vector &eye )
+{
+	Vector dest;
+	Vector dir;
+	Vector end;
+	TraceResult tr;
+	CBaseEntity *pHit;
+	float len;
+	float ang;
+	float dot;
+
+	if( !pEnt || pEnt == pPlayer )
+		return 0;
+	dest = EFW_Place( pEnt );
+	dir.x = dest.x - eye.x;
+	dir.y = dest.y - eye.y;
+	dir.z = dest.z - eye.z;
+	len = dir.Length();
+	if( len == 0.0f )
+		dir = Vector( 0.0f, 0.0f, 1.0f );
+	else
+		dir = dir * ( 1.0f / len );
+	dot = DotProduct( dir, gpGlobals->v_forward );
+	if( dot > 1.0f )
+		dot = 1.0f;
+	if( dot < -1.0f )
+		dot = -1.0f;
+	ang = (float)acos( (double)dot );
+	if( ang >= 0.17453278f )
+		return 0;
+	/* Brush markers are SOLID_NOT with origin 0; Place() is the abs-center
+	   inside the world brush. Stop 8u short so TraceLine is not an
+	   inside-solid miss (PE traces pev->origin). */
+	end = ( len > 8.0f ) ? ( eye + dir * ( len - 8.0f ) ) : dest;
+	UTIL_TraceLine( eye, end, dont_ignore_monsters, pPlayer->edict(), &tr );
+	if( tr.flFraction >= 0.97f )
+		return EFW_LookUse114( pEnt, pPlayer ) ? 1 : 0;
+	pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
+	if( pHit && EFW_FStrEq( STRING( pHit->pev->classname ), "efw_Marker" ) )
+		return EFW_LookUse114( pHit, pPlayer ) ? 1 : 0;
+	return 0;
+}
+
 int EFW_LookUse( CBasePlayer *pPlayer )
 {
 	/* FUN_100c4af0: cdecl player look-use. Sphere 96 from EyePosition,
 	   acos(dot) < 0.17453278 (~10°), TraceLine fraction 0.97,
 	   efw_Marker classname @ 0x1011c9ac, vtable+0x114.
-	   Brush markers have origin 0; aim/trace uses abs-center so the
-	   recovered cone points at the bmodel the player is looking at. */
+	   Brush markers have origin 0 so FindEntityInSphere misses them;
+	   also walk efw_Marker by abs-center. */
 	Vector eye;
 	CBaseEntity *pEnt;
-	TraceResult tr;
-	CBaseEntity *pHit;
-	Vector dir;
-	Vector dest;
-	float len;
-	float ang;
-	float dot;
 
 	if( !pPlayer )
 		return 0;
@@ -198,38 +234,16 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 	pEnt = NULL;
 	while( ( pEnt = UTIL_FindEntityInSphere( pEnt, eye, 96.0f ) ) != NULL )
 	{
-		if( pEnt == pPlayer )
+		if( EFW_LookUseTry( pPlayer, pEnt, eye ) )
+			return 1;
+	}
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, "efw_Marker" ) ) != NULL )
+	{
+		if( ( EFW_Place( pEnt ) - eye ).Length() > 96.0f )
 			continue;
-		dest = EFW_Place( pEnt );
-		dir.x = dest.x - eye.x;
-		dir.y = dest.y - eye.y;
-		dir.z = dest.z - eye.z;
-		len = dir.Length();
-		if( len == 0.0f )
-			dir = Vector( 0.0f, 0.0f, 1.0f );
-		else
-			dir = dir * ( 1.0f / len );
-		dot = DotProduct( dir, gpGlobals->v_forward );
-		if( dot > 1.0f )
-			dot = 1.0f;
-		if( dot < -1.0f )
-			dot = -1.0f;
-		ang = (float)acos( (double)dot );
-		if( ang >= 0.17453278f )
-			continue;
-		UTIL_TraceLine( eye, dest, dont_ignore_monsters, pPlayer->edict(), &tr );
-		if( tr.flFraction >= 0.97f )
-		{
-			if( EFW_LookUse114( pEnt, pPlayer ) )
-				return 1;
-			continue;
-		}
-		pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
-		if( pHit && EFW_FStrEq( STRING( pHit->pev->classname ), "efw_Marker" ) )
-		{
-			if( EFW_LookUse114( pHit, pPlayer ) )
-				return 1;
-		}
+		if( EFW_LookUseTry( pPlayer, pEnt, eye ) )
+			return 1;
 	}
 	return 0;
 }
@@ -558,6 +572,35 @@ int EFW_ClientCommand( edict_t *pEntity )
 		EFW_Spider( pPlayer );
 		return 1;
 	}
+	if( FStrEq( pcmd, "give" ) )
+	{
+		const char *name = ( CMD_ARGC() > arg0 + 1 ) ? CMD_ARGV( arg0 + 1 ) : NULL;
+		int bit = 0;
+		if( name && name[0] )
+		{
+			if( strstr( name, "Pliers" ) || strstr( name, "Pilers" ) )
+				bit = EFW_ITEM_PLIERS;
+			else if( strstr( name, "Lever" ) )
+				bit = EFW_ITEM_LEVER;
+			else if( strstr( name, "Branch" ) )
+				bit = EFW_ITEM_BRANCH;
+			else if( strstr( name, "MobilePhone" ) )
+				bit = EFW_ITEM_PHONE;
+			else if( strstr( name, "IDTag" ) )
+				bit = EFW_ITEM_IDTAG;
+			else if( strstr( name, "WashingPowder" ) )
+				bit = EFW_ITEM_POWDER;
+			else if( strstr( name, "RedPhone" ) )
+				bit = EFW_ITEM_REDCARD;
+			else if( strstr( name, "GreenPhone" ) )
+				bit = EFW_ITEM_GREENCARD;
+			else if( strstr( name, "BluePhone" ) )
+				bit = EFW_ITEM_BLUECARD;
+			EFW_GiveItem( pPlayer, bit, name );
+			EFW_DebugPrint( ">>> give %s bit=%d", name, bit );
+		}
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_lookuse" ) )
 	{
 		int hit;
@@ -566,11 +609,18 @@ int EFW_ClientCommand( edict_t *pEntity )
 		Vector back;
 		Vector ang;
 		float yaw;
+		float dist;
 		TraceResult tr;
 		CBaseEntity *pHit;
 		const char *hitCn;
+		const char *who;
 
-		pMark = EFW_NearestMarker( pPlayer, 256.0f );
+		pMark = NULL;
+		who = ( CMD_ARGC() > arg0 + 1 ) ? CMD_ARGV( arg0 + 1 ) : NULL;
+		if( who && who[0] )
+			pMark = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pMark )
+			pMark = EFW_NearestMarker( pPlayer, 4096.0f );
 		if( pMark )
 		{
 			dest = EFW_Place( pMark );
@@ -592,12 +642,15 @@ int EFW_ClientCommand( edict_t *pEntity )
 				pPlayer->edict(), &tr );
 			pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
 			hitCn = pHit ? STRING( pHit->pev->classname ) : "-";
+			dist = ( dest - pPlayer->EyePosition() ).Length();
 			yaw = (float)acos( DotProduct(
 				( dest - pPlayer->EyePosition() ).Normalize(),
 				gpGlobals->v_forward ) );
-			EFW_DebugPrint( ">>> look-use prep %s frac=%.2f hit=%s cone=%.3f",
-				STRING( pMark->pev->targetname ), tr.flFraction, hitCn, yaw );
+			EFW_DebugPrint( ">>> look-use prep %s dist=%.0f frac=%.2f hit=%s cone=%.3f",
+				STRING( pMark->pev->targetname ), dist, tr.flFraction, hitCn, yaw );
 		}
+		else
+			EFW_DebugPrint( ">>> look-use no marker" );
 		hit = EFW_LookUse( pPlayer );
 		EFW_DebugPrint( ">>> efw_lookuse hit=%d", hit );
 		return 1;
@@ -666,7 +719,14 @@ int EFW_ClientCommand( edict_t *pEntity )
 		{
 			CBaseEntity *pEnt = EFW_FindGoto( CMD_ARGV( arg0 + 1 ) );
 			if( pEnt )
-				EFW_Relocate( pPlayer, EFW_Place( pEnt ) );
+			{
+				Vector pos = EFW_Place( pEnt );
+				const char *cn = STRING( pEnt->pev->classname );
+				/* IdleThink walks when 100 < dist < 300; don't stand on the NPC. */
+				if( cn && !strncmp( cn, "monster_", 8 ) )
+					pos = pos + Vector( 150.0f, 0.0f, 8.0f );
+				EFW_Relocate( pPlayer, pos );
+			}
 			else
 				EFW_DebugPrint( ">>> efw_setpos (not found) %s", CMD_ARGV( arg0 + 1 ) );
 		}

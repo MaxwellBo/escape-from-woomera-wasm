@@ -859,7 +859,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
-		"efw_lookuse", "menuselect", NULL
+		"efw_lookuse", "menuselect", "give", NULL
 	};
 	int i;
 	if( done )
@@ -1148,9 +1148,8 @@ void EFW_StartFrame( void )
 			continue;
 		if( !strstr( model, ".mdl" ) )
 			continue;
-		/* Detainee studios stall the WASM SET_MODEL path. Keep the DLL
-		   name on the edict for logs and bind a studio the engine already
-		   loaded (EFW_SetVisibleModel fallback). */
+		/* Detainee SET_MODEL (and player.mdl stand-in) never returns in
+		   WASM. Bind the precached MODEL_INDEX and keep the PE name. */
 		apply = model;
 		n = 0;
 		for( c = 0; model[c] && n < (int)sizeof( lower ) - 1; c++ )
@@ -1161,13 +1160,29 @@ void EFW_StartFrame( void )
 			lower[n++] = ch;
 		}
 		lower[n] = 0;
-		if( strstr( lower, "detainee" ) )
-			apply = "models/player.mdl";
 		{
 			char line[192];
 			snprintf( line, sizeof( line ), "efw: studio begin edict=%d %s %s -> %s\n",
 				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model, apply );
 			EFW_LogLine( line );
+		}
+		if( strstr( lower, "detainee" ) )
+		{
+			int idx = MODEL_INDEX( (char *)model );
+			if( idx <= 0 )
+				idx = MODEL_INDEX( "models/Security.mdl" );
+			pent->v.modelindex = idx;
+			pent->v.solid = SOLID_BBOX;
+			pent->v.flags |= FL_MONSTER;
+			pent->v.movetype = MOVETYPE_STEP;
+			{
+				char line[160];
+				snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
+					i, pent->v.classname ? STRING( pent->v.classname ) : "?", idx );
+				EFW_LogLine( line );
+			}
+			EFW_EnableNpcThink( pent );
+			return;
 		}
 		SET_MODEL( pent, apply );
 		pent->v.solid = SOLID_BBOX;
@@ -1179,8 +1194,6 @@ void EFW_StartFrame( void )
 				i, pent->v.classname ? STRING( pent->v.classname ) : "?", apply );
 			EFW_LogLine( line );
 		}
-		/* UTIL_SetSize inside EnableNpcThink stalled refugee apply logs.
-		   Restore think after SET_MODEL has returned. */
 		EFW_EnableNpcThink( pent );
 		return;
 	}
