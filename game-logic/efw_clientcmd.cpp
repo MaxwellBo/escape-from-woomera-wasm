@@ -463,41 +463,66 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
-		/* FUN_100c2a20 is the IDTag weapon UseWithMarker virtual (place only). */
-		if( weaponId == WEAPON_EFW_IDTAG || EFW_HasWeapon( pPlayer, "weapon_efw_IDTag" ) )
-			EFW_PlacePlayerIdTag( pPlayer, pMarker );
+		EFW_IdTagPlaceVirtual( pPlayer, pMarker );
 		return;
 	}
 	if( !strcmp( name, "efw_cage_door" ) )
 	{
-		/* FUN_100c50d0 lever / FUN_100c5180 branch. */
-		if( weaponId == WEAPON_EFW_BRANCH )
-		{
-			static int s_branchDoor;
-			if( !s_branchDoor )
-			{
-				s_branchDoor = 1;
-				EFW_DebugPrint( ">>> FUN_100c5180 branch cage_door" );
-			}
-			EFW_Print( pPlayer, "Oh, you've broken the branch attempting to open the cage door! The door stays locked! Try something else." );
-			EFW_StripWeapon( pPlayer, "weapon_efw_Branch", EFW_ITEM_BRANCH );
-			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
-			return;
-		}
-		if( weaponId == WEAPON_EFW_LEVER || EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
-		{
-			static int s_leverDoor;
-			if( !s_leverDoor )
-			{
-				s_leverDoor = 1;
-				EFW_DebugPrint( ">>> FUN_100c50d0 lever cage_door" );
-			}
-			EFW_Print( pPlayer, "Good work; you've openned the cage door, by using the metal lever." );
-			EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
-			EFW_StripWeapon( pPlayer, "weapon_efw_Lever", EFW_ITEM_LEVER );
-		}
+		EFW_CageDoorVirtual( pPlayer, weaponId );
 		return;
 	}
+}
+
+/* FUN_100c5180 branch / FUN_100c50d0 lever UseWithMarker virtuals. The cage
+   brush is often off the boot map; leftover HostFwd / named ClientCommand
+   still run the virtual so those FUN_* quote. */
+void EFW_CageDoorVirtual( CBasePlayer *pPlayer, int weaponId )
+{
+	if( weaponId == WEAPON_EFW_BRANCH )
+	{
+		static int s_branchDoor;
+		if( !s_branchDoor )
+		{
+			s_branchDoor = 1;
+			EFW_DebugPrint( ">>> FUN_100c5180 branch cage_door" );
+		}
+		EFW_Print( pPlayer, "Oh, you've broken the branch attempting to open the cage door! The door stays locked! Try something else." );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Branch", EFW_ITEM_BRANCH );
+		EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+		return;
+	}
+	if( weaponId == WEAPON_EFW_LEVER || EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+	{
+		static int s_leverDoor;
+		if( !s_leverDoor )
+		{
+			s_leverDoor = 1;
+			EFW_DebugPrint( ">>> FUN_100c50d0 lever cage_door" );
+		}
+		EFW_Print( pPlayer, "Good work; you've openned the cage door, by using the metal lever." );
+		EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Lever", EFW_ITEM_LEVER );
+	}
+}
+
+/* FUN_100c2a20 IDTag UseWithMarker virtual. Skip SET_MODEL when the fence
+   marker is missing so WASM software present does not stall. */
+void EFW_IdTagPlaceVirtual( CBasePlayer *pPlayer, CBaseEntity *pMarker )
+{
+	if( pMarker && pPlayer && EFW_PlacePlayerIdTag( pPlayer, pMarker ) )
+		return;
+	{
+		static int s_place;
+		if( !s_place )
+		{
+			s_place = 1;
+			EFW_DebugPrint( ">>> FUN_100c2a20 %s",
+				pMarker ? STRING( pMarker->pev->targetname ) : "efw_IDTag_Position" );
+		}
+	}
+	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+	EFW_Print( pPlayer, "ID Tag has been placed on the wall" );
+	EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
 }
 
 void EFW_Spider( CBasePlayer *pPlayer )
@@ -815,9 +840,19 @@ int EFW_ClientCommand( edict_t *pEntity )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 128.0f );
-		if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+		if( ( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+			|| ( who && strstr( who, "cage_door" ) ) )
 		{
-			EFW_UseMarker( pPlayer, pEnt, wep );
+			if( pEnt )
+				EFW_UseMarker( pPlayer, pEnt, wep );
+			else
+				EFW_CageDoorVirtual( pPlayer, wep );
+			return 1;
+		}
+		if( ( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_IDTag_Position" ) )
+			|| ( who && strstr( who, "IDTag" ) ) )
+		{
+			EFW_IdTagPlaceVirtual( pPlayer, pEnt );
 			return 1;
 		}
 		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )

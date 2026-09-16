@@ -1174,6 +1174,10 @@ static void EFW_HostFwd( void )
 			pEnt = UTIL_FindEntityByTargetname( NULL, "efw_kitchen_bin" );
 		if( pEnt )
 			EFW_UseMarker( g_efw.player, pEnt, wep );
+		else if( who && strstr( who, "cage_door" ) )
+			EFW_CageDoorVirtual( g_efw.player, wep );
+		else if( who && strstr( who, "IDTag" ) )
+			EFW_IdTagPlaceVirtual( g_efw.player, NULL );
 		else if( !who || !who[0] || strstr( who, "kitchen_bin" ) )
 		{
 			/* Marker may be off-map on the boot level; leftover unique
@@ -1182,6 +1186,16 @@ static void EFW_HostFwd( void )
 				wep == WEAPON_EFW_PLIERS ? 1 : 0 );
 		}
 		EFW_PatrolAlertAll();
+		return;
+	}
+	if( !strcmp( pcmd, "efw_ShowMenu" ) )
+	{
+		int code = 0;
+		if( CMD_ARGC() > 1 )
+			code = atoi( CMD_ARGV( 1 ) );
+		/* 0x48 is FUN_100483d0 Panel (not HelpScreen 0x47 / 0x52 SPR). */
+		if( code )
+			EFW_FailOrNarrate( g_efw.player, code );
 		return;
 	}
 	if( !strcmp( pcmd, "efw_Talk" ) )

@@ -20,6 +20,8 @@ int EFW_RefugeeCount( void );
 void EFW_Precache( void );
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
 void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId = 0 );
+void EFW_CageDoorVirtual( CBasePlayer *pPlayer, int weaponId ); /* FUN_100c50d0 / FUN_100c5180 */
+void EFW_IdTagPlaceVirtual( CBasePlayer *pPlayer, CBaseEntity *pMarker ); /* FUN_100c2a20 */
 void EFW_Spider( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b450 */
 void EFW_Pickup( CBasePlayer *pPlayer, const char *arg ); /* ClientCommand 0x1001b5d7 */
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId = 0 );
