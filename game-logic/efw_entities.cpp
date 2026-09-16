@@ -179,7 +179,6 @@ void CRefugee::IdleThink( void )
 		s_walkTick++;
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
-		pev->movetype = MOVETYPE_STEP;
 		if( ( s_idleLog <= 2 ) || ( ( s_walkTick % 0x52 ) == 0 ) )
 		{
 			s_idleLog++;
@@ -189,24 +188,8 @@ void CRefugee::IdleThink( void )
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
 			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
-			/* SetActivity needs a SET_MODEL studio header; WASM detainee
-			   bind is MODEL_INDEX only and StudioFrameAdvance hangs. */
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
-			{
-				char line[80];
-				snprintf( line, sizeof( line ), "now walking %s", ( tn && tn[0] ) ? tn : "?" );
-				EFW_Print( pPlayer, line );
-			}
-		}
-		if( m_iWalkState == 3 && dist >= 100.0f )
-		{
-			delta.z = 0;
-			if( delta.Length() > 1.0f )
-			{
-				pev->angles.y = UTIL_VecToYaw( delta );
-				WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
-			}
 		}
 	}
 	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
@@ -636,8 +619,10 @@ void EFW_EnableNpcThink( edict_t *pent )
 		CRefugee *pRef = (CRefugee *)pEnt;
 		pRef->SetThink( &CRefugee::IdleThink );
 		pent->v.nextthink = gpGlobals->time + 0.1f;
-		pent->v.movetype = MOVETYPE_STEP;
-		pent->v.solid = SOLID_BBOX;
+		/* MOVETYPE_STEP without SET_MODEL stalls ServerFrame after a few
+		   seconds (same as think-without-studio). IdleThink still runs. */
+		pent->v.movetype = MOVETYPE_NONE;
+		pent->v.solid = SOLID_NOT;
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}

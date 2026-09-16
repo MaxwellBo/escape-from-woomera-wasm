@@ -1172,9 +1172,9 @@ void EFW_StartFrame( void )
 			if( idx <= 0 )
 				idx = MODEL_INDEX( "models/Security.mdl" );
 			pent->v.modelindex = idx;
-			pent->v.solid = SOLID_BBOX;
+			pent->v.solid = SOLID_NOT;
 			pent->v.flags |= FL_MONSTER;
-			pent->v.movetype = MOVETYPE_STEP;
+			pent->v.movetype = MOVETYPE_NONE;
 			{
 				char line[160];
 				snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
