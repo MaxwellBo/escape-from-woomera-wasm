@@ -581,17 +581,17 @@ int EFW_ClientCommand( edict_t *pEntity )
 		int bit = 0;
 		const char *cn;
 
-		cn = ( pItem && pItem->pev ) ? STRING( pItem->pev->classname ) : "";
-		if( !cn || strncmp( cn, "weapon_efw", 10 ) )
-		{
+		cn = "";
+		if( pItem && !( pItem->m_iId >= WEAPON_EFW_PLIERS && pItem->m_iId <= WEAPON_EFW_WASHINGPOWDER ) )
 			pItem = NULL;
+		if( !pItem )
+		{
 			for( slot = 0; slot < MAX_ITEM_TYPES && !pItem; slot++ )
 			{
 				CBasePlayerItem *pWalk = pPlayer->m_rgpPlayerItems[slot];
 				while( pWalk )
 				{
-					const char *walkCn = ( pWalk->pev ) ? STRING( pWalk->pev->classname ) : "";
-					if( walkCn && !strncmp( walkCn, "weapon_efw", 10 ) )
+					if( pWalk->m_iId >= WEAPON_EFW_PLIERS && pWalk->m_iId <= WEAPON_EFW_WASHINGPOWDER )
 					{
 						pItem = pWalk;
 						break;
@@ -600,21 +600,21 @@ int EFW_ClientCommand( edict_t *pEntity )
 				}
 			}
 		}
-		if( pItem && pItem->pev )
+		if( pItem && pItem->m_iId >= WEAPON_EFW_PLIERS && pItem->m_iId <= WEAPON_EFW_WASHINGPOWDER )
 		{
-			cn = STRING( pItem->pev->classname );
-			if( strstr( cn, "Pliers" ) || strstr( cn, "Pilers" ) )
-				bit = EFW_ITEM_PLIERS;
-			else if( strstr( cn, "Lever" ) )
-				bit = EFW_ITEM_LEVER;
-			else if( strstr( cn, "Branch" ) )
-				bit = EFW_ITEM_BRANCH;
-			else if( strstr( cn, "MobilePhone" ) )
-				bit = EFW_ITEM_PHONE;
-			else if( strstr( cn, "IDTag" ) )
-				bit = EFW_ITEM_IDTAG;
-			else if( strstr( cn, "WashingPowder" ) )
-				bit = EFW_ITEM_POWDER;
+			static const char *kNames[] = {
+				"weapon_efw_Pliers", "weapon_efw_Lever", "weapon_efw_Branch",
+				"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_RedPhoneCard",
+				"weapon_efw_GreenPhoneCard", "weapon_efw_BluePhoneCard", "weapon_efw_WashingPowder"
+			};
+			static const int kBits[] = {
+				EFW_ITEM_PLIERS, EFW_ITEM_LEVER, EFW_ITEM_BRANCH, EFW_ITEM_PHONE,
+				EFW_ITEM_IDTAG, EFW_ITEM_REDCARD, EFW_ITEM_GREENCARD, EFW_ITEM_BLUECARD,
+				EFW_ITEM_POWDER
+			};
+			int idx = pItem->m_iId - WEAPON_EFW_PLIERS;
+			cn = kNames[idx];
+			bit = kBits[idx];
 			/* FUN_10081f40 DropPlayerItem is a no-op in hlsdk SP
 			   (IsMultiplayer). PE still strips the held item. */
 			EFW_DebugPrint( ">>> drop %s", cn );
