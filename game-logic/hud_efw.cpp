@@ -41,9 +41,12 @@ static HSPRITE g_hHide;
 static HSPRITE g_hPliers;
 static HSPRITE g_hGive;
 static HSPRITE g_hStory;
+static HSPRITE g_hGrey; /* FUN_100436c0 sprites/efw_grey.spr */
+static HSPRITE g_hAscale; /* FUN_10044e30 sprites/ascale.spr */
 static int g_storyCode;
 static int g_storyPauseSent;
 static char g_storyChange[64];
+static float g_storyFade; /* DAT_100baf10 */
 static int g_weaponMask;
 
 #ifndef K_MOUSE1
@@ -210,6 +213,7 @@ static void EFW_OpenStoryboard( int code )
 		g_storyPauseSent = code;
 		gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
 	}
+	g_storyFade = 0.0f; /* FUN_10048590 DAT_100baf10 = 0 */
 	g_hStory = EFW_LoadSpr( spr );
 }
 
@@ -227,6 +231,7 @@ static void EFW_DismissStoryboard( void )
 	g_storyCode = 0;
 	g_storyPauseSent = 0;
 	g_hStory = 0;
+	g_storyFade = 0.0f;
 	g_menuCode = 0;
 	g_storyChange[0] = '\0';
 }
@@ -366,6 +371,9 @@ int CHudEfw::VidInit( void )
 	g_hDiary = 0;
 	g_loadedPage = -1;
 	g_hStory = 0;
+	g_hGrey = 0;
+	g_hAscale = 0;
+	g_storyFade = 0.0f;
 	/* SPR_Load on the software renderer can stall the first ClientFrame.
 	   Defer bubble/hide/give icons until Draw has returned a few times. */
 	g_hBubble = 0;
@@ -702,6 +710,94 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 	EFW_VguiSync();
 }
 
+/* FUN_100436c0: tile sprites/efw_grey.spr over the framebuffer. */
+static void EFW_DrawGreyVeil( void )
+{
+	int tw, th, x, y, tiles;
+	wrect_t rc;
+
+	if( !g_hGrey )
+		g_hGrey = EFW_LoadSpr( "sprites/efw_grey.spr" );
+	if( !g_hAscale )
+	{
+		g_hAscale = EFW_LoadSpr( "sprites/ascale.spr" ); /* FUN_10044e30 */
+		gEngfuncs.Con_Printf( ">>> FUN_10044e30 ascale=%d grey=%d\n", g_hAscale != 0, g_hGrey != 0 );
+	}
+	if( !g_hGrey )
+	{
+		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 220 );
+		return;
+	}
+	tw = SPR_Width( g_hGrey, 0 );
+	th = SPR_Height( g_hGrey, 0 );
+	if( tw < 1 )
+		tw = 16;
+	if( th < 1 )
+		th = 16;
+	tiles = ( ScreenWidth / tw ) * ( ScreenHeight / th );
+	SPR_Set( g_hGrey, 255, 255, 255 );
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = tw;
+	rc.bottom = th;
+	/* 16px grey is ~2500 SPR_DrawHoles on a 917x687 software present and
+	   never returns. Keep the PE loop when the tile is large enough. */
+	if( tiles > 80 )
+	{
+		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 12, 12, 12, 220 );
+		SPR_DrawHoles( 0, 0, 0, &rc );
+		return;
+	}
+	for( y = 0; y < ScreenHeight; y += th )
+		for( x = 0; x < ScreenWidth; x += tw )
+			SPR_DrawHoles( 0, x, y, &rc );
+}
+
+/* FUN_10043750: up to 12 frames of a 256px storyboard SPR in a 4x3 grid
+   centered on an 800x600 box, last column/row clipped. */
+static void EFW_DrawStoryboardTiles( HSPRITE spr )
+{
+	int frames, i, ox, oy, col, row, x, y, w, h;
+	wrect_t rc;
+	static int s_logged;
+
+	if( !spr )
+		return;
+	frames = SPR_Frames( spr );
+	if( frames < 1 )
+		frames = 1;
+	if( frames > 12 )
+		frames = 12;
+	ox = ( ScreenWidth - 800 ) / 2;
+	oy = ( ScreenHeight - 600 ) / 2;
+	SPR_Set( spr, 255, 255, 255 );
+	for( i = 0; i < frames; i++ )
+	{
+		col = i % 4;
+		row = i / 4;
+		x = ox + col * 256;
+		y = oy + row * 256;
+		w = 256;
+		h = 256;
+		if( x + w > ox + 800 )
+			w = ox + 800 - x;
+		if( y + h > oy + 600 )
+			h = oy + 600 - y;
+		if( w < 1 || h < 1 )
+			continue;
+		rc.left = 0;
+		rc.top = 0;
+		rc.right = w;
+		rc.bottom = h;
+		SPR_DrawHoles( i, x, y, &rc );
+	}
+	if( s_logged != g_storyCode )
+	{
+		s_logged = g_storyCode;
+		gEngfuncs.Con_Printf( ">>> FUN_10043750 frames=%d code=0x%x\n", frames, g_storyCode );
+	}
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -768,23 +864,12 @@ int CHudEfw::Draw( float flTime )
 
 	if( g_storyCode && g_hStory )
 	{
-		int dw, dh, dx, dy;
-		wrect_t rc;
-		dw = SPR_Width( g_hStory, 0 );
-		dh = SPR_Height( g_hStory, 0 );
-		if( dw < 1 )
-			dw = ScreenWidth;
-		if( dh < 1 )
-			dh = ScreenHeight;
-		dx = ( ScreenWidth - dw ) / 2;
-		dy = ( ScreenHeight - dh ) / 2;
-		rc.left = 0;
-		rc.top = 0;
-		rc.right = dw;
-		rc.bottom = dh;
-		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 220 );
-		SPR_Set( g_hStory, 255, 255, 255 );
-		SPR_DrawHoles( 0, dx, dy, &rc );
+		/* FUN_10043a10: grey veil, fade DAT_100baf10 += 0.1, then FUN_10043750. */
+		g_storyFade += 0.1f;
+		if( g_storyFade > 1.0f )
+			g_storyFade = 1.0f;
+		EFW_DrawGreyVeil();
+		EFW_DrawStoryboardTiles( g_hStory );
 		gHUD.DrawHudString( 16, ScreenHeight - 28, ScreenWidth - 16, "Press any key", r, g, b );
 		return 1;
 	}
