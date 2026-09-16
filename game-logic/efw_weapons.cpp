@@ -77,6 +77,7 @@ void CEfwWeapon::Spawn( void )
 		{
 			s_models = 1;
 			EFW_DebugPrint( ">>> FUN_100c43f0 %s %s %s", def->wmodel, def->vmodel, def->pmodel );
+			EFW_DebugPrint( ">>> FUN_100c5220 %s", def->wmodel );
 		}
 	}
 #endif
@@ -115,8 +116,18 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 #ifndef CLIENT_DLL
 	const EfwWeaponDef *defEarly = EFW_FindDef( STRING( pev->classname ) );
 	/* FUN_100c29f0: GetTickCount must pass this+0x12c before FUN_100c46a0. */
-	if( defEarly->itemBit == EFW_ITEM_IDTAG && pev->dmgtime && gpGlobals->time < pev->dmgtime )
-		return FALSE;
+	if( defEarly->itemBit == EFW_ITEM_IDTAG )
+	{
+		static int s_idGate;
+		if( !s_idGate )
+		{
+			s_idGate = 1;
+			EFW_DebugPrint( ">>> FUN_100c29f0 tick=%s",
+				( pev->dmgtime && gpGlobals->time < pev->dmgtime ) ? "wait" : "ok" );
+		}
+		if( pev->dmgtime && gpGlobals->time < pev->dmgtime )
+			return FALSE;
+	}
 #endif
 	if( CBasePlayerWeapon::AddToPlayer( pPlayer ) )
 	{
@@ -130,6 +141,14 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 			pretty += 11;
 		snprintf( picked, sizeof( picked ), "You just picked up the %s.", pretty );
 		EFW_Print( pPlayer, picked );
+		{
+			static int s_add;
+			if( !s_add )
+			{
+				s_add = 1;
+				EFW_DebugPrint( ">>> FUN_100c46a0 %s", pretty );
+			}
+		}
 		if( def->itemBit == EFW_ITEM_IDTAG )
 			EFW_AddKeyword( "Player'sIDTagOnFence", 0 );
 		if( def->itemBit == EFW_ITEM_PLIERS )

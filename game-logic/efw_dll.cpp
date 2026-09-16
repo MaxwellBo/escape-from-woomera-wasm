@@ -772,6 +772,23 @@ void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 			EFW_AddKeyword( "ELECTRICIAN", 0 );
 		}
 	}
+	{
+		static int s_add;
+		if( !s_add )
+		{
+			s_add = 1;
+			EFW_DebugPrint( ">>> FUN_100c46a0 %s", weaponName ? weaponName : "-" );
+		}
+	}
+	if( itemBit == EFW_ITEM_IDTAG )
+	{
+		static int s_idAdd;
+		if( !s_idAdd )
+		{
+			s_idAdd = 1;
+			EFW_DebugPrint( ">>> FUN_100c29f0 %s", weaponName ? weaponName : "-" );
+		}
+	}
 	if( !pPlayer || !weaponName || !weaponName[0] )
 		return;
 	/* After ServerActivate, s_mapLive used to reject every DispatchSpawn, so
@@ -827,6 +844,14 @@ CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 	pTag->pev->movetype = MOVETYPE_NONE;
 	pTag->pev->effects &= ~EF_NODRAW;
 	SET_MODEL( ENT( pTag->pev ), "models/w_idtag.mdl" );
+	{
+		static int s_set;
+		if( !s_set )
+		{
+			s_set = 1;
+			EFW_DebugPrint( ">>> FUN_100c5220 models/w_idtag.mdl" );
+		}
+	}
 	UTIL_SetOrigin( pTag->pev, pos );
 	pItem = (CBasePlayerItem *)pTag;
 	pItem->SetThink( NULL );
@@ -1106,6 +1131,11 @@ static void EFW_HostFwd( void )
 		|| ( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "Pliers" ) ) )
 	{
 		EFW_GiveItem( g_efw.player, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		return;
+	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 ) && strstr( CMD_ARGV( 1 ), "IDTag" ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
 		return;
 	}
 	if( !strcmp( pcmd, "efw_EndMailPickupMessage" ) )

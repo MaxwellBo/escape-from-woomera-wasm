@@ -67,6 +67,12 @@ static char g_caption[1024]; /* DAT_100baf04; FUN_10048790 */
 static int g_captionLen; /* DAT_100baf08 */
 static float g_captionAt; /* DAT_100baf14 */
 static float g_captionAge;
+static int g_iconFlyOn; /* DAT_100bc384; FUN_100464c0 +0x24 */
+static float g_iconFlyAt; /* DAT_100bc388 */
+static float g_iconFlyFrom[3]; /* DAT_100bc360 / 364 / 368 */
+static float g_iconFlyTo[3]; /* DAT_100bc36c / 370 / 374 */
+static float g_iconFlySize0; /* DAT_100bc378 */
+static float g_iconFlySize1; /* DAT_100bc37c */
 static float g_menuVeil; /* DAT_100a95b8; FUN_1001db00 conversation veil */
 static float g_invFade; /* DAT_100a95bc; FUN_10043dd0(fade) */
 static float g_diaryFade; /* DAT_100a95c4; diary SPR wipe */
@@ -76,6 +82,8 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 #define K_MOUSE1 107
 #define K_MOUSE2 108
 #endif
+
+static void EFW_StartIconFly( float x, float y ); /* FUN_100464c0 */
 
 #define EFW_VGUI_MAX 6 /* FUN_100c6d70 DAT_10134894..a8 — six CommandButton slots */
 struct EfwVguiBtn
@@ -681,6 +689,9 @@ static void EFW_OpenCaption( int code )
 	g_storyCode = 0;
 	g_hStory = 0;
 	gEngfuncs.Con_Printf( ">>> FUN_10048790 n=%d code=0x%x %s\n", g_captionLen, code, g_caption );
+	/* FUN_100463c0 copies FUN_100464c0 into DAT_100bc360 after a click.
+	   Caption Panel also leaves the interact icon, so start the 2s fly. */
+	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 	if( g_storyPauseSent != code )
 	{
 		g_storyPauseSent = code;
@@ -801,6 +812,21 @@ static void EFW_OpenStoryboard( int code )
 	g_hStory = EFW_LoadSpr( spr );
 }
 
+/* FUN_100464c0: pack from-pos / to-pos / sizes / now into DAT_100bc360. */
+static void EFW_StartIconFly( float x, float y )
+{
+	g_iconFlyFrom[0] = x;
+	g_iconFlyFrom[1] = y;
+	g_iconFlyFrom[2] = 0.5f;
+	g_iconFlyTo[0] = 15.0f; /* 0x41700000 */
+	g_iconFlyTo[1] = (float)ScreenHeight - 320.0f + 30.0f;
+	g_iconFlyTo[2] = 0.5f;
+	g_iconFlySize0 = 40.0f; /* FUN_100463c0 stack 0x42200000 */
+	g_iconFlySize1 = 10.0f; /* 0x41200000 */
+	g_iconFlyAt = EFW_ClientTime();
+	g_iconFlyOn = 1;
+}
+
 /* FUN_10043a10 / Panel dtor 0x10045899: DAT_1007ab5c = -1 so tiles stop. */
 static void EFW_LeaveContext( void )
 {
@@ -811,6 +837,8 @@ static void EFW_LeaveContext( void )
 	g_panel48On = 0;
 	g_contextDismissAt = EFW_ClientTime();
 	g_storyPauseSent = 0;
+	/* FUN_100463c0: vtable+0x14 then FUN_100464c0 copies 11 dwords to DAT_100bc360. */
+	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_10048740 pause=0 t=%.2f\n", g_contextDismissAt );
 	gEngfuncs.Con_Printf( ">>> FUN_100463c0\n" );
@@ -1559,6 +1587,68 @@ static void EFW_DrawInventoryStrip( float fade )
 	}
 }
 
+/* FUN_10044bf0: TRIAPI SpriteTexture centered quad. Software FillRGBA stand-in
+   (same hang-risk as FUN_1001d750 Begin). */
+static void EFW_DrawCenteredSpr( float cx, float cy, float w, float h )
+{
+	int x, y, iw, ih;
+	static int s_logged;
+
+	iw = (int)( w + 0.5f );
+	ih = (int)( h + 0.5f );
+	if( iw < 1 )
+		iw = 1;
+	if( ih < 1 )
+		ih = 1;
+	x = (int)( cx - w * 0.5f );
+	y = (int)( cy - h * 0.5f );
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_10044bf0 x=%.1f y=%.1f w=%.1f h=%.1f\n",
+			cx, cy, w, h );
+	}
+	FillRGBA( x, y, iw, ih, 200, 200, 180, 180 );
+}
+
+/* FUN_10046590 tail: 2s cubic ease from DAT_100bc360 to DAT_100bc36c. */
+static void EFW_DrawIconFly( void )
+{
+	float now;
+	float dt;
+	float t;
+	float cx;
+	float cy;
+	float sz;
+
+	if( !g_iconFlyOn )
+		return;
+	now = EFW_ClientTime();
+	if( now < g_iconFlyAt )
+	{
+		g_iconFlyOn = 0;
+		return;
+	}
+	dt = now - g_iconFlyAt;
+	if( dt > 2.0f )
+	{
+		g_iconFlyOn = 0;
+		return;
+	}
+	t = dt * 3.3333333f;
+	if( t < 0.0f )
+		t = 0.0f;
+	if( t > 1.0f )
+		t = 1.0f;
+	t = 1.0f - t;
+	t = 1.0f - t * t * t;
+	cx = ( g_iconFlyTo[0] - g_iconFlyFrom[0] ) * t + g_iconFlyFrom[0];
+	cy = ( g_iconFlyTo[1] - g_iconFlyFrom[1] ) * t + g_iconFlyFrom[1];
+	sz = ( g_iconFlySize1 - g_iconFlySize0 ) * t + g_iconFlySize0;
+	sz = sz + sz;
+	EFW_DrawCenteredSpr( cx, cy, sz, sz );
+}
+
 /* FUN_10046590: idle bar while DAT_100bc338==0 and DAT_100bc490!=0.
    DAT_100bc490 is the Cntxt scan count; DAT_100bc38c is the nearest name. */
 static void EFW_DrawInteractPrompt( void )
@@ -1571,6 +1661,16 @@ static void EFW_DrawInteractPrompt( void )
 	static char s_interact[32];
 	static int s_wasStory;
 	static int s_noneLog;
+	static int s_flyKick;
+
+	/* FUN_10046590 always evaluates the DAT_100bc384 fly after the bar. */
+	if( !s_flyKick )
+	{
+		s_flyKick = 1;
+		if( !g_iconFlyOn )
+			EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
+	}
+	EFW_DrawIconFly();
 
 	if( g_contextMode )
 	{
@@ -2158,6 +2258,10 @@ int CHudEfw::Draw( float flTime )
 		float hopeF = EFW_HopeForDraw();
 		EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40,
 			(int)( hopeF + 0.5f ), 200, 0, 0 );
+		if( !g_iconFlyOn )
+			EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
+		EFW_DrawIconFly();
+		EFW_DrawLetterbox( flTime );
 		return 1;
 	}
 
