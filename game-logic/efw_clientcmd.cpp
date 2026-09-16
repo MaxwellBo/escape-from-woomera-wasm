@@ -276,6 +276,14 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 	Vector eye;
 	CBaseEntity *pEnt;
 
+	{
+		static int s_look;
+		if( !s_look )
+		{
+			s_look = 1;
+			EFW_DebugPrint( ">>> FUN_100c4af0" );
+		}
+	}
 	if( !pPlayer )
 		return 0;
 	UTIL_MakeVectors( pPlayer->pev->v_angle );
@@ -309,10 +317,17 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 		weaponId = pPlayer->m_pActiveItem->m_iId;
 	if( weaponId <= 0 )
 		weaponId = WEAPON_EFW_PLIERS;
+	(void)EFW_WeaponTypeId( EFW_WeaponClassname( weaponId ) );
 
 	/* FUN_100c5240: MobilePhone Give virtual. Else FUN_100c4550. */
 	if( weaponId == WEAPON_EFW_MOBILEPHONE )
 	{
+		static int s_phoneGive;
+		if( !s_phoneGive )
+		{
+			s_phoneGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c5240 phone %s", tn ? tn : "?" );
+		}
 		if( EFW_FStrEq( tn, "Gholan" ) && EFW_HasKeyword( "GotHintAboutHiding" ) )
 		{
 			EFW_StripWeapon( pPlayer, "weapon_efw_MobilePhone", EFW_ITEM_PHONE );
@@ -333,6 +348,12 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 	/* FUN_100c5330: WashingPowder Give virtual. Else FUN_100c4550. */
 	if( weaponId == WEAPON_EFW_WASHINGPOWDER )
 	{
+		static int s_powderGive;
+		if( !s_powderGive )
+		{
+			s_powderGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c5330 powder %s", tn ? tn : "?" );
+		}
 		if( EFW_FStrEq( tn, "Mouhtaz" ) )
 		{
 			EFW_StripWeapon( pPlayer, "weapon_efw_WashingPowder", EFW_ITEM_POWDER );

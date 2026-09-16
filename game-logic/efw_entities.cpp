@@ -691,6 +691,14 @@ void CEfwMarker::Spawn( void )
 {
 	/* FUN_100c30a0: solid=0, movetype=7, SET_MODEL, DROP_TO_FLOOR,
 	   EF_NODRAW unless showtriggers. */
+	{
+		static int s_mark;
+		if( !s_mark )
+		{
+			s_mark = 1;
+			EFW_DebugPrint( ">>> FUN_100c30a0 %s", STRING( pev->targetname ) );
+		}
+	}
 	pev->angles = g_vecZero;
 	pev->movetype = MOVETYPE_PUSH;
 	pev->solid = SOLID_NOT;

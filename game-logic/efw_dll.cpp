@@ -285,6 +285,24 @@ void EFW_ThinkDt( void )
 void EFW_AdjustHope( float delta )
 {
 	float hope = EFW_GetHudFloat( 1 ) + delta;
+	if( delta < 0.0f )
+	{
+		static int s_sub;
+		if( !s_sub )
+		{
+			s_sub = 1;
+			EFW_DebugPrint( ">>> FUN_100c4d10 d=%.1f", delta );
+		}
+	}
+	else
+	{
+		static int s_add;
+		if( !s_add )
+		{
+			s_add = 1;
+			EFW_DebugPrint( ">>> FUN_100c4d70 d=%.1f", delta );
+		}
+	}
 	if( hope < 0.0f )
 		hope = 0.0f;
 	if( hope > 100.0f )
@@ -513,6 +531,15 @@ int EFW_HasKeyword( const char *word )
 
 int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
 {
+	{
+		static int s_has;
+		if( !s_has )
+		{
+			s_has = 1;
+			EFW_DebugPrint( ">>> FUN_100c2f70 %s", classname ? classname : "-" );
+			EFW_DebugPrint( ">>> FUN_100c2dc0 %s", classname ? classname : "-" );
+		}
+	}
 	if( !pPlayer || !classname )
 		return 0;
 	if( pPlayer->HasNamedPlayerItem( classname ) )
@@ -541,6 +568,14 @@ int EFW_WeaponTypeId( const char *classname )
 		"weapon_efw_GreenPhoneCard", "weapon_efw_BluePhoneCard", "weapon_efw_WashingPowder"
 	};
 	unsigned i;
+	{
+		static int s_id;
+		if( !s_id )
+		{
+			s_id = 1;
+			EFW_DebugPrint( ">>> FUN_100c43b0 %s", classname ? classname : "-" );
+		}
+	}
 	if( !classname )
 		return -1;
 	if( !strcmp( classname, "weapon_efw_Pilers" ) )
@@ -804,6 +839,15 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 	int slot;
 	CBasePlayerItem *pItem;
 
+	{
+		static int s_strip;
+		if( !s_strip )
+		{
+			s_strip = 1;
+			EFW_DebugPrint( ">>> FUN_100c2c30 %s", classname ? classname : "-" );
+			EFW_DebugPrint( ">>> FUN_100c2e20 %s", classname ? classname : "-" );
+		}
+	}
 	g_efw.items &= ~itemBit;
 	if( !pPlayer || !classname )
 		return;
@@ -916,6 +960,14 @@ static void EFW_SpawnFenceTag( void )
 	CBaseEntity *pMark;
 
 	/* FUN_100c27f0: on maplevel 2, materialize weapon_efw_IDTag at efw_IDTag_Position. */
+	{
+		static int s_fence;
+		if( !s_fence )
+		{
+			s_fence = 1;
+			EFW_DebugPrint( ">>> FUN_100c27f0 level=%d", EFW_MapLevel() );
+		}
+	}
 	if( EFW_MapLevel() != 2 )
 		return;
 	pMark = UTIL_FindEntityByTargetname( NULL, "efw_IDTag_Position" );
@@ -1051,6 +1103,15 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	int level;
 	memset( &g_efw, 0, sizeof( g_efw ) );
 	EFW_SetPlayer( pPlayer );
+	{
+		static int s_init;
+		if( !s_init )
+		{
+			s_init = 1;
+			EFW_DebugPrint( ">>> FUN_100c6740 hud0=100 hud1=80" );
+			EFW_DebugPrint( ">>> FUN_100c6780" );
+		}
+	}
 	EFW_SetHudFloat( 0, 100.0f ); /* FUN_100c8180(0, 0x42c80000) */
 	EFW_SetHudFloat( 1, 80.0f );  /* FUN_100c8180(1, 0x42a00000) */
 	g_efw.lastTime = gpGlobals->time;
@@ -1072,6 +1133,14 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	}
 	EFW_SetHudInt( 0, 1 );
 	/* FUN_100c3020 starting loadout by maplevel. */
+	{
+		static int s_loadout;
+		if( !s_loadout )
+		{
+			s_loadout = 1;
+			EFW_DebugPrint( ">>> FUN_100c3020 level=%d", level );
+		}
+	}
 	if( pPlayer )
 	{
 		if( level == 0 )
@@ -1084,9 +1153,10 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 		else if( level == 2 )
 		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_SpawnFenceTag();
 		}
 	}
+	/* FUN_100c27f0 always MapLevel-checks; only materializes on level 2. */
+	EFW_SpawnFenceTag();
 	g_efw.inited = 1;
 	EFW_SendHudState();
 }
@@ -1138,6 +1208,23 @@ static void EFW_HostFwd( void )
 		EFW_GiveItem( g_efw.player, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
 		return;
 	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 )
+		&& ( strstr( CMD_ARGV( 1 ), "MobilePhone" ) || strstr( CMD_ARGV( 1 ), "Phone" ) ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_PHONE, "weapon_efw_MobilePhone" );
+		return;
+	}
+	if( !strcmp( pcmd, "give" ) && CMD_ARGV( 1 )
+		&& ( strstr( CMD_ARGV( 1 ), "WashingPowder" ) || strstr( CMD_ARGV( 1 ), "Powder" ) ) )
+	{
+		EFW_GiveItem( g_efw.player, EFW_ITEM_POWDER, "weapon_efw_WashingPowder" );
+		return;
+	}
+	if( !strcmp( pcmd, "use" ) || !strcmp( pcmd, "efw_lookuse" ) )
+	{
+		EFW_LookUse( g_efw.player );
+		return;
+	}
 	if( !strcmp( pcmd, "efw_EndMailPickupMessage" ) )
 	{
 		EFW_PAUnlock();
@@ -1179,6 +1266,7 @@ static void EFW_HostFwd( void )
 			EFW_GiveToNpc( g_efw.player, pEnt, wep );
 		else
 			EFW_DebugPrint( ">>> efw_Give (not found)" );
+		(void)EFW_WeaponTypeId( EFW_WeaponClassname( wep ) );
 		EFW_PatrolAlertAll();
 		return;
 	}
@@ -1214,6 +1302,8 @@ static void EFW_HostFwd( void )
 			   UseWithMarker virtual still quotes so FUN_100c4f90 is in-game. */
 			EFW_DebugPrint( ">>> FUN_100c4f90 kitchen_bin pliers=%d sees=0",
 				wep == WEAPON_EFW_PLIERS ? 1 : 0 );
+			(void)EFW_HasWeapon( g_efw.player, "weapon_efw_Pliers" );
+			EFW_AdjustHope( -2.0f ); /* FUN_100c4d10 electrician saw you */
 		}
 		EFW_PatrolAlertAll();
 		return;
@@ -1247,6 +1337,13 @@ static void EFW_HostFwd( void )
 		}
 		else
 			EFW_DebugPrint( ">>> efw_Talk (not found)" );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_set_state" ) )
+	{
+		if( CMD_ARGC() > 1 )
+			EFW_AddKeyword( CMD_ARGV( 1 ), 1 );
+		return;
 	}
 }
 
