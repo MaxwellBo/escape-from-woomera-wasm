@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll33`;
+    return `${url}?v=efw-dll34`;
   return url;
 }
 
@@ -223,6 +223,11 @@ function onServerActivateSeen() {
     runEngineCmd('pausable 0');
     resumeEngineLoop();
   }, 200);
+  setTimeout(() => {
+    runEngineCmd('pausable 0');
+    resumeEngineLoop();
+    runEngineCmd('status');
+  }, 1500);
   setInterval(() => {
     runEngineCmd('pausable 0');
   }, 2000);

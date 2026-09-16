@@ -965,6 +965,10 @@ void EFW_StartFrame( void )
 
 	if( !s_mapLive )
 		return;
+	/* SET_MODEL of detainee studios stalls the WASM loop. Wait until the
+	   listen-server pawn exists so signon frames can run first. */
+	if( !EFW_Player() )
+		return;
 	maxEnts = gpGlobals->maxEntities;
 	if( maxEnts > 1200 )
 		maxEnts = 1200;
