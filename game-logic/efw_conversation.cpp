@@ -174,6 +174,14 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 	(void)flags;
 	if( !targetname || !targetname[0] )
 		return;
+	{
+		static int s_squark;
+		if( !s_squark )
+		{
+			s_squark = 1;
+			EFW_DebugPrint( ">>> FUN_100ba040 %s", targetname );
+		}
+	}
 	pEnt = UTIL_FindEntityByTargetname( NULL, targetname );
 	if( !pEnt )
 	{
@@ -513,6 +521,14 @@ void EFW_ThinkConversation( void )
 	EfwDllState *st = EFW_Dll();
 	CBasePlayer *pPlayer;
 	float dist;
+	{
+		static int s_thinkConv;
+		if( !s_thinkConv )
+		{
+			s_thinkConv = 1;
+			EFW_DebugPrint( ">>> FUN_100c6c10 talk=%d", st->talkActive );
+		}
+	}
 
 	if( !st->talkActive )
 	{

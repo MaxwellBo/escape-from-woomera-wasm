@@ -349,6 +349,12 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 	/* FUN_100c4e30: Pliers Give virtual. Unmatched NPC → FUN_100c4550. */
 	if( weaponId == WEAPON_EFW_PLIERS )
 	{
+		static int s_pliersGive;
+		if( !s_pliersGive )
+		{
+			s_pliersGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c4e30 pliers %s", tn ? tn : "?" );
+		}
 		if( EFW_FStrEq( tn, "Amir" ) )
 		{
 			EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
@@ -422,6 +428,7 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 		/* FUN_100c4f90: pliers UseWithMarker on efw_kitchen_bin. */
 		hasPliers = weaponId == WEAPON_EFW_PLIERS || EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
 		sees = EFW_ElectricianSees( pPlayer );
+		EFW_DebugPrint( ">>> FUN_100c4f90 kitchen_bin pliers=%d sees=%d", hasPliers, sees );
 		EFW_DebugPrint( ">>> kitchen_bin pliers=%d sees=%d", hasPliers, sees );
 		if( !hasPliers )
 			return;

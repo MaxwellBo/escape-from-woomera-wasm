@@ -142,19 +142,34 @@ static void *EFW_NewCmdBtn( CBasePlayer *pPlayer, int index )
 
 int EFW_FStrEq( const char *a, const char *b )
 {
+	static int s_logged;
+	int eq;
 	if( !a || !b )
 		return 0;
-	return !strcmp( a, b );
+	eq = !strcmp( a, b );
+	if( !s_logged && a[0] && b[0] )
+	{
+		s_logged = 1;
+		EFW_DebugPrint( ">>> FUN_100c8160 %s %s eq=%d", a, b, eq );
+	}
+	return eq;
 }
 
 int EFW_MapLevel( void )
 {
 	const char *map = STRING( gpGlobals->mapname );
+	int level = 0;
+	static int s_logged = -1;
 	if( map && !strcmp( map, "efw_prototype_level3" ) )
-		return 2;
-	if( map && !strcmp( map, "efw_prototype_level2" ) )
-		return 1;
-	return 0;
+		level = 2;
+	else if( map && !strcmp( map, "efw_prototype_level2" ) )
+		level = 1;
+	if( s_logged != level )
+	{
+		s_logged = level;
+		EFW_DebugPrint( ">>> FUN_100c5b80 level=%d %s", level, map ? map : "?" );
+	}
+	return level;
 }
 
 void EFW_SetHudFloat( int slot, float value )
@@ -296,6 +311,14 @@ void EFW_ThinkHope( void )
 	if( elapsed > 0.2f )
 		elapsed = 0.2f;
 	hope = EFW_GetHudFloat( 1 );
+	{
+		static int s_thinkHope;
+		if( !s_thinkHope )
+		{
+			s_thinkHope = 1;
+			EFW_DebugPrint( ">>> FUN_100c6ad0 hope=%.1f dt=%.3f", hope, elapsed );
+		}
+	}
 	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
 		hope = 0.0f;
@@ -415,6 +438,14 @@ void EFW_AddDiary( int page, int mode )
 		}
 	}
 	g_efw.diaryCount++;
+	{
+		static int s_addDiary;
+		if( !s_addDiary )
+		{
+			s_addDiary = 1;
+			EFW_DebugPrint( ">>> FUN_100c6890 page=%d", page );
+		}
+	}
 	EFW_DebugPrint( "Diary active item added    %d", page );
 }
 
@@ -449,8 +480,14 @@ void EFW_AddKeyword( const char *word, int unlocked )
 int EFW_HasKeyword( const char *word )
 {
 	int i;
+	static int s_logged;
 	if( !word )
 		return 0;
+	if( !s_logged )
+	{
+		s_logged = 1;
+		EFW_DebugPrint( ">>> FUN_100c3430 %s", word );
+	}
 	for( i = 0; i < g_efw.keywordCount; i++ )
 	{
 		if( !strcmp( g_efw.keywords[i], word ) )
@@ -706,6 +743,20 @@ void EFW_Print( CBasePlayer *pPlayer, const char *text )
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 {
 	g_efw.items |= itemBit;
+	if( itemBit == EFW_ITEM_PLIERS )
+	{
+		/* FUN_100c4f30 also runs from AddToPlayer; log if GiveNamedItem
+		   never creates the edict under WASM spawn gating. */
+		static int s_pliersGive;
+		if( !s_pliersGive )
+		{
+			s_pliersGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c4f30 PLIERS PLIERS_GOT_PLIERS ELECTRICIAN" );
+			EFW_AddKeyword( "PLIERS", 0 );
+			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			EFW_AddKeyword( "ELECTRICIAN", 0 );
+		}
+	}
 	if( !pPlayer || !weaponName || !weaponName[0] )
 		return;
 	/* After ServerActivate, s_mapLive used to reject every DispatchSpawn, so

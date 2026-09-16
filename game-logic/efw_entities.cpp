@@ -69,6 +69,12 @@ void EFW_OverrideNpcModel( CBaseEntity *pEntity )
 
 	if( model )
 	{
+		static int s_assign;
+		if( !s_assign )
+		{
+			s_assign = 1;
+			EFW_DebugPrint( ">>> FUN_1000d1d0 %s %s", tn && tn[0] ? tn : "?", model );
+		}
 		PRECACHE_MODEL( (char *)model );
 		if( EFW_DeferStudio() )
 			pEntity->pev->model = MAKE_STRING( model );
@@ -575,6 +581,16 @@ void CPatrolGuard::PatrolThink( void )
 void CPatrolGuard::Spawn( void )
 {
 	Precache();
+	/* FUN_100c5420: FUN_1000d1d0 then SET_MODEL models/security.mdl. */
+	EFW_OverrideNpcModel( this );
+	{
+		static int s_sec;
+		if( !s_sec )
+		{
+			s_sec = 1;
+			EFW_DebugPrint( ">>> FUN_100c5420 models/security.mdl" );
+		}
+	}
 	if( EFW_DeferStudio() )
 		pev->model = MAKE_STRING( "models/Security.mdl" );
 	else

@@ -501,6 +501,30 @@ static void EFW_DrawHudNumberRight( int xmax, int y, int xmin, int n, int r, int
 	EFW_DrawHudStringRight( xmax, y, xmin, buf, r, g, b );
 }
 
+/* FUN_10044860: client overlay stub, always 0. */
+static int EFW_HudStubZero( void )
+{
+	static int s_logged;
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_10044860 v=0\n" );
+	}
+	return 0;
+}
+
+/* Hope float is EFWData blob+4 / FUN_10047660(1). WASM usermsg may not
+   arrive; PE spawn is FUN_100c8180(1, 0x42a00000) = 80. */
+static float EFW_HopeForDraw( void )
+{
+	float hopeF = EFW_GetClientHudFloat( 1 );
+	if( hopeF < 0.0f && g_hope >= 0.0f )
+		hopeF = g_hope;
+	if( hopeF < 0.0f )
+		hopeF = 80.0f;
+	return hopeF;
+}
+
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
@@ -745,6 +769,9 @@ static void EFW_OpenStoryboard( int code )
 			g_contextMode = 1;
 			g_contextOpenedAt = now; /* FUN_10046370 DAT_100bc354 */
 			gEngfuncs.Con_Printf(
+				">>> FUN_100483d0 Panel 0,0,%d,%d +0xbc=100\n",
+				ScreenWidth, ScreenHeight );
+			gEngfuncs.Con_Printf(
 				">>> FUN_10048650 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
 				ScreenWidth, ScreenHeight );
 			gEngfuncs.Con_Printf( ">>> FUN_10048710 pause=1\n" );
@@ -954,9 +981,10 @@ int EFW_ClientKey( int down, int keynum )
 
 int CHudEfw::Init( void )
 {
-	g_hope = -1;
+	g_hope = 80.0f;
 	g_clientHudFloat[0] = 0.0f;
-	g_clientHudFloat[1] = -1.0f;
+	g_clientHudFloat[1] = 80.0f; /* FUN_100c8180(1, 80) until EFWData */
+	(void)EFW_HudStubZero();
 	memset( g_clientHudInt, 0, sizeof( g_clientHudInt ) );
 	g_hudDrawTime = 0.0f;
 	g_contextOpenedAt = 0.0f;
@@ -2127,22 +2155,16 @@ int CHudEfw::Draw( float flTime )
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 	{
 		/* Still draw hope number so FUN_1001e880 quotes after EFWData. */
-		float hopeF = EFW_GetClientHudFloat( 1 );
-		if( hopeF < 0.0f && g_hope >= 0.0f )
-			hopeF = g_hope;
-		if( hopeF >= 0.0f )
-			EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40,
-				(int)( hopeF + 0.5f ), 200, 0, 0 );
+		float hopeF = EFW_HopeForDraw();
+		EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40,
+			(int)( hopeF + 0.5f ), 200, 0, 0 );
 		return 1;
 	}
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	{
-		float hopeF = EFW_GetClientHudFloat( 1 );
-		if( hopeF < 0.0f && g_hope >= 0.0f )
-			hopeF = g_hope;
+		float hopeF = EFW_HopeForDraw();
 		hope = (int)( hopeF + 0.5f );
-		if( hopeF >= 0.0f )
 		{
 			/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
 			EFW_DrawHopeTicks( hope / 10 );

@@ -124,6 +124,14 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 			EFW_AddKeyword( "Player'sIDTagOnFence", 0 );
 		if( def->itemBit == EFW_ITEM_PLIERS )
 		{
+			/* FUN_100c4f30: parent AddToPlayer, then MapLevel==0 FailOrNarrate
+			   0x3d, then PLIERS / PLIERS_GOT_PLIERS / ELECTRICIAN. */
+			static int s_pliersAdd;
+			if( !s_pliersAdd )
+			{
+				s_pliersAdd = 1;
+				EFW_DebugPrint( ">>> FUN_100c4f30 PLIERS PLIERS_GOT_PLIERS ELECTRICIAN" );
+			}
 			EFW_AddKeyword( "PLIERS", 0 );
 			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
 			EFW_AddKeyword( "ELECTRICIAN", 0 );

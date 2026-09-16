@@ -394,6 +394,7 @@ void EFW_PALockRAR( void )
 void EFW_PAUnlock( void )
 {
 	g_pa.rarLock = 0;
+	EFW_DebugPrint( ">>> FUN_100c77e0 rarLock=0" );
 }
 
 #endif
