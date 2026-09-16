@@ -236,16 +236,17 @@ void EFW_SendHudState( void )
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 {
 	static const char *kNarrate[] = {
+		/* Pointers at 0x1011d618 + code*4 + 0x24. 0x3f/0x43 still EFW_Menu. */
 		/* 0x3c */ "You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.",
 		/* 0x3d */ "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir.",
 		/* 0x3e */ "Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.",
-		/* 0x3f */ NULL, /* Hiding_Day storyboard */
-		/* 0x40 */ "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.",
-		/* 0x41 */ "You return to the hiding place, with the pliers safely tucked away underneath your shirt.",
-		/* 0x42 */ "You could hide again, but you haven't got the pliers yet.",
+		/* 0x3f */ NULL, /* Hiding_Day storyboard; table text is the ID-tag night wait */
+		/* 0x40 */ "There's a hole. You could hide here, if you ever needed to.",
+		/* 0x41 */ "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching.",
+		/* 0x42 */ "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.",
 		/* 0x43 */ NULL, /* Hiding_Night storyboard */
-		/* 0x44 */ "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.",
-		/* 0x45 */ "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed."
+		/* 0x44 */ "You could hide again, but you haven't got the pliers yet.",
+		/* 0x45 */ "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters."
 	};
 	int idx;
 

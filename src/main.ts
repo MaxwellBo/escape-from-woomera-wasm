@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll76`;
+    return `${url}?v=efw-dll77`;
   return url;
 }
 
@@ -97,8 +97,16 @@ function applyEfwVgui(text: string): boolean {
 
 /* FUN_10047830 VGUI storyboards: HTML Panel stand-in while HUD SPR cannot run. */
 const EFW_STORY: Record<number, { title: string; next?: string }> = {
-  0x3f: { title: 'You hide under the building until night falls.' },
-  0x43: { title: 'Night. You retrieve the pliers from the kitchen bin and wait in the hiding place.' },
+  0x3c: { title: 'You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.' },
+  0x3d: { title: "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." },
+  0x3e: { title: 'Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.' },
+  0x3f: { title: "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed." },
+  0x40: { title: "There's a hole. You could hide here, if you ever needed to." },
+  0x41: { title: "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching." },
+  0x42: { title: 'You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.' },
+  0x43: { title: 'You return to the hiding place, with the pliers safely tucked away underneath your shirt.' },
+  0x44: { title: "You could hide again, but you haven't got the pliers yet." },
+  0x45: { title: 'You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.' },
   0x46: { title: 'Isolation.', next: 'efw_changelevel efw_prototype_level2' },
   0x47: { title: 'Help' },
   0x48: { title: '' },
@@ -294,15 +302,22 @@ function releaseConsoleToGame() {
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
 }
 
-function dismissMenuAfterHud() {
-  if (!consoleForPlaque)
+let bootMenuDismissed = false;
+function dismissBootMenu() {
+  if (bootMenuDismissed)
     return;
-  /* First-map double toggleconsole (dll74/75) put key_game during the
-     first ClientFrames and the software present stopped returning, so
-     authentic CHANGE_LEVEL never reached SV_ExecChangeLevel. Leave the
-     boot menu up (ui_renderworld composites the BSP) until after a
-     chapter change, when HUD is already looping. */
-  releaseConsoleToGame();
+  bootMenuDismissed = true;
+  /* After HUD has already looped with ui_renderworld (dll76 n=481),
+     two toggleconsoles: key_menu → key_console → UI_SetActiveMenu(false).
+     Doing this on HUD n=1 (dll74/75) stopped the software present. */
+  runEngineCmd('toggleconsole');
+  runEngineCmd('toggleconsole');
+  log('listen: double toggleconsole after world present (boot menu → game)');
+}
+
+function dismissMenuAfterHud() {
+  if (consoleForPlaque)
+    releaseConsoleToGame();
 }
 
 function resumeAfterFirstClientFrame() {
@@ -475,6 +490,8 @@ function onServerActivateSeen() {
     if (changeWatch) return;
     if (consoleForPlaque)
       releaseConsoleToGame();
+    else
+      dismissBootMenu();
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
@@ -1100,6 +1117,7 @@ async function boot() {
     listenReady = false;
     menuDismissed = false;
     consoleForPlaque = false;
+    bootMenuDismissed = false;
     setTimeout(() => {
       const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
       loadMap(bootMap, 'deferred after Host_Init');
