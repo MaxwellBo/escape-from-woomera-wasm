@@ -1040,23 +1040,14 @@ void EFW_StartFrame( void )
 		for( i = 1; i < EFW_MaxEnts(); i++ )
 		{
 			edict_t *pent = INDEXENT( i );
-			const char *cn;
 			if( !pent || pent->free )
 				continue;
 			if( pent->v.modelindex <= 0 )
 				continue;
-			cn = pent->v.classname ? STRING( pent->v.classname ) : "";
 			EFW_EnableNpcThink( pent );
-			if( cn[0] && !strncmp( cn, "monster_", 8 )
-				&& strcmp( cn, "monster_refugee" )
-				&& strcmp( cn, "monster_patrol_guard" )
-				&& strcmp( cn, "monster_efw_guard" ) )
-			{
-				if( pent->v.nextthink <= 0 )
-					pent->v.nextthink = gpGlobals->time + 0.1f;
-				pent->v.movetype = MOVETYPE_STEP;
-				pent->v.solid = SOLID_SLIDEBOX;
-			}
+			/* Leave stock HL monsters frozen. Unfreezing monster_barney
+			   made MonsterThink/GetEyePosition stall Host_Frame after the
+			   first live tick. */
 		}
 		/* Return so ClientFrame/CheckForResend and cmd forwarding run
 		   before the first deferred SET_MODEL. */
