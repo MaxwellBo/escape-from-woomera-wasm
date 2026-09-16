@@ -854,7 +854,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
-		"menuselect", NULL
+		"efw_lookuse", "menuselect", NULL
 	};
 	int i;
 	if( done )

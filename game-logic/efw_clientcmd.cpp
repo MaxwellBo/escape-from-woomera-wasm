@@ -421,6 +421,7 @@ void EFW_Spider( CBasePlayer *pPlayer )
 			g_engfuncs.pfnServerPrint( "Ignoring spider\n" );
 		return;
 	}
+	EFW_DebugPrint( ">>> efw_spider scan=%d FailOrNarrate 0x48", EFW_Dll()->scanCount );
 	EFW_SendCntxt();
 	EFW_FailOrNarrate( pPlayer, 0x48 );
 }
@@ -555,6 +556,12 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_spider" ) )
 	{
 		EFW_Spider( pPlayer );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_lookuse" ) )
+	{
+		int hit = EFW_LookUse( pPlayer );
+		EFW_DebugPrint( ">>> efw_lookuse hit=%d", hit );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_Pickup" ) )
