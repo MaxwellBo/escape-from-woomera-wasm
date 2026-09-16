@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll79`;
+    return `${url}?v=efw-dll80`;
   return url;
 }
 
@@ -302,17 +302,6 @@ function releaseConsoleToGame() {
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
 }
 
-function holdBootConsole() {
-  if (consoleForPlaque)
-    return;
-  /* Opening the console only switches key_dest. GameUI stays drawn, so
-     this matches the CHANGE_LEVEL plaque hold. dll74–77 doubled this
-     immediately into UI_SetActiveMenu(false) and the present died. */
-  runEngineCmd('toggleconsole');
-  consoleForPlaque = true;
-  log('listen: key_console after first HUD (boot menu still drawn)');
-}
-
 function dismissMenuAfterHud() {
   if (consoleForPlaque)
     releaseConsoleToGame();
@@ -491,17 +480,6 @@ function onServerActivateSeen() {
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
     log('listen: r_norefresh 0 ui_renderworld 1 (soft world present)');
-    /* CHANGE_LEVEL already released on HUD. Boot map: open console
-       (menu still drawn) then 400ms later close it while ca_active —
-       the same two steps as pfnChangeLevel, with a gap so we do not
-       double-toggle in one Host_Frame (dll77). */
-    if (!consoleForPlaque)
-      holdBootConsole();
-    setTimeout(() => {
-      if (changeWatch) return;
-      if (consoleForPlaque)
-        releaseConsoleToGame();
-    }, 400);
   }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
