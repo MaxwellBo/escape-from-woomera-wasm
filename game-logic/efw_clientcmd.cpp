@@ -33,6 +33,10 @@ static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
 		if( !strncmp( cn, "trigger_", 8 ) )
 			pScan->Touch( pPlayer );
 	}
+	/* FUN_100c7830 is per-frame from SendHudState. After a WASM setpos,
+	   rescan immediately so efw_spider (DAT_10134940 / FUN_100c7820) sees
+	   the new sphere instead of the previous spawn slot. */
+	EFW_TalkScan();
 }
 
 static CBaseEntity *EFW_FindGoto( const char *name )
@@ -781,9 +785,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 			{
 				Vector pos = EFW_Place( pEnt );
 				const char *cn = STRING( pEnt->pev->classname );
-				/* IdleThink walks when 100 < dist < 300; don't stand on the NPC. */
+				/* IdleThink walks when 100 < dist < 300; TalkScan sphere is
+				   123 (0x42f60000). 150 put the pawn outside DAT_10134940 so
+				   FUN_100c7820 always printed "Ignoring spider". */
 				if( cn && !strncmp( cn, "monster_", 8 ) )
-					pos = pos + Vector( 150.0f, 0.0f, 8.0f );
+					pos = pos + Vector( 110.0f, 0.0f, 8.0f );
 				EFW_Relocate( pPlayer, pos );
 			}
 			else

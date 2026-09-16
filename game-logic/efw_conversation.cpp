@@ -857,6 +857,17 @@ void EFW_TalkScan( void )
 			WRITE_BYTE( st->scanCount != 0 );
 		MESSAGE_END();
 	}
+	{
+		static int s_logged;
+		if( st->scanCount != s_logged )
+		{
+			int i;
+			s_logged = st->scanCount;
+			EFW_DebugPrint( ">>> TalkScan n=%d", st->scanCount );
+			for( i = 0; i < st->scanCount; i++ )
+				EFW_DebugPrint( ">>> TalkScan [%d] type=%d %s", i, st->scan[i].type, st->scan[i].name );
+		}
+	}
 	EFW_SendCntxt();
 	/* FUN_10044f70 CommandButtons live in client HUD_Redraw. When
 	   ClientFrame is stuck, emit the same prompts from TalkScan. */
