@@ -73,6 +73,8 @@ void EFW_SetPause( int on )
 static char s_queuedMap[64];
 static int s_queuedChange;
 
+void EFW_RunQueuedChangeLevel( void );
+
 void EFW_ChangeLevel( const char *map )
 {
 	if( !map || !map[0] )
@@ -85,13 +87,16 @@ void EFW_ChangeLevel( const char *map )
 	strncpy( s_queuedMap, map, sizeof( s_queuedMap ) - 1 );
 	s_queuedMap[sizeof( s_queuedMap ) - 1] = '\0';
 	s_queuedChange = 1;
-	/* Queue until engine StartFrame (inside Host_Frame). HostFwd JS runs
-	   between COM_Frames so COM_ChangeLevel's nextstate is lost before
-	   Host_RunFrame can promote STATE_CHANGELEVEL. */
+	/* PE ClientCommand 0x1001b325 is immediate pfnChangeLevel. Engine
+	   StartFrame is skipped while libmenu has the listen server paused,
+	   so flush now: Host_RunFrame at the end of the next COM_Frame still
+	   sees nextstate=STATE_CHANGELEVEL. StartFrame will no-op if already
+	   consumed. */
 	EFW_DebugPrint( ">>> efw_changelevel queued %s time=%.2f validate=%.0f newunit=%.0f",
 		map, gpGlobals->time,
 		CVAR_GET_FLOAT( "sv_validate_changelevel" ),
 		CVAR_GET_FLOAT( "sv_newunit" ) );
+	EFW_RunQueuedChangeLevel();
 }
 
 void EFW_ClearQueuedChangeLevel( void )

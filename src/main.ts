@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll68`;
+    return `${url}?v=efw-dll69`;
   return url;
 }
 
@@ -345,7 +345,6 @@ function loadMap(name: string, reason: string) {
      COM_Frame only runs SV_ExecChangeLevel on the *next* rAF after
      Host_RunFrame promotes STATE_CHANGELEVEL — leave that runner alone. */
   runEngineCmd('pausable 0');
-  runEngineCmd('unpause');
   runEngineCmd('cancelselect');
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
@@ -356,7 +355,6 @@ function loadMap(name: string, reason: string) {
       return;
     log(`listen: pfnChangeLevel ${name}`);
     runEngineCmd('pausable 0');
-    runEngineCmd('unpause');
     runEngineCmd('sv_validate_changelevel 0');
     runEngineCmd(`efw_changelevel ${name}`);
   }, 200);
@@ -397,13 +395,17 @@ function onServerActivateSeen() {
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
   runEngineCmd('pausable 0');
-  runEngineCmd('unpause');
   runEngineCmd('cancelselect');
   runEngineCmd('scr_loading 0');
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
+    /* Boot leaves libmenu painted over the world (New game / Configuration).
+       One togglemenu hides it so ServerFrame runs and the BSP can present.
+       pausable 0 so hiding the menu does not freeze StartFrame. */
+    runEngineCmd('togglemenu');
+    log('listen: togglemenu after ServerActivate (dismiss libmenu)');
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);

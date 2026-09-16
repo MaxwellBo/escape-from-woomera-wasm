@@ -871,6 +871,7 @@ static void EFW_HostPump( void )
 
 	n++;
 	EFW_StartFrame();
+	EFW_RunQueuedChangeLevel();
 	pPlayer = EFW_Player();
 	if( pPlayer )
 		EFW_PlayerPreThink( pPlayer );
