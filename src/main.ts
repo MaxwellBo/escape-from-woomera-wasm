@@ -105,6 +105,7 @@ let lastVguiFile = '';
 function ingestVguiFile(raw: string) {
   if (raw === lastVguiFile) return;
   lastVguiFile = raw;
+  (window as Window & { __efwVguiFile?: string }).__efwVguiFile = raw;
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (trimmed) applyEfwVgui(trimmed);
