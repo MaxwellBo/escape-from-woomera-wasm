@@ -86,6 +86,12 @@ void EFW_HideUnderBuilding( CBasePlayer *pPlayer )
 		return;
 	/* ClientCommand 0x1001b969: MapLevel, then HasKeyword / HasWeapon. */
 	level = EFW_MapLevel();
+	EFW_DebugPrint( ">>> HideUnder level=%d pliers=%d lever=%d PliersInBin=%d Gholan=%d",
+		level,
+		EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ),
+		EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ),
+		EFW_HasKeyword( "PliersInBin" ),
+		EFW_HasKeyword( "GholanAgreedToPloy" ) );
 	if( level == 0 )
 	{
 		if( !EFW_HasKeyword( "PliersInBin" ) )

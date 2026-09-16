@@ -859,7 +859,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
-		"efw_lookuse", "menuselect", "give", NULL
+		"efw_lookuse", "menuselect", "give", "drop", "use", NULL
 	};
 	int i;
 	if( done )
@@ -1350,9 +1350,10 @@ void EFW_OnServerActivate( void )
 	s_studioDelay = 0;
 	s_liveTicks = 0;
 	snprintf( line, sizeof( line ),
-		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d\n",
+		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
-		s_seenN, s_markers, s_refugees );
+		s_seenN, s_markers, s_refugees,
+		STRING( gpGlobals->mapname ), EFW_MapLevel() );
 	EFW_LogLine( line );
 }
 

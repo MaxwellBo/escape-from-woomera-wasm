@@ -536,6 +536,7 @@ static void EFW_VguiSync( void )
 	}
 	fflush( stdout );
 	fflush( stderr );
+	gEngfuncs.Con_Printf( "efw: vgui buttons=%d\n", g_vguiN );
 }
 
 static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )

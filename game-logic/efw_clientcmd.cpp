@@ -572,6 +572,28 @@ int EFW_ClientCommand( edict_t *pEntity )
 		EFW_Spider( pPlayer );
 		return 1;
 	}
+	if( FStrEq( pcmd, "drop" ) )
+	{
+		/* ClientCommand 0x1001ad87: stock drop + FUN_100c8388. */
+		CBasePlayerItem *pItem = pPlayer->m_pActiveItem;
+		const char *cn;
+		if( pItem )
+		{
+			cn = STRING( pItem->pev->classname );
+			EFW_StripWeapon( pPlayer, cn, 0 );
+			EFW_DebugPrint( ">>> drop %s", cn );
+		}
+		else
+			EFW_DebugPrint( ">>> drop (none)" );
+		return 1;
+	}
+	if( FStrEq( pcmd, "use" ) )
+	{
+		/* ClientCommand 0x1001af70 then FUN_100c4af0 look-use. */
+		int hit = EFW_LookUse( pPlayer );
+		EFW_DebugPrint( ">>> use look-use hit=%d", hit );
+		return 1;
+	}
 	if( FStrEq( pcmd, "give" ) )
 	{
 		const char *name = ( CMD_ARGC() > arg0 + 1 ) ? CMD_ARGV( arg0 + 1 ) : NULL;

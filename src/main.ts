@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll55`;
+    return `${url}?v=efw-dll56`;
   return url;
 }
 
@@ -130,7 +130,7 @@ function pollEfwVgui() {
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
-  if (normalized.includes('efw: ServerActivate'))
+  if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
     resumeAfterFirstClientFrame();
@@ -222,19 +222,51 @@ function resumeAfterFirstClientFrame() {
 
 let startedMap = '';
 let listenReady = false;
+let pumpTimer: ReturnType<typeof setInterval> | null = null;
+let pausableTimer: ReturnType<typeof setInterval> | null = null;
+
+function startHostPumps() {
+  if (pumpTimer) {
+    clearInterval(pumpTimer);
+    pumpTimer = null;
+  }
+  let pumps = 0;
+  pumpTimer = setInterval(() => {
+    if (pumps < 80) {
+      runEngineCmd('efw_pump');
+      pumps++;
+    } else if (pumpTimer) {
+      clearInterval(pumpTimer);
+      pumpTimer = null;
+    }
+    resumeEngineLoop();
+  }, 120);
+}
+
 function loadMap(name: string, reason: string) {
   if (startedMap === name) {
     log(`skip duplicate map ${name} (${reason})`);
     return;
   }
+  const prev = startedMap;
   startedMap = name;
   log(`> map ${name} (${reason})`);
-  runEngineCmd(`map ${name}`);
+  /* Extra `map` is a no-op while Host is in RUNFRAME. CHANGE_LEVEL (the
+     PE ClientCommand) is what actually loads chapter 2/3. */
+  if (prev)
+    runEngineCmd(`efw_changelevel ${name}`);
+  else
+    runEngineCmd(`map ${name}`);
 }
 
+let lastActivateMs = 0;
 function onServerActivateSeen() {
-  if (listenReady) return;
+  const now = Date.now();
+  if (now - lastActivateMs < 800)
+    return;
+  lastActivateMs = now;
   listenReady = true;
+  resumedAfterClientFrame = false;
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
   /* host_clientloaded starts the first 3D/overview ClientFrame, which
      never returned after live ticks=1. Delay it until StartFrame is live. */
@@ -257,19 +289,19 @@ function onServerActivateSeen() {
     runEngineCmd('host_gameloaded 1');
     resumeEngineLoop();
   }, 8000);
-  setInterval(() => {
-    runEngineCmd('pausable 0');
-  }, 4000);
-  let pumps = 0;
-  const pumpTimer = setInterval(() => {
-    if (pumps < 80) {
-      runEngineCmd('efw_pump');
-      pumps++;
-    } else {
-      clearInterval(pumpTimer);
-    }
-    resumeEngineLoop();
-  }, 120);
+  setTimeout(() => {
+    /* Software has no r_drawworld; leave r_norefresh off so the world
+       can present once Host_Frame is ticking. */
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawentities 1');
+    log('listen: r_norefresh 0 (soft world present)');
+  }, 14000);
+  startHostPumps();
+  if (!pausableTimer) {
+    pausableTimer = setInterval(() => {
+      runEngineCmd('pausable 0');
+    }, 4000);
+  }
 }
 
 /** Host console plus EFW AddServerCommand (EFW_HostFwd). Do not prefix
