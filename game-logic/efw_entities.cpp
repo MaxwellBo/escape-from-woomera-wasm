@@ -440,6 +440,14 @@ void EFW_PatrolAlertAll( void )
 {
 	CBaseEntity *pGuard = NULL;
 	CBasePlayer *pPlayer = EFW_Player();
+	{
+		static int s_alert;
+		if( !s_alert )
+		{
+			s_alert = 1;
+			EFW_DebugPrint( ">>> FUN_100c5480 monster_patrol_guard" );
+		}
+	}
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
 	{
 		CPatrolGuard *pg = (CPatrolGuard *)pGuard;

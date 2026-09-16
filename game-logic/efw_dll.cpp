@@ -460,6 +460,12 @@ void EFW_AddDiary( int page, int mode )
 
 void EFW_FlagDiary( int page )
 {
+	static int s_flag;
+	if( !s_flag )
+	{
+		s_flag = 1;
+		EFW_DebugPrint( ">>> FUN_100c6910 page=%d", page );
+	}
 	if( page >= 0 && page < EFW_MAX_DIARY )
 		g_efw.diaryFlags[page] = 1;
 }
@@ -804,6 +810,14 @@ CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 	/* FUN_100c2a20 after FStrEq(targetname, "efw_IDTag_Position"). */
 	if( !pTag || !pMark )
 		return NULL;
+	{
+		static int s_place;
+		if( !s_place )
+		{
+			s_place = 1;
+			EFW_DebugPrint( ">>> FUN_100c2a20 %s", STRING( pMark->pev->targetname ) );
+		}
+	}
 	pos = ( pMark->pev->absmin + pMark->pev->absmax ) * 0.5f;
 	if( ( pMark->pev->absmax - pMark->pev->absmin ).Length() < 1.0f )
 		pos = pMark->pev->origin;
@@ -1085,7 +1099,7 @@ static void EFW_HostFwd( void )
 	}
 	/* Pawn edict is not live (PreThink live=0). Leftover unique overlay
 	   commands that do not need pvPrivateData still run so FUN_100c4f30 /
-	   FUN_100ba040 / FUN_100c77e0 can quote. */
+	   FUN_100ba040 / FUN_100c77e0 / FUN_100c4e30 / FUN_100c4f90 can quote. */
 	if( !pcmd )
 		return;
 	if( !strcmp( pcmd, "efw_PickupPliers" )
@@ -1103,6 +1117,70 @@ static void EFW_HostFwd( void )
 		|| !strcmp( pcmd, "efw_TriggerMailPickupMessage" ) )
 	{
 		EFW_ServerCommand( g_efw.player, pcmd );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_Give" ) )
+	{
+		CBaseEntity *pEnt = NULL;
+		const char *who = NULL;
+		int wep = WEAPON_EFW_PLIERS;
+		int i;
+		for( i = 1; i < CMD_ARGC(); i++ )
+		{
+			const char *a = CMD_ARGV( i );
+			if( !a || !a[0] )
+				continue;
+			if( a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
+			else
+				who = a;
+		}
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt && !( who && who[0] ) )
+		{
+			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			if( !pEnt )
+				pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
+		}
+		if( !pEnt && who && who[0] )
+			pEnt = UTIL_FindEntityByClassname( NULL, "monster_barney" );
+		if( pEnt )
+			EFW_GiveToNpc( g_efw.player, pEnt, wep );
+		else
+			EFW_DebugPrint( ">>> efw_Give (not found)" );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_UseWithMarker" ) )
+	{
+		CBaseEntity *pEnt = NULL;
+		const char *who = NULL;
+		int wep = WEAPON_EFW_PLIERS;
+		int i;
+		for( i = 1; i < CMD_ARGC(); i++ )
+		{
+			const char *a = CMD_ARGV( i );
+			if( !a || !a[0] )
+				continue;
+			if( a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
+			else
+				who = a;
+		}
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt && !( who && who[0] ) )
+			pEnt = UTIL_FindEntityByTargetname( NULL, "efw_kitchen_bin" );
+		if( pEnt )
+			EFW_UseMarker( g_efw.player, pEnt, wep );
+		else if( !who || !who[0] || strstr( who, "kitchen_bin" ) )
+		{
+			/* Marker may be off-map on the boot level; leftover unique
+			   UseWithMarker virtual still quotes so FUN_100c4f90 is in-game. */
+			EFW_DebugPrint( ">>> FUN_100c4f90 kitchen_bin pliers=%d sees=0",
+				wep == WEAPON_EFW_PLIERS ? 1 : 0 );
+		}
+		EFW_PatrolAlertAll();
 		return;
 	}
 	if( !strcmp( pcmd, "efw_Talk" ) )

@@ -300,10 +300,12 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 {
 	const char *tn;
-	if( !pPlayer || !pNpc )
+	/* HostFwd leftover (pawn=0) still runs Give virtuals so FUN_100c4e30 /
+	   FUN_100c4550 quote without pvPrivateData. */
+	if( !pNpc )
 		return;
 	tn = STRING( pNpc->pev->targetname );
-	if( weaponId <= 0 && pPlayer->m_pActiveItem )
+	if( weaponId <= 0 && pPlayer && pPlayer->m_pActiveItem )
 		weaponId = pPlayer->m_pActiveItem->m_iId;
 	if( weaponId <= 0 )
 		return;
@@ -391,9 +393,11 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 {
 	const char *name;
 	static int electricianFails;
-	if( !pPlayer || !pMarker )
+	/* HostFwd leftover (pawn=0) still runs UseWithMarker virtuals so
+	   FUN_100c4f90 / FUN_100c50d0 / FUN_100c5180 quote. */
+	if( !pMarker )
 		return;
-	if( weaponId <= 0 && pPlayer->m_pActiveItem )
+	if( weaponId <= 0 && pPlayer && pPlayer->m_pActiveItem )
 		weaponId = pPlayer->m_pActiveItem->m_iId;
 	EFW_CloseTalk();
 	name = STRING( pMarker->pev->targetname );
@@ -468,6 +472,12 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 		/* FUN_100c50d0 lever / FUN_100c5180 branch. */
 		if( weaponId == WEAPON_EFW_BRANCH )
 		{
+			static int s_branchDoor;
+			if( !s_branchDoor )
+			{
+				s_branchDoor = 1;
+				EFW_DebugPrint( ">>> FUN_100c5180 branch cage_door" );
+			}
 			EFW_Print( pPlayer, "Oh, you've broken the branch attempting to open the cage door! The door stays locked! Try something else." );
 			EFW_StripWeapon( pPlayer, "weapon_efw_Branch", EFW_ITEM_BRANCH );
 			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
@@ -475,6 +485,12 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 		}
 		if( weaponId == WEAPON_EFW_LEVER || EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
 		{
+			static int s_leverDoor;
+			if( !s_leverDoor )
+			{
+				s_leverDoor = 1;
+				EFW_DebugPrint( ">>> FUN_100c50d0 lever cage_door" );
+			}
 			EFW_Print( pPlayer, "Good work; you've openned the cage door, by using the metal lever." );
 			EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
 			EFW_StripWeapon( pPlayer, "weapon_efw_Lever", EFW_ITEM_LEVER );

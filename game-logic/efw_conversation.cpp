@@ -432,7 +432,9 @@ void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	const char *text = "Thanks, but I don't need it.";
 	int qi;
 
-	if( !pPlayer || !pNpc )
+	/* HostFwd leftover (pawn=0) still Squarks UNWANTED_ITEM so FUN_100c4550
+	   / FUN_100ba080 quote without pvPrivateData. */
+	if( !pNpc )
 		return;
 	tn = STRING( pNpc->pev->targetname );
 	npc = EFW_ScriptNameForNpc( pNpc );
