@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll74`;
+    return `${url}?v=efw-dll75`;
   return url;
 }
 
@@ -294,27 +294,29 @@ function releaseConsoleToGame() {
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
 }
 
-function resumeAfterFirstClientFrame() {
-  if (changeWatch) return;
+function dismissMenuAfterHud() {
   if (consoleForPlaque) {
     releaseConsoleToGame();
-    if (!resumedAfterClientFrame) {
-      resumedAfterClientFrame = true;
-      log('listen: skip resumeMainLoop after CHANGE_LEVEL (rAF alive)');
-    }
     return;
   }
-  if (resumedAfterClientFrame) return;
-  resumedAfterClientFrame = true;
   /* Boot menu was VidInit'd with CL_IsActive false (no Resume). Two
      toggleconsoles: key_menu → key_console → UI_SetActiveMenu(false). */
   runEngineCmd('toggleconsole');
   runEngineCmd('toggleconsole');
   log('listen: double toggleconsole after first HUD (boot menu → game)');
-  log('listen: resumeMainLoop after first ClientFrame');
-  resumeEngineLoop();
-  setTimeout(() => resumeEngineLoop(), 250);
-  setTimeout(() => resumeEngineLoop(), 1000);
+}
+
+function resumeAfterFirstClientFrame() {
+  if (changeWatch) return;
+  if (resumedAfterClientFrame) return;
+  resumedAfterClientFrame = true;
+  /* Do not Cmd_ExecuteString or resumeMainLoop from inside HUD_Redraw's
+     Con_Printf → JS log. dll74 nested toggleconsole+resume there and
+     aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
+  setTimeout(() => {
+    if (changeWatch) return;
+    dismissMenuAfterHud();
+  }, 80);
 }
 
 let startedMap = '';
@@ -392,13 +394,8 @@ function loadMap(name: string, reason: string) {
     consoleForPlaque = true;
     log('listen: key_console for plaque (skip software present hang)');
     runEngineCmd(`efw_changelevel ${name}`);
-    setTimeout(() => {
-      if (listenReady)
-        return;
-      log('listen: CHANGE_LEVEL delayed resume t=2000ms (rAF dead vs WASM hang)');
-      lastResumeMs = 0;
-      resumeEngineLoop();
-    }, 2200);
+    /* Do not resumeMainLoop here. A live rAF is what runs SV_ExecChangeLevel
+       on the next COM_Frame; kicking resume aborts that runner (dll65/74). */
   }, 200);
   if (changeWatch)
     clearTimeout(changeWatch);
@@ -442,7 +439,8 @@ function onServerActivateSeen() {
   runEngineCmd('scr_loading 0');
   runEngineCmd('ui_renderworld 1');
   setTimeout(() => {
-    runEngineCmd('developer 1');
+    runEngineCmd('developer 0');
+    runEngineCmd('con_notifytime 0');
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
     runEngineCmd('ui_renderworld 1');
