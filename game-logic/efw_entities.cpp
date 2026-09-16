@@ -164,6 +164,8 @@ void CRefugee::IdleThink( void )
 	// CRefugee::IdleThink 0x100c6440
 	pev->framerate = 1.0f;
 	pev->nextthink = gpGlobals->time + 0.1f;
+	if( !pev->modelindex )
+		return;
 	if( pev->health == 2.0f )
 	{
 		UTIL_SetSize( pev, g_vecZero, g_vecZero );
@@ -249,7 +251,7 @@ void CRefugee::Spawn( void )
 	if( !EFW_DeferStudio() )
 		Precache();
 	tn = STRING( pev->targetname );
-	pev->movetype = MOVETYPE_STEP;
+	pev->movetype = EFW_DeferStudio() ? MOVETYPE_NONE : MOVETYPE_STEP;
 	pev->solid = EFW_DeferStudio() ? SOLID_NOT : SOLID_BBOX;
 	pev->takedamage = DAMAGE_YES;
 	if( !EFW_DeferStudio() )
@@ -294,10 +296,16 @@ void CRefugee::Spawn( void )
 		pev->origin.x, pev->origin.y, pev->origin.z, NUMBER_OF_ENTITIES() );
 	m_iWalkState = 0;
 	SetUse( &CRefugee::TalkUse );
-	SetThink( &CRefugee::IdleThink );
-	pev->nextthink = gpGlobals->time + 0.1f;
-	pev->framerate = 1.0f;
-	pev->movetype = MOVETYPE_STEP;
+	if( EFW_DeferStudio() )
+	{
+		SetThink( NULL );
+		pev->nextthink = 0;
+	}
+	else
+	{
+		SetThink( &CRefugee::IdleThink );
+		pev->nextthink = gpGlobals->time + 0.1f;
+	}
 }
 
 class CPatrolGuard : public CBaseMonster
@@ -454,6 +462,8 @@ void CPatrolGuard::PatrolThink( void )
 	float now = gpGlobals->time;
 
 	pev->nextthink = now + 0.1f;
+	if( !pev->modelindex )
+		return;
 	/* FUN_100c7490 / DAT_101348ac pause. */
 	if( EFW_GetHudInt( 6 ) )
 	{
@@ -575,10 +585,14 @@ void CPatrolGuard::PatrolThink( void )
 void CPatrolGuard::Spawn( void )
 {
 	Precache();
-	SET_MODEL( ENT( pev ), "models/Security.mdl" );
-	UTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
-	pev->solid = SOLID_SLIDEBOX;
-	pev->movetype = MOVETYPE_STEP;
+	if( EFW_DeferStudio() )
+		pev->model = MAKE_STRING( "models/Security.mdl" );
+	else
+		SET_MODEL( ENT( pev ), "models/Security.mdl" );
+	if( !EFW_DeferStudio() )
+		UTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
+	pev->solid = EFW_DeferStudio() ? SOLID_NOT : SOLID_SLIDEBOX;
+	pev->movetype = EFW_DeferStudio() ? MOVETYPE_NONE : MOVETYPE_STEP;
 	m_bloodColor = BLOOD_COLOR_RED;
 	pev->health = 80;
 	pev->view_ofs = Vector( 0, 0, 50 );
@@ -590,8 +604,53 @@ void CPatrolGuard::Spawn( void )
 	m_iCaught = 0;
 	m_iHearLatch = 0;
 	SetUse( &CPatrolGuard::TalkUse );
-	SetThink( &CPatrolGuard::PatrolThink );
-	pev->nextthink = gpGlobals->time + 0.5f;
+	if( EFW_DeferStudio() )
+	{
+		SetThink( NULL );
+		pev->nextthink = 0;
+	}
+	else
+	{
+		SetThink( &CPatrolGuard::PatrolThink );
+		pev->nextthink = gpGlobals->time + 0.5f;
+	}
+}
+
+void EFW_EnableNpcThink( edict_t *pent )
+{
+	CBaseEntity *pEnt;
+	const char *cn;
+
+	if( !pent || pent->free )
+		return;
+	pEnt = CBaseEntity::Instance( pent );
+	if( !pEnt )
+		return;
+	if( pent->v.modelindex <= 0 )
+		return;
+	cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+	if( !strcmp( cn, "monster_refugee" ) )
+	{
+		CRefugee *pRef = (CRefugee *)pEnt;
+		pRef->SetThink( &CRefugee::IdleThink );
+		pent->v.nextthink = gpGlobals->time + 0.1f;
+		pent->v.movetype = MOVETYPE_STEP;
+		pent->v.solid = SOLID_BBOX;
+		pent->v.flags |= FL_MONSTER;
+		UTIL_SetSize( pRef->pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+		return;
+	}
+	if( !strcmp( cn, "monster_patrol_guard" ) || !strcmp( cn, "monster_efw_guard" ) )
+	{
+		CPatrolGuard *pGuard = (CPatrolGuard *)pEnt;
+		pGuard->SetThink( &CPatrolGuard::PatrolThink );
+		pent->v.nextthink = gpGlobals->time + 0.5f;
+		pent->v.movetype = MOVETYPE_STEP;
+		pent->v.solid = SOLID_SLIDEBOX;
+		pent->v.flags |= FL_MONSTER;
+		UTIL_SetSize( pGuard->pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
+		return;
+	}
 }
 
 class CEfwMarker : public CBaseEntity

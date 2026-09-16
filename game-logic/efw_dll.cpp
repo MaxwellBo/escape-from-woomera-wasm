@@ -941,6 +941,7 @@ static void EFW_SpawnRemember( edict_t *pent, const char *cn )
 
 static int s_deferStudio;
 static int s_waitPawn;
+static int s_thinkRestored;
 
 static void EFW_LogLine( const char *line )
 {
@@ -959,10 +960,59 @@ int EFW_DeferStudio( void )
 	return s_deferStudio;
 }
 
+static int EFW_MaxEnts( void )
+{
+	int maxEnts = gpGlobals->maxEntities;
+	if( maxEnts > 1200 )
+		maxEnts = 1200;
+	return maxEnts;
+}
+
+/* IdleThink / PatrolThink / WALK_MOVE without a studio stall Host_ServerFrame
+   so ClientFrame never runs. Freeze every monster_* until the pawn exists. */
+static void EFW_FreezeNpcPhysics( void )
+{
+	int i;
+	int n = 0;
+
+	for( i = 1; i < EFW_MaxEnts(); i++ )
+	{
+		edict_t *pent;
+		CBaseEntity *pEnt;
+		const char *cn;
+
+		pent = INDEXENT( i );
+		if( !pent || pent->free )
+			continue;
+		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+		if( !cn[0] || strncmp( cn, "monster_", 8 ) )
+			continue;
+		pent->v.nextthink = 0;
+		pent->v.movetype = MOVETYPE_NONE;
+		pent->v.solid = SOLID_NOT;
+		/* Keep stock HL think pointers; only drop EFW IdleThink/PatrolThink
+		   (those WALK_MOVE without a studio and never return). */
+		if( !strcmp( cn, "monster_refugee" )
+			|| !strcmp( cn, "monster_patrol_guard" )
+			|| !strcmp( cn, "monster_efw_guard" ) )
+		{
+			pEnt = CBaseEntity::Instance( pent );
+			if( pEnt )
+				pEnt->SetThink( NULL );
+		}
+		n++;
+	}
+	if( s_waitPawn == 1 )
+	{
+		char line[80];
+		snprintf( line, sizeof( line ), "efw: froze %d monster thinks until pawn\n", n );
+		EFW_LogLine( line );
+	}
+}
+
 void EFW_StartFrame( void )
 {
 	int i;
-	int maxEnts;
 
 	if( !s_mapLive )
 		return;
@@ -971,7 +1021,8 @@ void EFW_StartFrame( void )
 	if( !EFW_Player() )
 	{
 		s_waitPawn++;
-		if( ( s_waitPawn % 120 ) == 1 )
+		EFW_FreezeNpcPhysics();
+		if( s_waitPawn <= 8 || ( s_waitPawn % 120 ) == 1 )
 		{
 			char line[96];
 			snprintf( line, sizeof( line ), "efw: StartFrame waiting for pawn ticks=%d\n",
@@ -980,10 +1031,33 @@ void EFW_StartFrame( void )
 		}
 		return;
 	}
-	maxEnts = gpGlobals->maxEntities;
-	if( maxEnts > 1200 )
-		maxEnts = 1200;
-	for( i = 1; i < maxEnts; i++ )
+	if( !s_thinkRestored )
+	{
+		s_thinkRestored = 1;
+		EFW_LogLine( "efw: StartFrame pawn live - restoring NPC think\n" );
+		for( i = 1; i < EFW_MaxEnts(); i++ )
+		{
+			edict_t *pent = INDEXENT( i );
+			const char *cn;
+			if( !pent || pent->free )
+				continue;
+			if( pent->v.modelindex <= 0 )
+				continue;
+			cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+			EFW_EnableNpcThink( pent );
+			if( cn[0] && !strncmp( cn, "monster_", 8 )
+				&& strcmp( cn, "monster_refugee" )
+				&& strcmp( cn, "monster_patrol_guard" )
+				&& strcmp( cn, "monster_efw_guard" ) )
+			{
+				if( pent->v.nextthink <= 0 )
+					pent->v.nextthink = gpGlobals->time + 0.1f;
+				pent->v.movetype = MOVETYPE_STEP;
+				pent->v.solid = SOLID_SLIDEBOX;
+			}
+		}
+	}
+	for( i = 1; i < EFW_MaxEnts(); i++ )
 	{
 		edict_t *pent;
 		const char *model;
@@ -1003,6 +1077,8 @@ void EFW_StartFrame( void )
 		SET_MODEL( pent, model );
 		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
+		pent->v.movetype = MOVETYPE_STEP;
+		EFW_EnableNpcThink( pent );
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
@@ -1159,6 +1235,8 @@ void EFW_OnServerActivate( void )
 		return;
 	}
 	s_mapLive = 1;
+	s_waitPawn = 0;
+	s_thinkRestored = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -1175,6 +1253,8 @@ void EFW_OnServerDeactivate( void )
 	s_mapLive = 0;
 	s_skipThis = 0;
 	s_deferStudio = 0;
+	s_waitPawn = 0;
+	s_thinkRestored = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
