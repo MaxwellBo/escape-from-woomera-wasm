@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll57`;
+    return `${url}?v=efw-dll58`;
   return url;
 }
 
@@ -262,6 +262,7 @@ function loadMap(name: string, reason: string) {
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
   runEngineCmd(`efw_changelevel ${name}`);
+  runEngineCmd(`changelevel ${name}`);
   resumeEngineLoop();
   startHostPumps();
   if (changeWatch)
@@ -269,12 +270,15 @@ function loadMap(name: string, reason: string) {
   changeWatch = setTimeout(() => {
     if (listenReady)
       return;
-    log(`listen: CHANGE_LEVEL stalled, killserver+map ${name}`);
+    log(`listen: CHANGE_LEVEL stalled, disconnect+map ${name}`);
     startedMap = '';
-    runEngineCmd('killserver');
+    runEngineCmd('disconnect');
     resumeEngineLoop();
-    setTimeout(() => loadMap(name, 'after killserver'), 500);
-  }, 8000);
+    setTimeout(() => {
+      runEngineCmd('disconnect');
+      setTimeout(() => loadMap(name, 'after disconnect'), 400);
+    }, 400);
+  }, 6000);
 }
 
 let lastActivateMs = 0;
@@ -920,7 +924,8 @@ async function boot() {
     startedMap = '';
     listenReady = false;
     setTimeout(() => {
-      loadMap('efw_prototype_level1', 'deferred after Host_Init');
+      const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
+      loadMap(bootMap, 'deferred after Host_Init');
     }, 1500);
     setInterval(pollEfwVgui, 250);
     pollEfwVgui();

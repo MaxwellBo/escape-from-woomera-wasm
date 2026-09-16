@@ -597,24 +597,23 @@ int EFW_ClientCommand( edict_t *pEntity )
 		}
 		if( pItem )
 		{
-			char name[64];
-			strncpy( name, STRING( pItem->pev->classname ), sizeof( name ) - 1 );
-			name[sizeof( name ) - 1] = 0;
-			if( strstr( name, "Pliers" ) || strstr( name, "Pilers" ) )
+			const char *cn = STRING( pItem->pev->classname );
+			if( strstr( cn, "Pliers" ) || strstr( cn, "Pilers" ) )
 				bit = EFW_ITEM_PLIERS;
-			else if( strstr( name, "Lever" ) )
+			else if( strstr( cn, "Lever" ) )
 				bit = EFW_ITEM_LEVER;
-			else if( strstr( name, "Branch" ) )
+			else if( strstr( cn, "Branch" ) )
 				bit = EFW_ITEM_BRANCH;
-			else if( strstr( name, "MobilePhone" ) )
+			else if( strstr( cn, "MobilePhone" ) )
 				bit = EFW_ITEM_PHONE;
-			else if( strstr( name, "IDTag" ) )
+			else if( strstr( cn, "IDTag" ) )
 				bit = EFW_ITEM_IDTAG;
-			else if( strstr( name, "WashingPowder" ) )
+			else if( strstr( cn, "WashingPowder" ) )
 				bit = EFW_ITEM_POWDER;
-			pPlayer->DropPlayerItem( name );
-			EFW_StripWeapon( pPlayer, name, bit );
-			EFW_DebugPrint( ">>> drop %s", name );
+			/* FUN_10081f40 DropPlayerItem is a no-op in hlsdk SP
+			   (IsMultiplayer). PE still strips the held item. */
+			EFW_DebugPrint( ">>> drop %s", cn );
+			EFW_StripWeapon( pPlayer, cn, bit );
 		}
 		else
 			EFW_DebugPrint( ">>> drop (none)" );
