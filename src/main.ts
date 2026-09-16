@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll94`;
+    return `${url}?v=efw-dll95`;
   return url;
 }
 
@@ -126,7 +126,7 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
   0x44: { title: "You could hide again, but you haven't got the pliers yet." },
   0x45: { title: 'You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.' },
   0x46: { title: 'Isolation.', next: 'efw_changelevel efw_prototype_level2' },
-  0x47: { title: 'Help' },
+  0x47: { title: 'The package is from a pen-friend, a member of a refugee support group in Melbourne. The letter accompanying it brings you some hope, knowing that there is someone in this country that cares about your fate. Inside the package are some chocolate bars, which you give to some children, and a box of washing powder. Your suspicions aroused by mysterious rattling sound, you feel inside the box and discover a SIM card for a mobile phone.' },
   0x48: { title: '' },
   0x49: { title: 'Introduction' },
   0x4a: { title: 'Introduction' },
@@ -144,14 +144,58 @@ let storyPaused = false;
 
 function storyboardPauses(code: number): boolean {
   /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu.
-     0x48 FUN_10048710 also ClientCmd efw_pause 1. */
+     0x47 FUN_10048790 caption Panel also pauses. 0x48 FUN_10048710 pauses. */
   return code === 0x3f || code === 0x43 || (code >= 0x46 && code <= 0x52);
+}
+
+function isCaptionMenu(code: number): boolean {
+  /* FUN_10047830 else-branch: not SPR, not 0x48. Server sends 0x47 this way. */
+  return code === 0x47;
+}
+
+function hideLetterbox() {
+  const layer = document.getElementById('efw-letter');
+  if (layer) layer.hidden = true;
+}
+
+function showLetterbox(code: number, caption?: string) {
+  const layer = document.getElementById('efw-letter');
+  const text = document.getElementById('efw-letter-text');
+  const story = document.getElementById('efw-story');
+  const interact = document.getElementById('efw-interact');
+  if (!layer || !text)
+    return;
+  const body = caption || EFW_STORY[code]?.title || '';
+  if (!body)
+    return;
+  text.textContent = body;
+  layer.hidden = false;
+  if (story) story.hidden = true;
+  if (interact) interact.hidden = true;
+  if (storyboardPauses(code) && !storyPaused) {
+    storyPaused = true;
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 1');
+  }
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  log(`efw: letterbox 0x${code.toString(16)}`);
+}
+
+function dismissLetterbox() {
+  hideLetterbox();
+  if (storyPaused) {
+    storyPaused = false;
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 0');
+  }
 }
 
 function dismissEfwStory() {
   const layer = document.getElementById('efw-story');
   if (layer)
     layer.hidden = true;
+  hideLetterbox();
   const next = storyNext;
   const paused = storyPaused;
   storyNext = '';
@@ -176,6 +220,10 @@ function showEfwStory(code: number, fallback?: string) {
       runEngineCmd('pausable 0');
       runGameCmd('efw_pause 1');
     }
+    return;
+  }
+  if (isCaptionMenu(code)) {
+    showLetterbox(code, fallback);
     return;
   }
   const spec = EFW_STORY[code];
@@ -318,6 +366,22 @@ function applyInteractHud(text: string): boolean {
   return false;
 }
 
+function applyLetterHud(text: string): boolean {
+  const open = text.match(/>>> FUN_10048790 n=(\d+) code=0x([0-9a-fA-F]+)(?: (.*))?$/);
+  if (open) {
+    const code = parseInt(open[2], 16);
+    const caption = open[3] || EFW_STORY[code]?.title;
+    showLetterbox(code, caption);
+    return false;
+  }
+  if (text.includes('>>> FUN_10043bb0')) {
+    const cont = document.getElementById('efw-letter-cont');
+    if (cont) cont.hidden = false;
+    return false;
+  }
+  return false;
+}
+
 function applyInvHud(text: string): boolean {
   const m = text.match(/>>> FUN_10043dd0 n=(\d+)(?: (.*))?$/);
   const el = document.getElementById('efw-inv');
@@ -366,6 +430,7 @@ function log(text: string) {
   applyContextHud(normalized);
   applyInteractHud(normalized);
   applyInvHud(normalized);
+  applyLetterHud(normalized);
   applyPrevQuestion(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
@@ -1324,6 +1389,11 @@ document.getElementById('efw-story-dismiss')?.addEventListener('click', (ev) => 
 document.getElementById('efw-story')?.addEventListener('click', (ev) => {
   if (ev.target === document.getElementById('efw-story'))
     dismissEfwStory();
+});
+document.getElementById('efw-letter')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  dismissLetterbox();
 });
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (efw_Talk)');

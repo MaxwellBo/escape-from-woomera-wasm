@@ -167,6 +167,30 @@ canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 .efw-vgui button:hover { background: rgba(40, 28, 12, 0.95); color: var(--accent); }
 .canvas-wrap.captured .efw-vgui button { cursor: pointer; }
 
+.efw-letter {
+  position: absolute; inset: 0; z-index: 7;
+  background: rgb(0, 0, 51);
+  padding: 50px 75px 120px;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+.efw-letter[hidden] { display: none; }
+.efw-letter p {
+  margin: 0;
+  color: #fff;
+  font-size: 15px;
+  line-height: 15px;
+  max-width: calc(100% - 0px);
+  white-space: pre-wrap;
+}
+.efw-letter-cont, #efw-letter-cont {
+  position: absolute;
+  right: 12px;
+  bottom: 115px;
+  color: #fff;
+  font-size: 14px;
+}
+
 .efw-story {
   position: absolute; inset: 0; z-index: 7;
   display: flex; align-items: center; justify-content: center;

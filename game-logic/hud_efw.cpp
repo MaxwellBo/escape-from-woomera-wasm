@@ -50,6 +50,10 @@ static float g_storyFade; /* DAT_100baf10 */
 static int g_weaponMask;
 static int g_contextMode; /* DAT_100bc338; FUN_10046370 / FUN_100463c0 */
 static float g_contextDismissAt; /* DAT_100bc9f4; 0.4s debounce on 0x48 */
+static char g_caption[1024]; /* DAT_100baf04; FUN_10048790 */
+static int g_captionLen; /* DAT_100baf08 */
+static float g_captionAt; /* DAT_100baf14 */
+static float g_captionAge;
 
 #ifndef K_MOUSE1
 #define K_MOUSE1 107
@@ -74,6 +78,7 @@ static HSPRITE EFW_LoadSpr( const char *path )
 }
 
 static void EFW_ClearStoryboard( void );
+static void EFW_ClearCaption( void );
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 {
@@ -106,8 +111,13 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		{
 			static int s_lastPause = -1;
 			/* Falling edge of hudInt[6]: Panel dtor DAT_1007ab5c = -1. */
-			if( g_storyCode && s_lastPause == 1 && paused == 0 )
-				EFW_ClearStoryboard();
+			if( s_lastPause == 1 && paused == 0 )
+			{
+				if( g_storyCode )
+					EFW_ClearStoryboard();
+				if( g_captionLen )
+					EFW_ClearCaption();
+			}
 			s_lastPause = paused;
 		}
 	}
@@ -159,6 +169,82 @@ static int __MsgFunc_EFWShow( const char *pszName, int iSize, void *pbuf )
 	return 1;
 }
 
+/* FUN_10047830 table at s_efw_UseWithMarker + code*4 + 0x14 for codes
+   0x3c–0x51. Else-branch FUN_10048790 uses this string as DAT_100baf04. */
+static const char *EFW_CaptionForCode( int code )
+{
+	switch( code )
+	{
+	case 0x3c:
+		return "You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.";
+	case 0x3d:
+		return "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir.";
+	case 0x3e:
+		return "Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.";
+	case 0x3f:
+		return "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed.";
+	case 0x40:
+		return "There's a hole. You could hide here, if you ever needed to.";
+	case 0x41:
+		return "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching.";
+	case 0x42:
+		return "You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.";
+	case 0x43:
+		return "You return to the hiding place, with the pliers safely tucked away underneath your shirt.";
+	case 0x44:
+		return "You could hide again, but you haven't got the pliers yet.";
+	case 0x45:
+		return "You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.";
+	case 0x46:
+		return "You've been caught by a patrolling guard. They're not pleased to find you sneaking about a locked compound late at night; you've been sent to solitary confinement. You don't expect to be let out for at least 3 days.";
+	case 0x47:
+		return "The package is from a pen-friend, a member of a refugee support group in Melbourne. The letter accompanying it brings you some hope, knowing that there is someone in this country that cares about your fate. Inside the package are some chocolate bars, which you give to some children, and a box of washing powder. Your suspicions aroused by mysterious rattling sound, you feel inside the box and discover a SIM card for a mobile phone.";
+	default:
+		return "<error>";
+	}
+}
+
+static void EFW_ClearCaption( void )
+{
+	g_caption[0] = '\0';
+	g_captionLen = 0;
+	g_captionAt = 0.0f;
+	g_captionAge = 0.0f;
+}
+
+static void EFW_OpenCaption( int code )
+{
+	const char *text;
+
+	/* FUN_10048790: copy caption into DAT_100baf04, DAT_100baf08 = len,
+	   DAT_100baf14 = now. Panel vtable setVisible ClientCmd efw_pause 1. */
+	text = EFW_CaptionForCode( code );
+	if( code - 0x3c >= 0x16 )
+		text = "<error>";
+	strncpy( g_caption, text, sizeof( g_caption ) - 1 );
+	g_caption[sizeof( g_caption ) - 1] = '\0';
+	g_captionLen = (int)strlen( g_caption );
+	g_captionAt = gHUD.m_flTime;
+	g_captionAge = 0.0f;
+	g_storyCode = 0;
+	g_hStory = 0;
+	gEngfuncs.Con_Printf( ">>> FUN_10048790 n=%d code=0x%x %s\n", g_captionLen, code, g_caption );
+	if( g_storyPauseSent != code )
+	{
+		g_storyPauseSent = code;
+		gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
+	}
+}
+
+static void EFW_DismissCaption( void )
+{
+	/* Caption InputSignal: same pause-0 path as FUN_100485d0 without a
+	   stored changelevel (FUN_10048790 param_9 == 0). */
+	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
+	g_storyPauseSent = 0;
+	EFW_ClearCaption();
+}
+
 static void EFW_OpenStoryboard( int code )
 {
 	const char *spr = NULL;
@@ -172,7 +258,6 @@ static void EFW_OpenStoryboard( int code )
 	case 0x43:
 		spr = "Storyboard/EFW_Storyboards_Hiding_Night.spr";
 		break;
-	case 0x47:
 	case 0x52:
 		spr = "Storyboard/EFW_Storyboards_Help_Screen.spr";
 		break;
@@ -230,9 +315,11 @@ static void EFW_OpenStoryboard( int code )
 			return;
 		}
 	default:
-		g_hStory = 0;
+		/* FUN_10047830 else: FUN_10048790 caption Panel, not a SPR. */
+		EFW_OpenCaption( code );
 		return;
 	}
+	EFW_ClearCaption();
 	/* FUN_10048590: ClientCmd efw_pause 1 once per Panel show. Send
 	   before SPR_Load so a blocking storyboard sprite cannot starve the
 	   pause command on the WASM main thread. */
@@ -267,6 +354,8 @@ static void EFW_ClearStoryboard( void )
 	g_menuCode = 0;
 	g_storyChange[0] = '\0';
 	EFW_LeaveContext();
+	/* Caption Panel is a different object; dtor of a SPR panel does not
+	   clear DAT_100baf08. Pause falling-edge handles caption separately. */
 }
 
 static void EFW_DismissStoryboard( void )
@@ -338,6 +427,11 @@ int EFW_ClientKey( int down, int keynum )
 	if( g_storyCode )
 	{
 		EFW_DismissStoryboard();
+		return 0;
+	}
+	if( g_captionLen && ( keynum == K_MOUSE1 || keynum == K_MOUSE2 ) )
+	{
+		EFW_DismissCaption();
 		return 0;
 	}
 	if( g_contextMode && ( keynum == K_MOUSE1 || keynum == K_MOUSE2 ) )
@@ -424,6 +518,7 @@ int CHudEfw::Init( void )
 	g_scanCount = 0;
 	g_storyCode = 0;
 	g_contextMode = 0;
+	EFW_ClearCaption();
 	g_weaponId = -1;
 	g_weaponMask = 0;
 	g_vguiN = 0;
@@ -467,6 +562,7 @@ void CHudEfw::Reset( void )
 	g_scanCount = 0;
 	g_storyCode = 0;
 	g_contextMode = 0;
+	EFW_ClearCaption();
 	memset( g_menuLine, 0, sizeof( g_menuLine ) );
 	memset( g_scan, 0, sizeof( g_scan ) );
 }
@@ -1026,6 +1122,98 @@ static void EFW_DrawStoryboardTiles( HSPRITE spr )
 	}
 }
 
+/* FUN_1001e7d0: wrap at xmax-100 on space, hard wrap at xmax, 15px lines. */
+static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b )
+{
+	char line[256];
+	int n = 0;
+	int cx = 0;
+	int cy = y;
+	int i;
+	int ch;
+	int w;
+
+	if( !text )
+		return;
+	line[0] = '\0';
+	for( i = 0; text[i]; i++ )
+	{
+		ch = (unsigned char)text[i];
+		w = 8;
+		if( ch == '\n' || ( ch == ' ' && x + cx + w > xmax - 100 ) || x + cx + w > xmax )
+		{
+			line[n] = '\0';
+			if( n )
+				gHUD.DrawHudString( x, cy, xmax, line, r, g, b );
+			cy += 15;
+			n = 0;
+			cx = 0;
+			if( ch == '\n' || ch == ' ' )
+				continue;
+		}
+		if( n < (int)sizeof( line ) - 1 )
+		{
+			line[n++] = (char)ch;
+			cx += w;
+		}
+	}
+	line[n] = '\0';
+	if( n )
+		gHUD.DrawHudString( x, cy, xmax, line, r, g, b );
+}
+
+/* FUN_10043bb0: growing center veil (FUN_1001d750 RGB 0,0,0.2 / 0,0,0.6),
+   caption at x=0x4b, continue at (width-300, height-0x73) once fade>=1. */
+static void EFW_DrawLetterbox( float flTime )
+{
+	float fade;
+	float half;
+	int y0;
+	int y1;
+	int h;
+	int w;
+	static int s_logged;
+
+	if( g_captionLen <= 0 )
+	{
+		s_logged = 0;
+		return;
+	}
+	h = ScreenHeight;
+	w = ScreenWidth;
+	if( flTime > g_captionAt )
+		g_captionAge = flTime - g_captionAt;
+	else
+		g_captionAge += 0.05f;
+	fade = g_captionAge * 3.3333333f;
+	if( fade > 1.0f )
+		fade = 1.0f;
+	if( fade < 0.0f )
+		fade = 0.0f;
+	half = ( fade + 1.0f ) * 0.5f * ( (float)h - 100.0f ) * 0.5f;
+	y0 = (int)( (float)h * 0.5f - half );
+	y1 = (int)( (float)h * 0.5f + half );
+	if( y0 < 0 )
+		y0 = 0;
+	if( y1 > h )
+		y1 = h;
+	FillRGBA( 0, y0 - 1, w, 1, 0, 0, 153, 255 );
+	FillRGBA( 0, y0, w, ( h / 2 ) - y0, 0, 0, 51, 255 );
+	FillRGBA( 0, h / 2, w, y1 - ( h / 2 ), 0, 0, 51, 255 );
+	FillRGBA( 0, y1, w, 1, 0, 0, 153, 255 );
+	EFW_DrawWrapped( 0x4b, y0, w - 0x4b, g_caption, 255, 255, 255 );
+	if( fade >= 1.0f )
+	{
+		gHUD.DrawHudString( w - 300, h - 0x73, w,
+			"Press left mouse button to continue", 255, 255, 255 );
+		if( !s_logged )
+		{
+			s_logged = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10043bb0 fade=1.00\n" );
+		}
+	}
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -1090,6 +1278,7 @@ int CHudEfw::Draw( float flTime )
 
 	EFW_DrawScanPrompts( r, g, b );
 	EFW_DrawInteractPrompt();
+	EFW_DrawLetterbox( flTime );
 
 	if( g_storyCode && g_hStory )
 	{
