@@ -457,7 +457,17 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 		EFW_DebugPrint( ">>> FUN_100c4f90 kitchen_bin pliers=%d sees=%d", hasPliers, sees );
 		EFW_DebugPrint( ">>> kitchen_bin pliers=%d sees=%d", hasPliers, sees );
 		if( !hasPliers )
+		{
+			/* Boot-map leftover: FUN_100c4d10 lives inside 4f90's electrician
+			   branch; quote it when pliers are already stripped. */
+			static int s_d10;
+			if( !s_d10 )
+			{
+				s_d10 = 1;
+				EFW_AdjustHope( -2.0f );
+			}
 			return;
+		}
 		if( sees )
 		{
 			electricianFails++;
