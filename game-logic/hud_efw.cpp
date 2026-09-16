@@ -1308,9 +1308,9 @@ static void EFW_TickHudFades( void )
 		if( g_diaryFade < 0.01f && page == 0 )
 			g_diaryFadePage = 0;
 	}
-	packed = ( (int)( g_diaryFade * 10.0f + 0.5f ) ) * 1000
-		+ ( (int)( g_invFade * 10.0f + 0.5f ) ) * 100
-		+ ( (int)( g_menuVeil * 10.0f + 0.5f ) ) * 10
+	packed = ( g_diaryFade >= 1.0f ? 11 : (int)( g_diaryFade * 10.0f + 0.5f ) ) * 1000
+		+ ( g_invFade >= 1.0f ? 11 : (int)( g_invFade * 10.0f + 0.5f ) ) * 100
+		+ ( g_menuVeil >= 1.0f ? 11 : (int)( g_menuVeil * 10.0f + 0.5f ) ) * 10
 		+ ( g_diaryOpen ? 1 : 0 );
 	if( packed != s_fadeLog )
 	{
