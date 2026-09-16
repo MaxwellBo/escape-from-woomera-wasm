@@ -24,6 +24,7 @@ int gmsgEFWCntxt = 0;
 int gmsgEFWCtPrv = 0;
 
 static EfwDllState g_efw;
+static int s_hudPulse; /* StartFrame pulses; ThinkHope drains once per pulse if sv.time is frozen */
 
 typedef char EFW_SCAN_SIZE_CHECK[( sizeof( EfwScanSlot ) == EFW_SCAN_BYTES ) ? 1 : -1];
 
@@ -162,6 +163,7 @@ void EFW_AdjustHope( float delta )
 void EFW_ThinkHope( void )
 {
 	static int s_hopeN;
+	static int s_hopePulse;
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
@@ -172,7 +174,15 @@ void EFW_ThinkHope( void )
 		g_efw.hopeClock = now;
 	elapsed = now - g_efw.hopeClock;
 	if( elapsed <= 0.0f )
-		return;
+	{
+		/* Frozen gpGlobals->time: drain once per StartFrame pulse. */
+		if( s_hopePulse == s_hudPulse )
+			return;
+		elapsed = gpGlobals->frametime;
+		if( elapsed <= 0.0f )
+			elapsed = 0.05f;
+	}
+	s_hopePulse = s_hudPulse;
 	g_efw.hopeClock = now;
 	if( elapsed > 0.2f )
 		elapsed = 0.2f;
@@ -1119,6 +1129,13 @@ static void EFW_FreezeNpcPhysics( void )
 		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
 		if( !cn[0] || strncmp( cn, "monster_", 8 ) )
 			continue;
+		/* Bound refugees keep IdleThink; FreezeNpcPhysics used to wipe them
+		   every tick until liveTicks>=45 so IdleThink never ran. */
+		if( pent->v.modelindex > 0
+			&& ( !strcmp( cn, "monster_refugee" )
+				|| !strcmp( cn, "monster_patrol_guard" )
+				|| !strcmp( cn, "monster_efw_guard" ) ) )
+			continue;
 		pent->v.nextthink = 0;
 		pent->v.movetype = MOVETYPE_NONE;
 		pent->v.solid = SOLID_NOT;
@@ -1140,6 +1157,70 @@ static void EFW_FreezeNpcPhysics( void )
 		snprintf( line, sizeof( line ), "efw: froze %d monster thinks until pawn\n", n );
 		EFW_LogLine( line );
 	}
+}
+
+static int EFW_ModelLooksDetainee( const char *model )
+{
+	char lower[80];
+	int n = 0;
+	int c;
+
+	if( !model )
+		return 0;
+	for( c = 0; model[c] && n < (int)sizeof( lower ) - 1; c++ )
+	{
+		char ch = model[c];
+		if( ch >= 'A' && ch <= 'Z' )
+			ch = (char)( ch + 32 );
+		lower[n++] = ch;
+	}
+	lower[n] = 0;
+	return strstr( lower, "detainee" ) != NULL;
+}
+
+/* SET_MODEL of detainee studios stalls WASM. Bind MODEL_INDEX + IdleThink
+   one entity per StartFrame after the pawn is live. */
+static int EFW_BindOneDetainee( void )
+{
+	int i;
+
+	for( i = 1; i < EFW_MaxEnts(); i++ )
+	{
+		edict_t *pent;
+		const char *model;
+		int idx;
+
+		pent = INDEXENT( i );
+		if( !pent || pent->free )
+			continue;
+		if( pent->v.modelindex > 0 )
+			continue;
+		if( !pent->v.model )
+			continue;
+		model = STRING( pent->v.model );
+		if( !model || !model[0] || model[0] == '*' )
+			continue;
+		if( !strstr( model, ".mdl" ) )
+			continue;
+		if( !EFW_ModelLooksDetainee( model ) )
+			continue;
+		idx = MODEL_INDEX( (char *)model );
+		if( idx <= 0 )
+			idx = MODEL_INDEX( "models/Security.mdl" );
+		pent->v.modelindex = idx;
+		pent->v.solid = SOLID_NOT;
+		pent->v.flags |= FL_MONSTER;
+		pent->v.movetype = MOVETYPE_NONE;
+		{
+			char line[160];
+			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
+				i, pent->v.classname ? STRING( pent->v.classname ) : "?", idx );
+			EFW_LogLine( line );
+		}
+		EFW_EnableNpcThink( pent );
+		return 1;
+	}
+	return 0;
 }
 
 void EFW_StartFrame( void )
@@ -1182,9 +1263,17 @@ void EFW_StartFrame( void )
 	/* FUN_100c6a60 also runs from StartFrame so HostPump can poll
 	   talk hotkeys while ClientFrame (and therefore HUD_Key_Event) is stuck. */
 	if( s_liveTicks >= 8 )
+	{
+		CBasePlayer *pLive = EFW_Player();
+		if( pLive && g_efw.player != pLive )
+			EFW_SetPlayer( pLive );
+		s_hudPulse++;
+		EFW_SendHudState();
 		EFW_PollMenuKeys();
-	/* First live frames: do not SET_MODEL or unfreeze anyone. The 3D
-	   ClientFrame plus leftover STEP physics is what stalls Host_Frame. */
+		EFW_BindOneDetainee();
+	}
+	/* First live frames: do not SET_MODEL other studios. Bound detainees
+	   keep IdleThink; FreezeNpcPhysics skips modelindex>0 refugees. */
 	if( s_liveTicks < 45 )
 	{
 		int j;
@@ -1200,6 +1289,8 @@ void EFW_StartFrame( void )
 			if( pPlayer && e == pPlayer->edict() )
 				continue;
 			if( e->v.flags & FL_CLIENT )
+				continue;
+			if( ( e->v.flags & FL_MONSTER ) && e->v.modelindex > 0 )
 				continue;
 			e->v.nextthink = 0;
 			if( e->v.movetype == MOVETYPE_STEP || e->v.movetype == MOVETYPE_FLY

@@ -164,7 +164,9 @@ void CRefugee::IdleThink( void )
 
 	// CRefugee::IdleThink 0x100c6440
 	pev->framerate = 1.0f;
-	pev->nextthink = gpGlobals->time + 0.1f;
+	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
+	   every ServerFrame (same function; denser ticks). */
+	pev->nextthink = gpGlobals->time;
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
@@ -618,7 +620,8 @@ void EFW_EnableNpcThink( edict_t *pent )
 	{
 		CRefugee *pRef = (CRefugee *)pEnt;
 		pRef->SetThink( &CRefugee::IdleThink );
-		pent->v.nextthink = gpGlobals->time + 0.1f;
+		/* Fire this frame: +0.1 never elapses while gpGlobals->time is stuck. */
+		pent->v.nextthink = gpGlobals->time;
 		/* MOVETYPE_STEP without SET_MODEL stalls ServerFrame after a few
 		   seconds (same as think-without-studio). IdleThink still runs. */
 		pent->v.movetype = MOVETYPE_NONE;
