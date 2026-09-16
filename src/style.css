@@ -87,6 +87,19 @@ canvas#canvas:focus { box-shadow: inset 0 0 0 2px var(--accent); }
 }
 .efw-hope-ticks i.on { background: rgb(200, 0, 0); }
 
+/* FUN_1001db00 tail: %2d.%02d am/pm + artslogo at (width-sprW-5, 5). */
+.efw-clock {
+  position: absolute;
+  right: calc(5 / 800 * 100%);
+  top: calc(5 / 600 * 100%);
+  z-index: 6; pointer-events: none;
+  color: rgb(100, 100, 100);
+  font-size: 13px; letter-spacing: 0.06em;
+  text-shadow: 0 0 3px #000;
+  white-space: nowrap;
+}
+.efw-clock[hidden] { display: none; }
+
 /* FUN_1001db00 diary SPR wipe: clip from the top so the card grows up from the bottom. */
 .efw-diary {
   position: absolute; right: 16px; bottom: 16px; z-index: 6;

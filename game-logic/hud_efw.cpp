@@ -27,10 +27,12 @@ struct EfwScanSlot
 static float g_hope = -1;
 static int g_diaryPage;
 static int g_diaryOpen;
+static int g_mapLevel; /* hudInt[3]; FUN_1001db00 clock am/pm + hour base */
 static int g_talkPrompt;
 static int g_menuCode;
 static int g_weaponId = -1;
 static HSPRITE g_hDiary;
+static HSPRITE g_hLogo; /* sprites/efw_artslogo.spr; FUN_1001db00 tail */
 static int g_loadedPage = -1;
 static char g_menuLine[7][256];
 static int g_menuOn;
@@ -99,6 +101,7 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		blob[i] = (unsigned char)READ_BYTE();
 	memcpy( &g_hope, blob + 4, sizeof( float ) );
 	memcpy( &g_diaryPage, blob + 12, sizeof( int ) );
+	memcpy( &g_mapLevel, blob + 8 + 3 * 4, sizeof( int ) );
 	memcpy( &g_weaponId, blob + 8 + 4 * 4, sizeof( int ) );
 	g_weaponMask = ( (unsigned)g_weaponId ) >> 16;
 	g_weaponId = g_weaponId & 0xffff;
@@ -517,6 +520,7 @@ int CHudEfw::Init( void )
 	g_hope = -1;
 	g_diaryPage = 0;
 	g_diaryOpen = 0;
+	g_mapLevel = 0;
 	g_talkPrompt = 0;
 	g_menuOn = 0;
 	g_scanCount = 0;
@@ -548,6 +552,7 @@ int CHudEfw::VidInit( void )
 {
 	gEngfuncs.Con_Printf( "efw: HUD_VidInit\n" );
 	g_hDiary = 0;
+	g_hLogo = 0;
 	g_loadedPage = -1;
 	g_hStory = 0;
 	g_hGrey = 0;
@@ -1380,6 +1385,74 @@ static void EFW_DrawHopeTicks( int ticks )
 	}
 }
 
+/* FUN_1001db00 tail: %2d.%02d am/pm from gpGlobals time, then
+   sprites/efw_artslogo.spr at (width-sprW-5, 5) with fade*100 SPR_Set. */
+static void EFW_DrawArtsClock( float flTime )
+{
+	int secs;
+	int t15;
+	int hour;
+	int mins;
+	int rgb;
+	int dw;
+	int x;
+	float t0;
+	float fade;
+	char clock[32];
+	wrect_t rc;
+	static int s_pack = -1;
+	int pack;
+
+	if( flTime < 0.0f )
+		flTime = 0.0f;
+	secs = (int)flTime;
+	t15 = secs / 15;
+	hour = ( g_mapLevel == 1 ? 5 : 7 ) + t15 / 15;
+	mins = t15 % 60;
+	snprintf( clock, sizeof( clock ), "%2d.%02d %s", hour, mins,
+		g_mapLevel == 1 ? "pm" : "am" );
+	t0 = 5.0f;
+	fade = 1.0f - ( flTime - t0 ) * 0.2f;
+	if( fade < 0.0f )
+		fade = 0.0f;
+	if( fade > 1.0f )
+		fade = 1.0f;
+	rgb = (int)( fade * 100.0f );
+	if( rgb < 0 )
+		rgb = 0;
+	if( fade > 0.0f && !g_hLogo )
+		g_hLogo = EFW_LoadSpr( "sprites/efw_artslogo.spr" );
+	pack = ( fade >= 1.0f ? 11 : (int)( fade * 10.0f + 0.5f ) ) * 10000
+		+ hour * 100 + mins;
+	if( pack != s_pack )
+	{
+		s_pack = pack;
+		gEngfuncs.Con_Printf( ">>> FUN_1001db00 clock=%s fade=%.2f logo=%d\n",
+			clock, fade, g_hLogo != 0 );
+	}
+	if( fade <= 0.0f )
+		return;
+	dw = 64;
+	if( g_hLogo )
+	{
+		dw = SPR_Width( g_hLogo, 0 );
+		if( dw < 1 )
+			dw = 64;
+	}
+	x = ScreenWidth - dw - 5;
+	gHUD.DrawHudString( x - 72, 5, ScreenWidth - 8, clock, rgb, rgb, rgb );
+	if( !g_hLogo )
+		return;
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = dw;
+	rc.bottom = SPR_Height( g_hLogo, 0 );
+	if( rc.bottom < 1 )
+		rc.bottom = 64;
+	SPR_Set( g_hLogo, rgb, rgb, rgb );
+	SPR_DrawHoles( 0, x, 5, &rc );
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -1428,6 +1501,8 @@ int CHudEfw::Draw( float flTime )
 		if( g_diaryOpen )
 			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 20, ScreenWidth - 8, "DIARY", r, g, b );
 	}
+
+	EFW_DrawArtsClock( flTime );
 
 	EFW_DrawScanPrompts( r, g, b );
 	EFW_DrawInteractPrompt();

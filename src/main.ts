@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll97b`;
+    return `${url}?v=efw-dll98`;
   return url;
 }
 
@@ -324,6 +324,20 @@ function applyHopeHud(text: string): boolean {
   return false;
 }
 
+function applyClockHud(text: string): boolean {
+  const m = text.match(/>>> FUN_1001db00 clock=(.+) fade=([\d.]+) logo=(\d+)/);
+  if (!m) return false;
+  const el = document.getElementById('efw-clock');
+  if (!el) return false;
+  const fade = Number(m[2]);
+  el.textContent = m[1].trim();
+  el.hidden = fade <= 0;
+  const rgb = Math.max(0, Math.min(100, Math.round(fade * 100)));
+  el.style.color = `rgb(${rgb}, ${rgb}, ${rgb})`;
+  el.style.opacity = String(fade);
+  return false;
+}
+
 function applyDiaryHud(text: string): boolean {
   const fade = text.match(/>>> FUN_1001db00 diaryfade=([\d.]+) inv=([\d.]+) veil=([\d.]+) page=(\d+)/);
   if (fade) {
@@ -468,6 +482,7 @@ function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
   applyHopeHud(normalized);
+  applyClockHud(normalized);
   applyDiaryHud(normalized);
   applyContextHud(normalized);
   applyInteractHud(normalized);
