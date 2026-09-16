@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 
 #define EFW_SCRIPT_CACHE 24
 
@@ -82,11 +83,78 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 	return &slot->script;
 }
 
+/* FUN_100b8ff0 FindFirstFileA(gamedir\\Conversations\\*.txt). POSIX opendir
+ * is the WASM stand-in; the v0.84 zip list is the fallback when the engine
+ * search path is not a real directory. */
+static int EFW_LoadConversationDir( const char *dir )
+{
+	DIR *d;
+	struct dirent *ent;
+	int n = 0;
+
+	if( !dir || !dir[0] )
+		return 0;
+	d = opendir( dir );
+	if( !d )
+		return 0;
+	while( ( ent = readdir( d ) ) != NULL )
+	{
+		const char *name = ent->d_name;
+		size_t len;
+		char stem[EFW_TOPIC_LEN];
+		int stemLen;
+
+		if( !name || name[0] == '.' )
+			continue;
+		len = strlen( name );
+		if( len < 5 )
+			continue;
+		if( strcmp( name + len - 4, ".txt" ) && strcmp( name + len - 4, ".TXT" ) )
+			continue;
+		stemLen = (int)len - 4;
+		if( stemLen >= EFW_TOPIC_LEN )
+			stemLen = EFW_TOPIC_LEN - 1;
+		memcpy( stem, name, (size_t)stemLen );
+		stem[stemLen] = '\0';
+		if( EFW_ParseFile( stem ) )
+			n++;
+	}
+	closedir( d );
+	return n;
+}
+
 void EFW_LoadAllConversations( void )
 {
 	int i;
-	for( i = 0; kConversationFiles[i]; i++ )
-		EFW_ParseFile( kConversationFiles[i] );
+	int n = 0;
+	char gamedir[256];
+	char path[300];
+
+	gamedir[0] = '\0';
+	GET_GAME_DIR( gamedir );
+	if( gamedir[0] )
+	{
+		snprintf( path, sizeof( path ), "%s/Conversations", gamedir );
+		n = EFW_LoadConversationDir( path );
+		if( !n )
+		{
+			snprintf( path, sizeof( path ), "/%s/Conversations", gamedir );
+			n = EFW_LoadConversationDir( path );
+		}
+	}
+	if( !n )
+		n = EFW_LoadConversationDir( "/woomera/Conversations" );
+	if( !n )
+		n = EFW_LoadConversationDir( "Conversations" );
+	if( !n )
+	{
+		for( i = 0; kConversationFiles[i]; i++ )
+		{
+			if( EFW_ParseFile( kConversationFiles[i] ) )
+				n++;
+		}
+	}
+	EFW_DebugPrint( "efwConversation::LoadAll %d files", n );
 	EFW_AddKeyword( "ESCAPE", 1 );
 	EFW_AddKeyword( "GREET", 1 );
 	EFW_AddKeyword( "GOODBYE", 1 );
@@ -324,6 +392,41 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
 	EFW_ShowConversationMenu( pPlayer, pNpc );
+}
+
+/* FUN_100c4550: FUN_100b95a0(npc, weapon->classname, 8).
+ * FUN_100bdc80 walks questions until type==1 (UNWANTED_ITEM); classname is
+ * only a dummy std::string. Missing script → "Thanks, but I don't need it." */
+void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc )
+{
+	const char *npc;
+	const char *tn;
+	const EfwScript *script;
+	const EfwQuestion *q;
+	const EfwReply *r;
+	const char *text = "Thanks, but I don't need it.";
+	int qi;
+
+	if( !pPlayer || !pNpc )
+		return;
+	tn = STRING( pNpc->pev->targetname );
+	npc = EFW_ScriptNameForNpc( pNpc );
+	script = EFW_ParseFile( npc );
+	if( script )
+	{
+		qi = EfwScript_FindQuestion( script, "UNWANTED_ITEM" );
+		if( qi >= 0 )
+		{
+			q = &script->questions[qi];
+			r = EFW_PickReply( npc, q );
+			if( r && r->text[0] )
+				text = r->text;
+			EFW_MarkSeen( npc, q->topic );
+		}
+	}
+	EFW_DebugPrint( ">>> efw_Give UNWANTED_ITEM %s", tn );
+	EFW_CloseTalk();
+	EFW_Squark( tn, text, 8 );
 }
 
 void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )

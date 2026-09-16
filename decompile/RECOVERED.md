@@ -58,6 +58,13 @@ Ghidra only decompiled the `say` / `say_team` prefix. Capstone recovered the lat
 
 `efw_Talk` looks up the named NPC (`UTIL_FindEntityByTargetname`) and debug-prints `>>> efw_Talk %s`. `efw_PickupPliers` calls `Squark` then the stock give-weapon helper.
 
+Give virtuals (Capstone of the gap Ghidra skipped between `0x100c4f30` and `0x100c53c0`):
+
+- `FUN_100c4e30` pliers → Amir/Fashid/Nasir/Mouhtaz, else `FUN_100c4550`
+- `FUN_100c5240` phone → Gholan+GotHintAboutHiding, else `FUN_100c4550`
+- `FUN_100c5330` powder → Mouhtaz gives Lever, else `FUN_100c4550`
+- `FUN_100c4550` → `FUN_100b95a0(npc, classname, 8)` finds the UNWANTED_ITEM (type-1) question and Squarks flag 8; fallback `"Thanks, but I don't need it."`
+
 ## Client `client.dll`
 
 1735 functions decompiled. HUD owns diary sprites, speech-bubble prompts, storyboards, and the hope bar.

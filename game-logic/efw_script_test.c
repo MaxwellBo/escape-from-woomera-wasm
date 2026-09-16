@@ -49,6 +49,33 @@ int main( void )
 	EfwScript_Parse( &s, "Mouhtaz", kMouhtaz, -1 );
 	fail += expect_action( &s.questions[0].replies[0], 1, "AddDiary(16)" );
 
+	{
+		static const char kUnwanted[] =
+			"Q<GREET>: Hello.\n"
+			"A: hi.\n"
+			"UNWANTED_ITEM\n"
+			"A<FirstTime>: Keep it, my friend. It may be useful to you later.\n"
+			"A<!FirstTime>: Keep it for yourself.\n";
+		int qi;
+		EfwScript_Parse( &s, "Amir", kUnwanted, -1 );
+		qi = EfwScript_FindQuestion( &s, "UNWANTED_ITEM" );
+		if( qi < 0 )
+		{
+			printf( "missing UNWANTED_ITEM question\n" );
+			fail++;
+		}
+		else if( s.questions[qi].replyCount != 2 )
+		{
+			printf( "UNWANTED_ITEM replies %d want 2\n", s.questions[qi].replyCount );
+			fail++;
+		}
+		else if( !EfwFlags_Has( s.questions[qi].replies[0].flags, "FirstTime" ) )
+		{
+			printf( "UNWANTED_ITEM FirstTime flag missing\n" );
+			fail++;
+		}
+	}
+
 	if( fail )
 	{
 		printf( "FAIL %d\n", fail );

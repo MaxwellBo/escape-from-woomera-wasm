@@ -149,18 +149,19 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 {
-	EfwDllState *st = EFW_Dll();
 	const char *tn;
 	if( !pPlayer || !pNpc )
 		return;
 	tn = STRING( pNpc->pev->targetname );
 	if( weaponId <= 0 && pPlayer->m_pActiveItem )
 		weaponId = pPlayer->m_pActiveItem->m_iId;
+	if( weaponId <= 0 )
+		return;
 
-	/* FUN_100c5240: give MobilePhone to Gholan after GotHintAboutHiding. */
-	if( weaponId == WEAPON_EFW_MOBILEPHONE && EFW_FStrEq( tn, "Gholan" ) )
+	/* FUN_100c5240: MobilePhone Give virtual. Else FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_MOBILEPHONE )
 	{
-		if( EFW_HasKeyword( "GotHintAboutHiding" ) )
+		if( EFW_FStrEq( tn, "Gholan" ) && EFW_HasKeyword( "GotHintAboutHiding" ) )
 		{
 			EFW_StripWeapon( pPlayer, "weapon_efw_MobilePhone", EFW_ITEM_PHONE );
 			EFW_Squark( "Gholan",
@@ -173,56 +174,61 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
 			EFW_AddDiary( 13, 1 );
 			return;
 		}
-	}
-
-	/* FUN_100c5330: give WashingPowder to Mouhtaz → lever. */
-	if( weaponId == WEAPON_EFW_WASHINGPOWDER && EFW_FStrEq( tn, "Mouhtaz" ) )
-	{
-		EFW_StripWeapon( pPlayer, "weapon_efw_WashingPowder", EFW_ITEM_POWDER );
-		EFW_Squark( "Mouhtaz",
-			"Mustafa, this is far too kind of you! The only thing I can offer you in exchange is this length of metal pipe I have found and have been hiding. Perhaps you can find a use for it?",
-			2 );
-		EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
-		EFW_AddDiary( 17, 1 );
-		EFW_AdjustHope( 15.0f );
+		EFW_GiveUnwanted( pPlayer, pNpc );
 		return;
 	}
 
-	if( weaponId && weaponId != WEAPON_EFW_PLIERS )
+	/* FUN_100c5330: WashingPowder Give virtual. Else FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_WASHINGPOWDER )
+	{
+		if( EFW_FStrEq( tn, "Mouhtaz" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_WashingPowder", EFW_ITEM_POWDER );
+			EFW_Squark( "Mouhtaz",
+				"Mustafa, this is far too kind of you! The only thing I can offer you in exchange is this length of metal pipe I have found and have been hiding. Perhaps you can find a use for it?",
+				2 );
+			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+			EFW_AddDiary( 17, 1 );
+			EFW_AdjustHope( 15.0f );
+			return;
+		}
+		EFW_GiveUnwanted( pPlayer, pNpc );
 		return;
+	}
 
-	if( EFW_FStrEq( tn, "Amir" ) )
+	/* FUN_100c4e30: Pliers Give virtual. Unmatched NPC → FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_PLIERS )
 	{
-		EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
-		EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
-		st->items &= ~EFW_ITEM_PLIERS;
-		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
-		EFW_FlagDiary( 2 ); /* FUN_100c6910(2) */
-		EFW_FailOrNarrate( pPlayer, 0x4c );
+		if( EFW_FStrEq( tn, "Amir" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
+			EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
+			EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
+			EFW_FlagDiary( 2 ); /* FUN_100c6910(2) */
+			EFW_FailOrNarrate( pPlayer, 0x4c );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Fashid" ) )
+		{
+			EFW_Squark( "Fashid", "Thanks, but I don't want them. A word of warning though, my friend. The guard outside often searches us, so you should find a way to hide them or smuggle them out.", 8 );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Nasir" ) )
+		{
+			EFW_Squark( "Nasir", "Well done, but you'll have to hide them in here somewhere, or the guard will find them when you leave the kitchen.", 8 );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Mouhtaz" ) )
+		{
+			EFW_Squark( "Mouhtaz", "Are you crazy? Whatever you do, don't try to leave with them. The guard outside may search you!", 8 );
+			return;
+		}
+		EFW_GiveUnwanted( pPlayer, pNpc );
 		return;
 	}
-	if( EFW_FStrEq( tn, "Fashid" ) )
-	{
-		EFW_Squark( "Fashid", "Thanks, but I don't want them. A word of warning though, my friend. The guard outside often searches us, so you should find a way to hide them or smuggle them out.", 8 );
-		return;
-	}
-	if( EFW_FStrEq( tn, "Nasir" ) )
-	{
-		EFW_Squark( "Nasir", "Well done, but you'll have to hide them in here somewhere, or the guard will find them when you leave the kitchen.", 8 );
-		return;
-	}
-	if( EFW_FStrEq( tn, "Mouhtaz" ) )
-	{
-		EFW_Squark( "Mouhtaz", "Are you crazy? Whatever you do, don't try to leave with them. The guard outside may search you!", 8 );
-		return;
-	}
-	if( st->items & EFW_ITEM_PLIERS )
-	{
-		st->items &= ~EFW_ITEM_PLIERS;
-		EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
-		EFW_Print( pPlayer, "You hand over the pliers." );
-		EFW_StartTalk( pPlayer, pNpc );
-	}
+
+	/* Lever / Branch / IDTag / *PhoneCard default Give = FUN_100c4550. */
+	EFW_GiveUnwanted( pPlayer, pNpc );
 }
 
 void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )

@@ -113,6 +113,7 @@ void EFW_ThinkConversation( void ); /* 0x100c6c10 */
 void EFW_TalkScan( void ); /* 0x100c7830 */
 void EFW_SendCntxt( void ); /* 0x100c7d30 */
 void EFW_Squark( const char *targetname, const char *text = 0, int flags = 0 ); /* 0x100ba040 */
+void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc ); /* FUN_100c4550 → FUN_100b95a0 flag 8 */
 void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc ); /* 0x100c6e60 */
 void EFW_CloseTalk( void );
 void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot );

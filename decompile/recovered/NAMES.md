@@ -17,7 +17,13 @@
 | 0x100c77c0 | `efw_PALockRAR` | rarLock=1, play slot 0 (Ann_RAR_124), timer=0 |
 | 0x100c77e0 | `efw_PAUnlock` | rarLock=0 |
 | 0x100c6910 | `efw_FlagDiary` | `DAT_10134474[page] = 1` |
-| 0x100c4e30 | `weapon Give to NPC` | Amir / Fashid / Nasir / Mouhtaz Squark + diary 0x4c |
+| 0x100c4550 | `CEfwWeapon::GiveUnwanted` | `FUN_100b95a0(npc, classname, 8)` — UNWANTED_ITEM type-1 question, flag 8 Squark; fallback "Thanks, but I don't need it." |
+| 0x100c4e30 | `weapon_efw_Pliers::Give` | Amir strips+0x4c; Fashid/Nasir/Mouhtaz Squark; else GiveUnwanted |
+| 0x100c4f90 | `weapon_efw_Pliers::UseWithMarker` | kitchen_bin: electrician hope-2 / else 0x3e + PliersInBin |
+| 0x100c50d0 | `weapon_efw_Lever::UseWithMarker` | efw_cage_door open + strip lever |
+| 0x100c5180 | `weapon_efw_Branch::UseWithMarker` | efw_cage_door break → GiveNamedItem Lever |
+| 0x100c5240 | `weapon_efw_MobilePhone::Give` | Gholan+GotHintAboutHiding → GholanAgreedToPloy; else GiveUnwanted |
+| 0x100c5330 | `weapon_efw_WashingPowder::Give` | Mouhtaz → Lever + diary 17; else GiveUnwanted |
 | 0x100c59c0 | `efw_ElectricianSees` | dist < 256 or view cone ~35° |
 | 0x100c7510 | `efw_pause` | hudInt[6], MOVETYPE_NONE freeze |
 | 0x100c7830 | `efw_TalkScan` | sphere 123, up to 3×0x30 slots, EFW_CtPrv |
