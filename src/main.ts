@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll38`;
+    return `${url}?v=efw-dll39`;
   return url;
 }
 
@@ -198,9 +198,11 @@ function runEngineCmd(cmd: string) {
 }
 
 function resumeEngineLoop() {
-  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
+  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void; pauseMainLoop?: () => void } } | undefined)?.Module;
   try {
-    mod?.resumeMainLoop?.();
+    /* resume() increments currentlyRunningMainloop and kills the active rAF
+       runner. Only call it when we know the loop was paused. */
+    void mod;
   } catch {
     /* ignore */
   }
@@ -227,7 +229,6 @@ function onServerActivateSeen() {
     runEngineCmd('pausable 0');
     runEngineCmd('host_clientloaded');
     runEngineCmd('host_gameloaded');
-    resumeEngineLoop();
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
