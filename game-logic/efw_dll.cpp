@@ -940,6 +940,7 @@ static void EFW_SpawnRemember( edict_t *pent, const char *cn )
 }
 
 static int s_deferStudio;
+static int s_waitPawn;
 
 static void EFW_LogLine( const char *line )
 {
@@ -968,7 +969,17 @@ void EFW_StartFrame( void )
 	/* SET_MODEL of detainee studios stalls the WASM loop. Wait until the
 	   listen-server pawn exists so signon frames can run first. */
 	if( !EFW_Player() )
+	{
+		s_waitPawn++;
+		if( ( s_waitPawn % 120 ) == 1 )
+		{
+			char line[96];
+			snprintf( line, sizeof( line ), "efw: StartFrame waiting for pawn ticks=%d\n",
+				s_waitPawn );
+			EFW_LogLine( line );
+		}
 		return;
+	}
 	maxEnts = gpGlobals->maxEntities;
 	if( maxEnts > 1200 )
 		maxEnts = 1200;

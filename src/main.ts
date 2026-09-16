@@ -1,6 +1,7 @@
 import './style.css';
 import { Xash3D } from 'xash3d-fwgs';
 import { unzipSync } from 'fflate';
+import { EfwLoopbackNet } from './loopback-net';
 
 type XashInstance = InstanceType<typeof Xash3D>;
 
@@ -23,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll35`;
+    return `${url}?v=efw-dll36`;
   return url;
 }
 
@@ -44,6 +45,7 @@ const staged = {
   valve: new Map<string, Uint8Array>(),
 };
 let engine: XashInstance | null = null;
+let loopbackNet: EfwLoopbackNet | null = null;
 let logLines = 0;
 
 function applyEfwVgui(text: string): boolean {
@@ -177,6 +179,7 @@ function pressGameKey(key: string, keyCode: number) {
   fire('keydown');
   setTimeout(() => fire('keyup'), 120);
 }
+(window as Window & { pressGameKey?: typeof pressGameKey }).pressGameKey = pressGameKey;
 
 function chooseTalkSlot(slot: number) {
   log(`> cmd menuselect ${slot}`);
@@ -218,19 +221,19 @@ function loadMap(name: string, reason: string) {
 function onServerActivateSeen() {
   if (listenReady) return;
   listenReady = true;
-  log('listen: ServerActivate — resume loop for local client signon');
+  log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
   setTimeout(() => {
+    runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
-    runEngineCmd('hideconsole');
     resumeEngineLoop();
   }, 250);
   setTimeout(() => {
-    resumeEngineLoop();
+    log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
     runEngineCmd('status');
   }, 2000);
   setInterval(() => {
     runEngineCmd('pausable 0');
-  }, 2000);
+  }, 4000);
 }
 
 /** Host console, ClientCommand, and listen-server `cmd` forwarding. */
@@ -680,6 +683,8 @@ async function boot() {
       '-windowed',
       '-nointro',
       '-console',
+      '-dev',
+      '1',
       '-game',
       GAME_DIR,
       '+maxplayers',
@@ -690,6 +695,10 @@ async function boot() {
       '0',
       '+pausable',
       '0',
+      '+sv_lan',
+      '1',
+      '+map',
+      'efw_prototype_level1',
     ];
     if (shimOk) {
       bootArgs.splice(1, 0, '-width', String(view.width), '-height', String(view.height));
@@ -713,7 +722,11 @@ async function boot() {
         elementPointerLock: true,
       },
     });
-    log('boot: init()');
+    loopbackNet = new EfwLoopbackNet();
+    loopbackNet.onLog = log;
+    engine.net = loopbackNet;
+    (window as Window & { __efwNet?: EfwLoopbackNet }).__efwNet = loopbackNet;
+    log('boot: init() with in-process loopback net');
     await engine.init();
     log('boot: init ok');
 
@@ -782,14 +795,17 @@ async function boot() {
     markDone('step-launch');
     launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
-    log('engine main loop started; map load deferred until after Host_Init');
+    log('engine main loop started; +map is in Host_Init argv');
     canvas.focus();
     resumeEngineLoop();
-    startedMap = '';
+    startedMap = 'efw_prototype_level1';
     listenReady = false;
     setTimeout(() => {
-      loadMap('efw_prototype_level1', 'deferred after Host_Init');
-    }, 1500);
+      if (!listenReady) {
+        startedMap = '';
+        loadMap('efw_prototype_level1', 'fallback if +map did not spawn');
+      }
+    }, 4000);
     setInterval(pollEfwVgui, 250);
     pollEfwVgui();
     document.addEventListener('visibilitychange', () => {
