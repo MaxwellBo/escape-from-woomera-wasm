@@ -149,6 +149,7 @@ void EFW_AdjustHope( float delta )
 
 void EFW_ThinkHope( void )
 {
+	static int s_hopeN;
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
@@ -170,6 +171,9 @@ void EFW_ThinkHope( void )
 	if( hope > 100.0f )
 		hope = 100.0f;
 	EFW_SetHudFloat( 1, hope );
+	s_hopeN++;
+	if( s_hopeN == 1 || ( s_hopeN % 40 ) == 0 )
+		EFW_DebugPrint( "hope %.1f", hope );
 	if( hope <= 0.0f && g_efw.player && !g_efw.hopeFailed )
 	{
 		g_efw.hopeFailed = 1;
@@ -233,6 +237,7 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 
 	if( !pPlayer )
 		return;
+	EFW_DebugPrint( ">>> FailOrNarrate 0x%x", code );
 	if( code == 0x3f || code == 0x43 )
 		EFW_AdjustHope( 15.0f );
 	idx = code - 0x3c;
@@ -1168,13 +1173,15 @@ void EFW_StartFrame( void )
 		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
 		pent->v.movetype = MOVETYPE_STEP;
-		EFW_EnableNpcThink( pent );
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
 				i, pent->v.classname ? STRING( pent->v.classname ) : "?", apply );
 			EFW_LogLine( line );
 		}
+		/* UTIL_SetSize inside EnableNpcThink stalled refugee apply logs.
+		   Restore think after SET_MODEL has returned. */
+		EFW_EnableNpcThink( pent );
 		return;
 	}
 }

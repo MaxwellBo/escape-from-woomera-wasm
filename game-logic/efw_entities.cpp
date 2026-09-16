@@ -637,7 +637,6 @@ void EFW_EnableNpcThink( edict_t *pent )
 		pent->v.movetype = MOVETYPE_STEP;
 		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
-		UTIL_SetSize( pRef->pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 		return;
 	}
 	if( !strcmp( cn, "monster_patrol_guard" ) || !strcmp( cn, "monster_efw_guard" ) )

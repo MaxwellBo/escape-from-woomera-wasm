@@ -560,22 +560,45 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_lookuse" ) )
 	{
-		int hit = EFW_LookUse( pPlayer );
-		if( !hit )
+		int hit;
+		CBaseEntity *pMark;
+		Vector dest;
+		Vector back;
+		Vector ang;
+		float yaw;
+		TraceResult tr;
+		CBaseEntity *pHit;
+		const char *hitCn;
+
+		pMark = EFW_NearestMarker( pPlayer, 256.0f );
+		if( pMark )
 		{
-			CBaseEntity *pMark = EFW_NearestMarker( pPlayer, 160.0f );
-			if( pMark )
-			{
-				Vector dir = EFW_Place( pMark ) - pPlayer->EyePosition();
-				Vector ang = UTIL_VecToAngles( dir );
-				pPlayer->pev->v_angle = ang;
-				pPlayer->pev->angles = ang;
-				hit = EFW_LookUse( pPlayer );
-				EFW_DebugPrint( ">>> efw_lookuse aimed %s hit=%d",
-					STRING( pMark->pev->targetname ), hit );
-				return 1;
-			}
+			dest = EFW_Place( pMark );
+			back = dest - pPlayer->pev->origin;
+			back.z = 0;
+			if( back.Length() < 8.0f )
+				back = Vector( 40.0f, 0.0f, 0.0f );
+			else
+				back = back.Normalize() * 48.0f;
+			/* Stand off the brush so TraceLine is not an inside-solid miss. */
+			EFW_Relocate( pPlayer, dest - back + Vector( 0, 0, 8 ) );
+			ang = UTIL_VecToAngles( dest - pPlayer->EyePosition() );
+			pPlayer->pev->angles.y = ang.y;
+			pPlayer->pev->v_angle.y = ang.y;
+			pPlayer->pev->v_angle.x = -ang.x;
+			pPlayer->pev->angles.x = 0;
+			UTIL_MakeVectors( pPlayer->pev->v_angle );
+			UTIL_TraceLine( pPlayer->EyePosition(), dest, dont_ignore_monsters,
+				pPlayer->edict(), &tr );
+			pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
+			hitCn = pHit ? STRING( pHit->pev->classname ) : "-";
+			yaw = (float)acos( DotProduct(
+				( dest - pPlayer->EyePosition() ).Normalize(),
+				gpGlobals->v_forward ) );
+			EFW_DebugPrint( ">>> look-use prep %s frac=%.2f hit=%s cone=%.3f",
+				STRING( pMark->pev->targetname ), tr.flFraction, hitCn, yaw );
 		}
+		hit = EFW_LookUse( pPlayer );
 		EFW_DebugPrint( ">>> efw_lookuse hit=%d", hit );
 		return 1;
 	}
@@ -615,6 +638,22 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_setpos" ) || FStrEq( pcmd, "setpos" ) )
 	{
+		if( CMD_ARGC() > arg0 + 4 )
+		{
+			CBaseEntity *pEnt;
+			Vector pos;
+			const char *who = CMD_ARGV( arg0 + 1 );
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			if( pEnt )
+			{
+				pos.x = (float)atof( CMD_ARGV( arg0 + 2 ) );
+				pos.y = (float)atof( CMD_ARGV( arg0 + 3 ) );
+				pos.z = (float)atof( CMD_ARGV( arg0 + 4 ) );
+				UTIL_SetOrigin( pEnt->pev, pos );
+				EFW_DebugPrint( ">>> efw_setpos %s %.0f %.0f %.0f", who, pos.x, pos.y, pos.z );
+				return 1;
+			}
+		}
 		if( CMD_ARGC() > arg0 + 3 )
 		{
 			Vector pos;
