@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll65`;
+    return `${url}?v=efw-dll66`;
   return url;
 }
 
@@ -335,7 +335,6 @@ function loadMap(name: string, reason: string) {
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
-  runEngineCmd('togglemenu');
   runEngineCmd('sv_validate_changelevel');
   /* Xash drops CHANGE_LEVEL when sv.framecount < 15 if validate is on.
      Pump COM_Frames first so the queue is accepted, then pfnChangeLevel

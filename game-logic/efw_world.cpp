@@ -94,6 +94,12 @@ void EFW_ChangeLevel( const char *map )
 		CVAR_GET_FLOAT( "sv_newunit" ) );
 }
 
+void EFW_ClearQueuedChangeLevel( void )
+{
+	s_queuedChange = 0;
+	s_queuedMap[0] = '\0';
+}
+
 void EFW_RunQueuedChangeLevel( void )
 {
 	if( !s_queuedChange )

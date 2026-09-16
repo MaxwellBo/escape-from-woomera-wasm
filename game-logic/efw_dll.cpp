@@ -1441,6 +1441,7 @@ void EFW_OnServerActivate( void )
 void EFW_OnServerDeactivate( void )
 {
 	EFW_LogLine( "efw: ServerDeactivate\n" );
+	EFW_ClearQueuedChangeLevel();
 	g_efw.player = NULL;
 	s_worldPrecache = 0;
 	s_worldPrecacheDone = 0;
