@@ -134,6 +134,14 @@ void EFW_LoadAllConversations( void )
 	int n = 0;
 	char gamedir[256];
 	char path[300];
+	{
+		static int s_load;
+		if( !s_load )
+		{
+			s_load = 1;
+			EFW_DebugPrint( ">>> FUN_100b8ff0" );
+		}
+	}
 
 	gamedir[0] = '\0';
 	GET_GAME_DIR( gamedir );
@@ -347,6 +355,14 @@ void EFW_CloseTalk( void )
 {
 	EfwDllState *st = EFW_Dll();
 	CBasePlayer *pPlayer = EFW_Player();
+	{
+		static int s_close;
+		if( !s_close )
+		{
+			s_close = 1;
+			EFW_DebugPrint( ">>> FUN_100c6950" );
+		}
+	}
 	st->talkActive = 0;
 	st->talkNpc = NULL;
 	st->menuCount = 0;
@@ -831,6 +847,14 @@ void EFW_SendCntxt( void )
 	EfwDllState *st = EFW_Dll();
 	int i;
 	unsigned char *raw;
+	{
+		static int s_cntxt;
+		if( !s_cntxt )
+		{
+			s_cntxt = 1;
+			EFW_DebugPrint( ">>> FUN_100c7d30" );
+		}
+	}
 	if( !pPlayer || !gmsgEFWCntxt )
 		return;
 	MESSAGE_BEGIN( MSG_ONE, gmsgEFWCntxt, NULL, pPlayer->pev );

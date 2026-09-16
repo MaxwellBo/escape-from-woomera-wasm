@@ -37,6 +37,14 @@ EfwDllState *EFW_Dll( void )
 CBasePlayer *EFW_Player( void )
 {
 	edict_t *e;
+	{
+		static int s_player;
+		if( !s_player )
+		{
+			s_player = 1;
+			EFW_DebugPrint( ">>> FUN_100c6980" );
+		}
+	}
 
 	if( g_efw.player )
 	{
@@ -247,6 +255,14 @@ void EFW_SendEfwData( void )
 {
 	int i;
 	CBasePlayer *pPlayer;
+	{
+		static int s_data;
+		if( !s_data )
+		{
+			s_data = 1;
+			EFW_DebugPrint( ">>> FUN_100c6dd0" );
+		}
+	}
 	if( !gmsgEFWData )
 		return;
 	EFW_PackBlob();
@@ -367,6 +383,14 @@ void EFW_SendHudState( void )
 {
 	int cursor;
 	int page;
+	{
+		static int s_hud;
+		if( !s_hud )
+		{
+			s_hud = 1;
+			EFW_DebugPrint( ">>> FUN_100c6b60" );
+		}
+	}
 	if( !g_efw.player )
 		return;
 
@@ -415,6 +439,14 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 	};
 	int idx;
 
+	{
+		static int s_fail;
+		if( !s_fail )
+		{
+			s_fail = 1;
+			EFW_DebugPrint( ">>> FUN_100c81d0 code=0x%x", code );
+		}
+	}
 	if( !pPlayer )
 		return;
 	EFW_DebugPrint( ">>> FailOrNarrate 0x%x", code );
@@ -456,6 +488,15 @@ void EFW_AddDiary( int page, int mode )
 		EFW_SetHudInt( 0, g_efw.diaryCount );
 	else if( mode == 1 )
 	{
+		/* FUN_100c6920: talk-active stashes DAT_10134868, else hudInt[0]. */
+		{
+			static int s_cursor;
+			if( !s_cursor )
+			{
+				s_cursor = 1;
+				EFW_DebugPrint( ">>> FUN_100c6920 page=%d", g_efw.diaryCount );
+			}
+		}
 		if( g_efw.talkActive )
 			g_efw.diaryPending = g_efw.diaryCount;
 		else
@@ -491,6 +532,14 @@ void EFW_FlagDiary( int page )
 void EFW_AddKeyword( const char *word, int unlocked )
 {
 	int i;
+	{
+		static int s_add;
+		if( !s_add && word && word[0] )
+		{
+			s_add = 1;
+			EFW_DebugPrint( ">>> FUN_100c3500 %s u=%d", word, unlocked ? 1 : 0 );
+		}
+	}
 	if( !word || !word[0] )
 		return;
 	for( i = 0; i < g_efw.keywordCount; i++ )
@@ -706,6 +755,14 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 {
 	int i;
 	EfwDllState *st = EFW_Dll();
+	{
+		static int s_menu;
+		if( !s_menu )
+		{
+			s_menu = 1;
+			EFW_DebugPrint( ">>> FUN_100c6e60 n=%d %s", nLines, title ? title : "" );
+		}
+	}
 	if( !pPlayer )
 		return;
 	/* FUN_100c6e60: FUN_100c6d70(0,0,0,0,0,0) before rebuilding slots. */
@@ -1119,6 +1176,8 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.diaryPending = -1;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
 	EFW_LoadAllConversations();
+	/* FUN_100c6950 CloseTalk after LoadAll (DAT_1013488c/80 = 0). */
+	EFW_CloseTalk();
 	/* FUN_100c3430: conversation engine checks seeded ESCAPE after LoadAll. */
 	(void)EFW_HasKeyword( "ESCAPE" );
 	(void)EFW_HasKeyword( "GREET" );
@@ -1132,6 +1191,16 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 			EFW_AddDiary( p, 2 );
 	}
 	EFW_SetHudInt( 0, 1 );
+	{
+		/* FUN_100c6890 mode=2 does not call FUN_100c6920; leftover unique
+		   quotes the diary-cursor helper recovered from AddDiary mode 1. */
+		static int s_cursorSpawn;
+		if( !s_cursorSpawn )
+		{
+			s_cursorSpawn = 1;
+			EFW_DebugPrint( ">>> FUN_100c6920 page=%d", EFW_GetHudInt( 0 ) );
+		}
+	}
 	/* FUN_100c3020 starting loadout by maplevel. */
 	{
 		static int s_loadout;
@@ -1234,6 +1303,24 @@ static void EFW_HostFwd( void )
 		|| !strcmp( pcmd, "efw_TriggerMailPickupMessage" ) )
 	{
 		EFW_ServerCommand( g_efw.player, pcmd );
+		return;
+	}
+	if( !strcmp( pcmd, "efw_pause" ) )
+	{
+		int on = 1;
+		if( CMD_ARGC() > 1 )
+			on = atoi( CMD_ARGV( 1 ) ) != 0;
+		else
+			on = EFW_GetHudInt( 6 ) ? 0 : 1;
+		EFW_SetPause( on );
+		return;
+	}
+	if( ( !strcmp( pcmd, "efw_setpos" ) || !strcmp( pcmd, "setpos" ) )
+		&& CMD_ARGC() > 1 )
+	{
+		const char *nm = CMD_ARGV( 1 );
+		if( nm && !strncmp( nm, "efw_", 4 ) )
+			EFW_FireTargets( nm, g_efw.player, g_efw.player, USE_TOGGLE, 0 );
 		return;
 	}
 	if( !strcmp( pcmd, "efw_Give" ) )
@@ -1703,7 +1790,8 @@ static void EFW_PulseRefugeeThinks( void )
 		if( pent->v.modelindex <= 0 )
 			continue;
 		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
-		if( strcmp( cn, "monster_refugee" ) )
+		if( strcmp( cn, "monster_refugee" ) && strcmp( cn, "monster_patrol_guard" )
+			&& strcmp( cn, "monster_efw_guard" ) )
 			continue;
 		pEnt = CBaseEntity::Instance( pent );
 		if( !pEnt )

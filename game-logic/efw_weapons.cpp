@@ -73,11 +73,36 @@ void CEfwWeapon::Spawn( void )
 #ifndef CLIENT_DLL
 	{
 		static int s_models;
+		static int s_stub;
 		if( !s_models )
 		{
 			s_models = 1;
 			EFW_DebugPrint( ">>> FUN_100c43f0 %s %s %s", def->wmodel, def->vmodel, def->pmodel );
 			EFW_DebugPrint( ">>> FUN_100c5220 %s", def->wmodel );
+			EFW_DebugPrint( ">>> FUN_100c45b0 %s", STRING( pev->classname ) );
+			EFW_DebugPrint( ">>> FUN_100c4600 %s", def->wmodel );
+		}
+		if( !( s_stub & def->itemBit ) )
+		{
+			s_stub |= def->itemBit;
+			if( def->itemBit == EFW_ITEM_IDTAG )
+				EFW_DebugPrint( ">>> FUN_10044600 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_REDCARD )
+				EFW_DebugPrint( ">>> FUN_10044670 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_PHONE )
+				EFW_DebugPrint( ">>> FUN_10044590 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_POWDER )
+				EFW_DebugPrint( ">>> FUN_100447c0 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_PLIERS )
+				EFW_DebugPrint( ">>> FUN_10044440 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_LEVER )
+				EFW_DebugPrint( ">>> FUN_100444b0 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_BRANCH )
+				EFW_DebugPrint( ">>> FUN_10044520 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_GREENCARD )
+				EFW_DebugPrint( ">>> FUN_100446e0 %s", def->wmodel );
+			else if( def->itemBit == EFW_ITEM_BLUECARD )
+				EFW_DebugPrint( ">>> FUN_10044750 %s", def->wmodel );
 		}
 	}
 #endif
@@ -89,6 +114,16 @@ void CEfwWeapon::Spawn( void )
 void CEfwWeapon::Precache( void )
 {
 	const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
+#ifndef CLIENT_DLL
+	{
+		static int s_pre;
+		if( !s_pre )
+		{
+			s_pre = 1;
+			EFW_DebugPrint( ">>> FUN_100c4600 %s", def->wmodel );
+		}
+	}
+#endif
 	PRECACHE_MODEL( (char *)def->vmodel );
 	PRECACHE_MODEL( (char *)def->wmodel );
 	PRECACHE_MODEL( (char *)def->pmodel );

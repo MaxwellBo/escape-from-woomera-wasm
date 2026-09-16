@@ -28,6 +28,14 @@ int EFW_ElectricianSees( CBasePlayer *pPlayer )
 	Vector delta;
 	float dist;
 	float dot;
+	{
+		static int s_sees;
+		if( !s_sees )
+		{
+			s_sees = 1;
+			EFW_DebugPrint( ">>> FUN_100c59c0" );
+		}
+	}
 
 	if( !pPlayer )
 		return 0;
@@ -54,6 +62,14 @@ void EFW_SetPause( int on )
 	CBasePlayer *pPlayer = EFW_Player();
 	CBaseEntity *pGuard;
 	int want = on ? 1 : 0;
+	{
+		static int s_pause;
+		if( !s_pause )
+		{
+			s_pause = 1;
+			EFW_DebugPrint( ">>> FUN_100c7510 on=%d", want );
+		}
+	}
 	/* FUN_10048590 ctor / FUN_100485d0 dismiss each fire once. HTML stand-in
 	   plus HUD ClientCmd would otherwise HostFwd the same pause in a storm. */
 	if( EFW_GetHudInt( 6 ) == want )
@@ -169,6 +185,14 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 {
 	CBasePlayer *pPlayer;
 	(void)pCaller;
+	{
+		static int s_gate;
+		if( !s_gate && targetName && targetName[0] )
+		{
+			s_gate = 1;
+			EFW_DebugPrint( ">>> FUN_100c7da0 %s", targetName );
+		}
+	}
 	if( !targetName || !targetName[0] )
 		return 0;
 	pPlayer = ( pActivator && pActivator->IsPlayer() ) ? (CBasePlayer *)pActivator : EFW_Player();
@@ -386,6 +410,14 @@ void EFW_PALockRAR( void )
 	if( !g_pa.inited )
 		EFW_InitPA();
 	g_pa.rarLock = 1;
+	{
+		static int s_lock;
+		if( !s_lock )
+		{
+			s_lock = 1;
+			EFW_DebugPrint( ">>> FUN_100c77c0 Ann_RAR_124" );
+		}
+	}
 	EFW_DebugPrint( ">>> PALockRAR Ann_RAR_124" );
 	EFW_PlayCue( g_pa.slot[0].sample );
 	g_pa.timer = 0.0f;

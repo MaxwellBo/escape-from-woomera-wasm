@@ -951,7 +951,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 					EFW_FireTargets( nm, pPlayer, pPlayer, USE_TOGGLE, 0 );
 			}
 			else
-				EFW_DebugPrint( ">>> efw_setpos (not found) %s", CMD_ARGV( arg0 + 1 ) );
+			{
+				const char *nm = CMD_ARGV( arg0 + 1 );
+				EFW_DebugPrint( ">>> efw_setpos (not found) %s", nm );
+				/* WASM stand-in: GateFSM still runs when the brush is absent. */
+				if( nm && !strncmp( nm, "efw_", 4 ) )
+					EFW_FireTargets( nm, pPlayer, pPlayer, USE_TOGGLE, 0 );
+			}
 		}
 		return 1;
 	}

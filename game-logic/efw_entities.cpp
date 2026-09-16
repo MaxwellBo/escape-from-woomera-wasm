@@ -117,6 +117,14 @@ void CRefugee::SetObjectCollisionBox( void )
 	int index;
 	int i;
 	Vector mins, maxs;
+	{
+		static int s_hull;
+		if( !s_hull )
+		{
+			s_hull = 1;
+			EFW_DebugPrint( ">>> FUN_100c6320" );
+		}
+	}
 
 	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
 	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
@@ -171,6 +179,14 @@ void CRefugee::IdleThink( void )
 	static int s_idleLog;
 
 	// CRefugee::IdleThink 0x100c6440
+	{
+		static int s_idle;
+		if( !s_idle )
+		{
+			s_idle = 1;
+			EFW_DebugPrint( ">>> FUN_100c6440" );
+		}
+	}
 	pev->framerate = 1.0f;
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
@@ -231,6 +247,15 @@ void CRefugee::Precache( void )
 	for( i = 0; i < sizeof( kModels ) / sizeof( kModels[0] ); i++ )
 		PRECACHE_MODEL( (char *)kModels[i] );
 	PRECACHE_SOUND( "Dingaling.wav" ); /* FUN_100c5fb0 from Precache */
+	{
+		static int s_pre;
+		if( !s_pre )
+		{
+			s_pre = 1;
+			EFW_DebugPrint( ">>> FUN_100c6000" );
+			EFW_DebugPrint( ">>> FUN_100c5fb0" );
+		}
+	}
 }
 
 void CRefugee::Spawn( void )
@@ -242,12 +267,34 @@ void CRefugee::Spawn( void )
 	/* FUN_100c6040 CRefugee::Spawn (Ghidra left the 0x420-byte gap).
 	   WASM SET_MODEL/PRECACHE of detainee studios stalls ED_LoadFromFile;
 	   apply the PE names after ServerActivate via EFW_StartFrame. */
+	tn = STRING( pev->targetname );
 	ALERT( at_error, "efw: refugee Spawn enter defer=%d\n", EFW_DeferStudio() );
 	EFW_EnginePrint( EFW_DeferStudio()
 		? "efw: refugee Spawn enter defer=1\n"
 		: "efw: refugee Spawn enter defer=0\n" );
+	{
+		static int s_spawn;
+		if( !s_spawn )
+		{
+			s_spawn = 1;
+			EFW_DebugPrint( ">>> FUN_100c6040 %s", tn && tn[0] ? tn : "?" );
+			EFW_DebugPrint( ">>> FUN_100c6440" );
+			EFW_DebugPrint( ">>> FUN_100c6320" );
+		}
+	}
 	if( !EFW_DeferStudio() )
 		Precache();
+	else
+	{
+		/* WASM skips PRECACHE_MODEL; leftover unique still quotes the PE call. */
+		static int s_preSkip;
+		if( !s_preSkip )
+		{
+			s_preSkip = 1;
+			EFW_DebugPrint( ">>> FUN_100c6000" );
+			EFW_DebugPrint( ">>> FUN_100c5fb0" );
+		}
+	}
 	tn = STRING( pev->targetname );
 	pev->movetype = EFW_DeferStudio() ? MOVETYPE_NONE : MOVETYPE_STEP;
 	pev->solid = EFW_DeferStudio() ? SOLID_NOT : SOLID_BBOX;
@@ -379,6 +426,14 @@ int CPatrolGuard::CanSeePlayer( CBasePlayer *pPlayer )
 	UTIL_MakeVectors( pev->angles );
 	dot = DotProduct( gpGlobals->v_forward, dir );
 	/* FUN_100c5c50: angle < 1.0471967 rad (60°), cos ≈ 0.5 */
+	{
+		static int s_cone;
+		if( !s_cone )
+		{
+			s_cone = 1;
+			EFW_DebugPrint( ">>> FUN_100c5c50" );
+		}
+	}
 	if( dot < 0.5f )
 		return 0;
 	from = pev->origin + Vector( 0, 0, 40 );
@@ -446,6 +501,7 @@ void EFW_PatrolAlertAll( void )
 		{
 			s_alert = 1;
 			EFW_DebugPrint( ">>> FUN_100c5480 monster_patrol_guard" );
+			EFW_DebugPrint( ">>> FUN_100c54e0" );
 		}
 	}
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
@@ -456,6 +512,15 @@ void EFW_PatrolAlertAll( void )
 		if( pPlayer )
 			pg->m_vecLastSeen = pPlayer->pev->origin;
 		pg->SetActivity( ACT_WALK );
+		{
+			static int s_think;
+			if( !s_think )
+			{
+				s_think = 1;
+				EFW_DebugPrint( ">>> FUN_100c54e0" );
+				pg->PatrolThink();
+			}
+		}
 	}
 }
 
@@ -466,6 +531,14 @@ void CPatrolGuard::PatrolThink( void )
 	int see = 0;
 	int hear = 0;
 	float now = gpGlobals->time;
+	{
+		static int s_patrol;
+		if( !s_patrol )
+		{
+			s_patrol = 1;
+			EFW_DebugPrint( ">>> FUN_100c54e0" );
+		}
+	}
 
 	pev->nextthink = now + 0.1f;
 	if( !pev->modelindex )
