@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll73`;
+    return `${url}?v=efw-dll74`;
   return url;
 }
 
@@ -264,6 +264,11 @@ function runEngineCmd(cmd: string) {
 
 let resumedAfterClientFrame = false;
 let lastResumeMs = 0;
+/* Con_ToggleConsole_f: closing the console while cls.state==ca_active
+   calls UI_SetActiveMenu(false). Closing it earlier reopens libmenu.
+   Hold key_console only for SCR_BeginLoadingPlaque, then release after
+   HUD_Redraw (proof of ca_active). */
+let consoleForPlaque = false;
 function resumeEngineLoop() {
   const now = Date.now();
   /* resume() increments currentlyRunningMainloop and aborts the in-flight
@@ -280,10 +285,32 @@ function resumeEngineLoop() {
   }
 }
 
+function releaseConsoleToGame() {
+  if (!consoleForPlaque)
+    return;
+  consoleForPlaque = false;
+  /* ca_active is required: otherwise Con_ToggleConsole_f reopens the menu. */
+  runEngineCmd('toggleconsole');
+  log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
+}
+
 function resumeAfterFirstClientFrame() {
   if (changeWatch) return;
+  if (consoleForPlaque) {
+    releaseConsoleToGame();
+    if (!resumedAfterClientFrame) {
+      resumedAfterClientFrame = true;
+      log('listen: skip resumeMainLoop after CHANGE_LEVEL (rAF alive)');
+    }
+    return;
+  }
   if (resumedAfterClientFrame) return;
   resumedAfterClientFrame = true;
+  /* Boot menu was VidInit'd with CL_IsActive false (no Resume). Two
+     toggleconsoles: key_menu → key_console → UI_SetActiveMenu(false). */
+  runEngineCmd('toggleconsole');
+  runEngineCmd('toggleconsole');
+  log('listen: double toggleconsole after first HUD (boot menu → game)');
   log('listen: resumeMainLoop after first ClientFrame');
   resumeEngineLoop();
   setTimeout(() => resumeEngineLoop(), 250);
@@ -335,6 +362,7 @@ function loadMap(name: string, reason: string) {
   listenReady = false;
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
+  consoleForPlaque = false;
   if (pumpTimer) {
     clearInterval(pumpTimer);
     pumpTimer = null;
@@ -357,8 +385,12 @@ function loadMap(name: string, reason: string) {
     runEngineCmd('pausable 0');
     runEngineCmd('sv_validate_changelevel 0');
     /* Plaque SCR_UpdateScreen hangs the software renderer. key_console
-       makes SCR_BeginLoadingPlaque return before that present. */
+       makes SCR_BeginLoadingPlaque return before that present.
+       Do not toggleconsole again until HUD_Redraw: closing the console
+       while !ca_active calls UI_SetActiveMenu(true) and brings libmenu back. */
     runEngineCmd('toggleconsole');
+    consoleForPlaque = true;
+    log('listen: key_console for plaque (skip software present hang)');
     runEngineCmd(`efw_changelevel ${name}`);
     setTimeout(() => {
       if (listenReady)
@@ -415,14 +447,15 @@ function onServerActivateSeen() {
     runEngineCmd('cancelselect');
     runEngineCmd('ui_renderworld 1');
     /* togglemenu is CL_Escape_f: no-op when key_dest is the menu, otherwise
-       it OPENS the menu. Resume Game is hidden unless CL_IsActive(). Draw
-       the BSP under libmenu via ui_renderworld. */
+       it OPENS the menu. Resume Game is hidden unless CL_IsActive() at
+       VidInit. Dismiss via Con_ToggleConsole_f only after HUD_Redraw
+       (ca_active). Do not toggleconsole here — ServerActivate runs while
+       the client is still connecting and would reopen libmenu. */
     if (!menuDismissed) {
       menuDismissed = true;
-      log('listen: ui_renderworld 1 (libmenu cannot hide via togglemenu)');
+      log('listen: waiting HUD_Redraw before menu dismiss');
     } else {
-      runEngineCmd('toggleconsole');
-      log('listen: toggleconsole after CHANGE_LEVEL (back to game)');
+      log('listen: CHANGE_LEVEL activate — hold console until HUD_Redraw');
     }
   }, 250);
   setTimeout(() => {
@@ -434,11 +467,17 @@ function onServerActivateSeen() {
     log('listen: host_clientloaded (r_norefresh 1)');
     runEngineCmd('host_clientloaded 1');
     runEngineCmd('host_gameloaded 1');
+    if (resumedAfterClientFrame) {
+      log('listen: skip 4s resume (HUD already looping)');
+      return;
+    }
     lastResumeMs = 0;
     resumeEngineLoop();
   }, 4000);
   setTimeout(() => {
     if (changeWatch) return;
+    if (consoleForPlaque)
+      releaseConsoleToGame();
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
@@ -1063,6 +1102,7 @@ async function boot() {
     startedMap = '';
     listenReady = false;
     menuDismissed = false;
+    consoleForPlaque = false;
     setTimeout(() => {
       const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
       loadMap(bootMap, 'deferred after Host_Init');
