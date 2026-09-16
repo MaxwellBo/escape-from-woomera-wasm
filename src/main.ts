@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll69`;
+    return `${url}?v=efw-dll70`;
   return url;
 }
 
@@ -356,7 +356,17 @@ function loadMap(name: string, reason: string) {
     log(`listen: pfnChangeLevel ${name}`);
     runEngineCmd('pausable 0');
     runEngineCmd('sv_validate_changelevel 0');
+    /* Plaque SCR_UpdateScreen hangs the software renderer. key_console
+       makes SCR_BeginLoadingPlaque return before that present. */
+    runEngineCmd('toggleconsole');
     runEngineCmd(`efw_changelevel ${name}`);
+    setTimeout(() => {
+      if (listenReady)
+        return;
+      log('listen: CHANGE_LEVEL delayed resume t=2000ms (rAF dead vs WASM hang)');
+      lastResumeMs = 0;
+      resumeEngineLoop();
+    }, 2200);
   }, 200);
   if (changeWatch)
     clearTimeout(changeWatch);
