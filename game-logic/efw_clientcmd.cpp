@@ -178,12 +178,15 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 {
 	/* FUN_100c4af0: cdecl player look-use. Sphere 96 from EyePosition,
 	   acos(dot) < 0.17453278 (~10°), TraceLine fraction 0.97,
-	   efw_Marker classname @ 0x1011c9ac, vtable+0x114. */
+	   efw_Marker classname @ 0x1011c9ac, vtable+0x114.
+	   Brush markers have origin 0; aim/trace uses abs-center so the
+	   recovered cone points at the bmodel the player is looking at. */
 	Vector eye;
 	CBaseEntity *pEnt;
 	TraceResult tr;
 	CBaseEntity *pHit;
 	Vector dir;
+	Vector dest;
 	float len;
 	float ang;
 	float dot;
@@ -197,9 +200,10 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 	{
 		if( pEnt == pPlayer )
 			continue;
-		dir.x = pEnt->pev->origin.x - eye.x;
-		dir.y = pEnt->pev->origin.y - eye.y;
-		dir.z = pEnt->pev->origin.z - eye.z;
+		dest = EFW_Place( pEnt );
+		dir.x = dest.x - eye.x;
+		dir.y = dest.y - eye.y;
+		dir.z = dest.z - eye.z;
 		len = dir.Length();
 		if( len == 0.0f )
 			dir = Vector( 0.0f, 0.0f, 1.0f );
@@ -213,7 +217,7 @@ int EFW_LookUse( CBasePlayer *pPlayer )
 		ang = (float)acos( (double)dot );
 		if( ang >= 0.17453278f )
 			continue;
-		UTIL_TraceLine( eye, pEnt->pev->origin, dont_ignore_monsters, pPlayer->edict(), &tr );
+		UTIL_TraceLine( eye, dest, dont_ignore_monsters, pPlayer->edict(), &tr );
 		if( tr.flFraction >= 0.97f )
 		{
 			if( EFW_LookUse114( pEnt, pPlayer ) )

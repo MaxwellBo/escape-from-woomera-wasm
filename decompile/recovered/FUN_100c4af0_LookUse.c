@@ -7,7 +7,8 @@
  * 0x100af200 UTIL_MakeVectors(pev->v_angle)
  * vtable+0x214 EyePosition()  → hidden Vector* out
  * 0x100aeba0 UTIL_FindEntityInSphere(start, eye, 96.0)   ; 0x42c00000
- * dir = ent.origin - eye; if |dir|==0 use (0,0,1) else normalize
+ * dir = Place(ent) - eye; if |dir|==0 use (0,0,1) else normalize
+ *   (PE uses pev->origin; brush markers have origin 0 so WASM uses abs-center)
  * 0x100c9190 _CIacos (fld1/fadd/fsub/fmul/fsqrt/fpatan)
  * keep if acos(dot(dir, gpGlobals->v_forward)) < 0.17453278  (~10°)
  * 0x100afc60 UTIL_TraceLine(eye, ent.origin, dont_ignore_monsters=0, player)
