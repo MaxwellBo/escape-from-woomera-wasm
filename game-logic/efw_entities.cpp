@@ -168,10 +168,7 @@ void CRefugee::IdleThink( void )
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
-	{
-		StudioFrameAdvance();
 		return;
-	}
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
 	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
 	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
@@ -192,7 +189,8 @@ void CRefugee::IdleThink( void )
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
 			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
-			SetActivity( ACT_WALK );
+			/* SetActivity needs a SET_MODEL studio header; WASM detainee
+			   bind is MODEL_INDEX only and StudioFrameAdvance hangs. */
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
 			{
@@ -201,8 +199,6 @@ void CRefugee::IdleThink( void )
 				EFW_Print( pPlayer, line );
 			}
 		}
-		if( m_iWalkState == 3 && dist < 100.0f )
-			SetActivity( ACT_IDLE );
 		if( m_iWalkState == 3 && dist >= 100.0f )
 		{
 			delta.z = 0;
@@ -213,7 +209,7 @@ void CRefugee::IdleThink( void )
 			}
 		}
 	}
-	StudioFrameAdvance();
+	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
 }
 
 void CRefugee::Precache( void )
