@@ -561,6 +561,21 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_lookuse" ) )
 	{
 		int hit = EFW_LookUse( pPlayer );
+		if( !hit )
+		{
+			CBaseEntity *pMark = EFW_NearestMarker( pPlayer, 160.0f );
+			if( pMark )
+			{
+				Vector dir = EFW_Place( pMark ) - pPlayer->EyePosition();
+				Vector ang = UTIL_VecToAngles( dir );
+				pPlayer->pev->v_angle = ang;
+				pPlayer->pev->angles = ang;
+				hit = EFW_LookUse( pPlayer );
+				EFW_DebugPrint( ">>> efw_lookuse aimed %s hit=%d",
+					STRING( pMark->pev->targetname ), hit );
+				return 1;
+			}
+		}
 		EFW_DebugPrint( ">>> efw_lookuse hit=%d", hit );
 		return 1;
 	}
