@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll91`;
+    return `${url}?v=efw-dll92`;
   return url;
 }
 
@@ -181,6 +181,8 @@ function showEfwStory(code: number, fallback?: string) {
   text.textContent = title;
   storyNext = spec?.next || '';
   layer.hidden = false;
+  const interact = document.getElementById('efw-interact');
+  if (interact) interact.hidden = true;
   if (storyboardPauses(code)) {
     /* FUN_10048590: ClientCmd efw_pause 1 once per Panel show, not every
        FailOrNarrate log reprint. */
@@ -273,6 +275,48 @@ function applyDiaryHud(text: string): boolean {
   return false;
 }
 
+function applyInteractHud(text: string): boolean {
+  const m = text.match(/>>> FUN_10046590 interact=(.*)$/);
+  if (!m) return false;
+  const name = m[1].trim();
+  const el = document.getElementById('efw-interact');
+  const span = document.getElementById('efw-interact-name');
+  if (!el) return false;
+  if (!name) {
+    el.hidden = true;
+    return false;
+  }
+  el.hidden = false;
+  if (span) span.textContent = name === '-' ? '' : name;
+  return false;
+}
+
+function applyInvHud(text: string): boolean {
+  const m = text.match(/>>> FUN_10043dd0 n=(\d+)(?: (.*))?$/);
+  const el = document.getElementById('efw-inv');
+  if (!el) return false;
+  if (text.match(/>>> (?:diaryhud|efw_diary) open=0/)) {
+    el.hidden = true;
+    el.innerHTML = '';
+    return false;
+  }
+  if (!m) return false;
+  const n = Number(m[1]);
+  const names = (m[2] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  el.innerHTML = '';
+  if (n <= 0) {
+    el.hidden = true;
+    return false;
+  }
+  names.forEach((name) => {
+    const i = document.createElement('i');
+    i.textContent = name;
+    el.appendChild(i);
+  });
+  el.hidden = false;
+  return false;
+}
+
 function applyPrevQuestion(text: string): boolean {
   const m = text.match(/>>> prevq (.+)$/);
   const el = document.getElementById('efw-prevq');
@@ -292,6 +336,8 @@ function log(text: string) {
   if (!normalized) return;
   applyHopeHud(normalized);
   applyDiaryHud(normalized);
+  applyInteractHud(normalized);
+  applyInvHud(normalized);
   applyPrevQuestion(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();

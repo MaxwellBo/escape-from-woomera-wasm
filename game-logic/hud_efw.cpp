@@ -710,6 +710,130 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 	EFW_VguiSync();
 }
 
+/* FUN_10043af0: 4-edge FillRGBA border of thickness param_9. */
+static void EFW_DrawBoxBorder( int x, int y, int w, int h, int r, int g, int b, int a, int t )
+{
+	int inner;
+	if( t < 1 )
+		t = 1;
+	FillRGBA( x, y, w, t, r, g, b, a );
+	FillRGBA( x, y + h - t, w, t, r, g, b, a );
+	inner = h - t * 2;
+	if( inner < 1 )
+		inner = 1;
+	FillRGBA( x, y + t, t, inner, r, g, b, a );
+	FillRGBA( x + w - t, y + t, t, inner, r, g, b, a );
+}
+
+/* FUN_10043a70: 64x64 dark tile + 3px grey frame + optional SPR at (x-32,y-32). */
+static void EFW_DrawInvIcon( int x, int y, HSPRITE icon )
+{
+	wrect_t rc;
+	int dw, dh;
+	FillRGBA( x, y, 64, 64, 20, 20, 20, 255 );
+	EFW_DrawBoxBorder( x, y, 64, 64, 50, 50, 50, 255, 3 );
+	if( !icon )
+		return;
+	dw = SPR_Width( icon, 0 );
+	dh = SPR_Height( icon, 0 );
+	if( dw < 1 )
+		dw = 64;
+	if( dh < 1 )
+		dh = 64;
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = dw;
+	rc.bottom = dh;
+	SPR_Set( icon, 255, 255, 255 );
+	SPR_DrawHoles( 0, x - 32, y - 32, &rc );
+}
+
+/* FUN_10043dd0: bottom inventory strip when the diary fade is up.
+   Walks DAT_100a37a8 weapon slots; x starts at 60, +128 per owned item. */
+static void EFW_DrawInventoryStrip( void )
+{
+	int id;
+	int n;
+	int x;
+	int y;
+	int namesN;
+	char names[160];
+	static int s_invLog = -1;
+
+	if( !g_diaryOpen )
+		return;
+	FillRGBA( 0, ScreenHeight - 190, ScreenWidth, 190, 51, 51, 51, 204 );
+	x = 60;
+	y = ScreenHeight - 190;
+	n = 0;
+	names[0] = '\0';
+	namesN = 0;
+	for( id = 16; id <= 24; id++ )
+	{
+		HSPRITE icon;
+		if( !EFW_HasWep( id ) )
+			continue;
+		icon = ( id == 16 ) ? g_hPliers : 0;
+		EFW_DrawInvIcon( x, y, icon );
+		gHUD.DrawHudString( x, y - 45, x + 64, EFW_WepLabel( id ), 255, 255, 255 );
+		if( namesN < (int)sizeof( names ) - 16 )
+			namesN += snprintf( names + namesN, sizeof( names ) - namesN, "%s%s",
+				n ? "," : "", EFW_WepLabel( id ) );
+		n++;
+		x += 128;
+	}
+	if( n != s_invLog )
+	{
+		s_invLog = n;
+		gEngfuncs.Con_Printf( ">>> FUN_10043dd0 n=%d %s\n", n, names );
+	}
+}
+
+/* FUN_10046590: idle bar while DAT_100bc338==0 and DAT_100bc490!=0.
+   DAT_100bc490 is the Cntxt scan count; DAT_100bc38c is the nearest name. */
+static void EFW_DrawInteractPrompt( void )
+{
+	int x;
+	int y;
+	int w;
+	int nameW;
+	const char *name;
+	static char s_interact[32];
+
+	if( g_storyCode )
+		return;
+	if( g_scanCount <= 0 )
+	{
+		if( s_interact[0] )
+		{
+			s_interact[0] = '\0';
+			gEngfuncs.Con_Printf( ">>> FUN_10046590 interact=\n" );
+		}
+		return;
+	}
+	name = g_scan[0].name[0] ? g_scan[0].name : "";
+	w = 240;
+	x = ScreenWidth / 2 - 120;
+	y = ScreenHeight - 25;
+	FillRGBA( x, y, w, 25, 0, 0, 0, 255 );
+	gHUD.DrawHudString( ScreenWidth / 2 - 115, ScreenHeight - 20, ScreenWidth,
+		"Click left mouse button to interact", 255, 255, 255 );
+	if( name[0] )
+	{
+		nameW = (int)strlen( name ) * 7;
+		FillRGBA( ( ScreenWidth - nameW ) / 2 - 5, ScreenHeight - 45,
+			nameW + 10, 20, 0, 0, 0, 255 );
+		gHUD.DrawHudString( ( ScreenWidth - nameW ) / 2, ScreenHeight - 40,
+			ScreenWidth, name, 255, 255, 255 );
+	}
+	if( strcmp( s_interact, name ) )
+	{
+		strncpy( s_interact, name, sizeof( s_interact ) - 1 );
+		s_interact[sizeof( s_interact ) - 1] = '\0';
+		gEngfuncs.Con_Printf( ">>> FUN_10046590 interact=%s\n", name[0] ? name : "-" );
+	}
+}
+
 /* FUN_100436c0: tile sprites/efw_grey.spr over the framebuffer. */
 static void EFW_DrawGreyVeil( void )
 {
@@ -861,6 +985,7 @@ int CHudEfw::Draw( float flTime )
 	}
 
 	EFW_DrawScanPrompts( r, g, b );
+	EFW_DrawInteractPrompt();
 
 	if( g_storyCode && g_hStory )
 	{
@@ -910,6 +1035,9 @@ int CHudEfw::Draw( float flTime )
 			row += 16;
 		}
 	}
+
+	if( g_diaryOpen && !g_menuOn )
+		EFW_DrawInventoryStrip();
 
 	if( g_diaryOpen && g_diaryPage >= 0 )
 	{
