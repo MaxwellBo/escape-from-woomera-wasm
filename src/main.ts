@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll95`;
+    return `${url}?v=efw-dll96`;
   return url;
 }
 
@@ -313,6 +313,11 @@ function setHopeHud(n: number): void {
 }
 
 function applyHopeHud(text: string): boolean {
+  const daa = text.match(/>>> FUN_1001daa0 ticks=(\d+) hope=([\d.]+)/);
+  if (daa) {
+    setHopeHud(Number(daa[2]));
+    return false;
+  }
   const m = text.match(/>>> hopehud ([\d.]+)/);
   if (!m) return false;
   setHopeHud(Number(m[1]));

@@ -1214,10 +1214,33 @@ static void EFW_DrawLetterbox( float flTime )
 	}
 }
 
+/* FUN_1001daa0: 10×(28×6) ticks at (20,120), stacked up by 12px.
+   Filled (200,0,0,255) while ticks >= i; else (200,200,200,10). */
+static void EFW_DrawHopeTicks( int ticks )
+{
+	int i;
+	int y;
+	static int s_logged = -1;
+
+	y = 0x78 - 6;
+	for( i = 0; i < 10; i++ )
+	{
+		if( ticks < i )
+			FillRGBA( 0x14, y, 0x1c, 6, 200, 200, 200, 10 );
+		else
+			FillRGBA( 0x14, y, 0x1c, 6, 200, 0, 0, 255 );
+		y -= 0xc;
+	}
+	if( s_logged != ticks )
+	{
+		s_logged = ticks;
+		gEngfuncs.Con_Printf( ">>> FUN_1001daa0 ticks=%d hope=%.1f\n", ticks, g_hope );
+	}
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
-	int x, y, w, fill;
 	int r, g, b;
 	char label[32];
 	int hope;
@@ -1246,24 +1269,12 @@ int CHudEfw::Draw( float flTime )
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	hope = (int)( g_hope + 0.5f );
-	x = ScreenWidth / 2 - 90;
-	y = 12;
 	if( g_hope >= 0.0f )
 	{
-		w = 180;
-		FillRGBA( x - 2, y - 2, w + 4, 16, 0, 0, 0, 140 );
-		FillRGBA( x, y, w, 12, 60, 40, 10, 180 );
-		fill = ( w * hope ) / 100;
-		if( fill < 0 )
-			fill = 0;
-		if( fill > w )
-			fill = w;
-		if( hope < 20 )
-			FillRGBA( x, y, fill, 12, 210, 40, 20, 220 );
-		else
-			FillRGBA( x, y, fill, 12, 255, 155, 50, 220 );
+		/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
+		EFW_DrawHopeTicks( hope / 10 );
 		snprintf( label, sizeof( label ), "HOPE  %d", hope );
-		gHUD.DrawHudString( x, y + 16, x + w + 80, label, r, g, b );
+		gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, ScreenWidth - 8, label, 200, 0, 0 );
 		{
 			static int s_hopeDraw;
 			s_hopeDraw++;
@@ -1271,9 +1282,9 @@ int CHudEfw::Draw( float flTime )
 				gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
 		}
 		if( g_talkPrompt )
-			gHUD.DrawHudString( x + w + 88, y + 16, ScreenWidth - 8, "TALK", r, g, b );
+			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 4, ScreenWidth - 8, "TALK", r, g, b );
 		if( g_diaryOpen )
-			gHUD.DrawHudString( x + w + 88, y + 32, ScreenWidth - 8, "DIARY", r, g, b );
+			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 20, ScreenWidth - 8, "DIARY", r, g, b );
 	}
 
 	EFW_DrawScanPrompts( r, g, b );
