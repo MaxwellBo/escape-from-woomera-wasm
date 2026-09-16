@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll23`;
+    return `${url}?v=efw-dll24`;
   return url;
 }
 
@@ -132,9 +132,9 @@ function log(text: string) {
   logLines++;
   logCount.textContent = String(logLines);
   logEl.textContent += normalized + '\n';
-  if (logLines > 500) {
+  if (logLines > 2500) {
     const lines = logEl.textContent.split('\n');
-    logEl.textContent = lines.slice(lines.length - 500).join('\n');
+    logEl.textContent = lines.slice(lines.length - 2500).join('\n');
   }
   logEl.scrollTop = logEl.scrollHeight;
 }

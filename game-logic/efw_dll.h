@@ -137,10 +137,13 @@ CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard chases the player */
 void EFW_OnDispatchSpawn( edict_t *pent ); /* NUMBER_OF_ENTITIES log; Host_ErrorInit cap is 1200 */
 int EFW_ShouldSpawn( edict_t *pent );
+int EFW_RejectSpawn( edict_t *pent );
 int EFW_BeginWorldPrecache( void );
 void EFW_EndWorldPrecache( void );
 int EFW_PrecacheOnce( const char *szClassname );
 void EFW_WPrecache( void ); /* FUN_100b2f80 after HL weapons */
+void EFW_OnServerActivate( void );
+void EFW_OnServerDeactivate( void );
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */

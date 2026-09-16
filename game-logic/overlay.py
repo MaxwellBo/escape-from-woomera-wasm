@@ -136,6 +136,32 @@ def main() -> None:
         f"\tif( EFW_ClientCommand( pEntity ) ) {MARKER}\n"
         "\t\treturn;\n",
     )
+    once(
+        client_cpp,
+        "void ServerDeactivate( void )\n"
+        "{\n"
+        "	//ALERT( at_console, \"ServerDeactivate()\\n\" );\n",
+        "void ServerDeactivate( void )\n"
+        "{\n"
+        f"	EFW_OnServerDeactivate(); {MARKER}\n"
+        "	//ALERT( at_console, \"ServerDeactivate()\\n\" );\n",
+    )
+    once(
+        client_cpp,
+        "void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )\n"
+        "{\n"
+        "	int		i;\n"
+        "	CBaseEntity	*pClass;\n"
+        "\n"
+        "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
+        "void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )\n"
+        "{\n"
+        "	int		i;\n"
+        "	CBaseEntity	*pClass;\n"
+        "\n"
+        f"	EFW_OnServerActivate(); {MARKER}\n"
+        "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
+    )
 
     player_cpp = dlls / "player.cpp"
     once(
@@ -266,6 +292,19 @@ def main() -> None:
         "\t\t\tpEntity->Spawn();\n"
         "\n"
         "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
+    )
+    once(
+        cbase_cpp,
+        "\treturn 0;\n"
+        "}\n"
+        "\n"
+        "void DispatchKeyValue( edict_t *pentKeyvalue, KeyValueData *pkvd )\n",
+        f"\tif( EFW_RejectSpawn( pent ) ) {MARKER}\n"
+        "\t\treturn -1;\n"
+        "\treturn 0;\n"
+        "}\n"
+        "\n"
+        "void DispatchKeyValue( edict_t *pentKeyvalue, KeyValueData *pkvd )\n",
     )
 
     world_cpp = dlls / "world.cpp"

@@ -846,6 +846,9 @@ void EFW_LinkUserMessages( void )
 
 static int s_worldPrecache;
 static int s_worldPrecacheDone;
+static int s_worldPasses;
+static int s_dropPass;
+static int s_dropped;
 static char s_precacheMap[32];
 static char s_precacheSeen[96][40];
 static int s_precacheSeenN;
@@ -920,12 +923,71 @@ void EFW_EndWorldPrecache( void )
 int EFW_ShouldSpawn( edict_t *pent )
 {
 	const char *cn;
-	if( !s_worldPrecache || !pent || !pent->v.classname )
-		return 1;
-	cn = STRING( pent->v.classname );
-	if( cn && !strcmp( cn, "worldspawn" ) )
+
+	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "";
+	if( cn && !strcmp( cn, "worldspawn" ) && !s_worldPrecache )
+	{
+		s_worldPasses++;
+		if( s_worldPasses > 1 )
+		{
+			char line[160];
+			s_dropPass = 1;
+			snprintf( line, sizeof( line ),
+				"efw: drop duplicate entity lump pass=%d ents=%d\n",
+				s_worldPasses, NUMBER_OF_ENTITIES() );
+			EFW_LogLine( line );
+		}
+	}
+	if( s_dropPass && ( !cn || strcmp( cn, "player" ) ) )
+		return 0;
+	if( s_worldPrecache && cn && !strcmp( cn, "worldspawn" ) )
 		return 0;
 	return 1;
+}
+
+int EFW_RejectSpawn( edict_t *pent )
+{
+	const char *cn;
+
+	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "";
+	if( cn && !strcmp( cn, "player" ) )
+	{
+		s_dropPass = 0;
+		return 0;
+	}
+	if( !s_dropPass )
+		return 0;
+	s_dropped++;
+	if( s_dropped <= 6 || ( s_dropped % 50 ) == 0 )
+	{
+		char line[160];
+		snprintf( line, sizeof( line ), "efw: reject #%d ents=%d %s\n",
+			s_dropped, NUMBER_OF_ENTITIES(), cn && cn[0] ? cn : "?" );
+		EFW_LogLine( line );
+	}
+	return 1;
+}
+
+void EFW_OnServerActivate( void )
+{
+	char line[160];
+	s_dropPass = 0;
+	snprintf( line, sizeof( line ),
+		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d\n",
+		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses );
+	EFW_LogLine( line );
+}
+
+void EFW_OnServerDeactivate( void )
+{
+	s_worldPrecache = 0;
+	s_worldPrecacheDone = 0;
+	s_worldPasses = 0;
+	s_dropPass = 0;
+	s_dropped = 0;
+	s_precacheMap[0] = 0;
+	s_precacheSeenN = 0;
+	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
 }
 
 void EFW_WPrecache( void )
@@ -961,7 +1023,7 @@ void EFW_OnDispatchSpawn( edict_t *pent )
 	{
 		char line[160];
 		snprintf( line, sizeof( line ), "efw: spawn #%d ents=%d %s\n", s_n, used, cn ? cn : "?" );
-		if( s_n <= 12 || ( s_n % 25 ) == 0 || used >= 700
+		if( s_n <= 12 || ( s_n % 25 ) == 0 || ( used >= 700 && ( s_n % 25 ) == 0 )
 			|| ( cn && !strncmp( cn, "monster_", 8 ) )
 			|| ( cn && !strncmp( cn, "efw_", 4 ) )
 			|| ( cn && !strncmp( cn, "worldspawn", 10 ) ) )
