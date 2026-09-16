@@ -50,7 +50,7 @@ static int g_weaponMask;
 #define K_MOUSE2 108
 #endif
 
-#define EFW_VGUI_MAX 12
+#define EFW_VGUI_MAX 6 /* FUN_100c6d70 DAT_10134894..a8 — six CommandButton slots */
 struct EfwVguiBtn
 {
 	int x, y, w, h;

@@ -275,7 +275,6 @@ struct EfwPA
 	float lastTime;  /* +0x58 */
 	int index;       /* +0x5c */
 	int rarLock;     /* +0x60 */
-	float remainUntil;
 	int inited;
 };
 
@@ -330,7 +329,6 @@ void EFW_InitPA( void )
 	g_pa.lastTime = 0.0f;
 	g_pa.index = 0;
 	g_pa.rarLock = 0;
-	g_pa.remainUntil = 0.0f;
 	g_pa.inited = 1;
 	PRECACHE_SOUND( "Dingaling.wav" );
 }
@@ -338,32 +336,39 @@ void EFW_InitPA( void )
 void EFW_ThinkPA( void )
 {
 	float now;
-	float remain;
+	float elapsed;
 	const char *sample;
 	if( !g_pa.inited )
 		EFW_InitPA();
 	if( EFW_MapLevel() != 0 )
 		return;
 	now = gpGlobals->time;
-	remain = g_pa.remainUntil - now;
-	if( remain <= 0.5f && g_pa.timer > 5.0f )
+	elapsed = now - g_pa.lastTime;
+	if( elapsed <= 0.0f )
+	{
+		elapsed = gpGlobals->frametime;
+		if( elapsed <= 0.0f )
+			elapsed = 0.05f;
+	}
+	if( elapsed > 0.2f )
+		elapsed = 0.2f;
+	g_pa.timer += elapsed;
+	g_pa.lastTime = now;
+	/* FUN_100c7740: play when timer>5; rarLock uses slot 0 else slot[index+1]. */
+	if( g_pa.timer > 5.0f )
 	{
 		if( g_pa.rarLock == 1 )
 			sample = g_pa.slot[0].sample;
 		else
 			sample = g_pa.slot[g_pa.index + 1].sample;
 		EFW_PlayCue( sample );
+		EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
+			sample ? sample : "?", g_pa.rarLock, g_pa.index );
 		g_pa.timer = 0.0f;
 		g_pa.index++;
 		if( g_pa.index > 3 )
 			g_pa.index = 0;
-		g_pa.remainUntil = now + ( sample && strstr( sample, "callToPrayer" ) ? 8.0f : 4.0f );
 	}
-	if( g_pa.lastTime > 0.0f )
-		g_pa.timer += now - g_pa.lastTime;
-	else if( now > 0.0f )
-		g_pa.timer += now;
-	g_pa.lastTime = now;
 }
 
 void EFW_PALockRAR( void )

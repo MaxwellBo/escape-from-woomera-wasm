@@ -346,6 +346,7 @@ void EFW_AddKeyword( const char *word, int unlocked )
 	g_efw.keywords[g_efw.keywordCount][EFW_TOPIC_LEN - 1] = '\0';
 	g_efw.keywordUnlocked[g_efw.keywordCount] = unlocked ? 1 : 0;
 	g_efw.keywordCount++;
+	EFW_DebugPrint( ">>> keyword %s unlocked=%d", word, unlocked ? 1 : 0 );
 }
 
 int EFW_HasKeyword( const char *word )

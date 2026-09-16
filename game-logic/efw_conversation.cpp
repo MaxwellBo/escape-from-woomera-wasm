@@ -595,7 +595,7 @@ static int EFW_HtmlHasWep( CBasePlayer *pPlayer, int id )
 	return ( EFW_WeaponMask( pPlayer ) & ( 1 << ( id - 16 ) ) ) != 0;
 }
 
-#define EFW_HTML_VGUI_MAX 12
+#define EFW_HTML_VGUI_MAX 6 /* FUN_100c6d70 six Panel* slots */
 #define EFW_HTML_SW 640
 #define EFW_HTML_SH 480
 

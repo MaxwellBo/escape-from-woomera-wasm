@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll86`;
+    return `${url}?v=efw-dll87`;
   return url;
 }
 
@@ -78,6 +78,10 @@ function applyEfwVgui(text: string): boolean {
   if (parts.length < 5) return true;
   const [nx, ny, nw, nh, ...cmdParts] = parts;
   const cmd = cmdParts.join(' ');
+  if ([...layer.querySelectorAll('button')].some((b) => b.dataset.cmd === cmd
+    && b.style.left === `${(Number(nx) * 100).toFixed(2)}%`
+    && b.style.top === `${(Number(ny) * 100).toFixed(2)}%`))
+    return true;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.dataset.cmd = cmd;
