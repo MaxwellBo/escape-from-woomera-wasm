@@ -83,6 +83,68 @@ static HSPRITE EFW_LoadSpr( const char *path )
 	return SPR_Load( path );
 }
 
+/* FUN_10042140: client RegisterDefaults map at DAT_100baee8. */
+static const struct
+{
+	const char *target;
+	const char *display;
+} kClientDisplay[] = {
+	{ "efw_compound_gate_guard", "Gate Guard" },
+	{ "efw_electrician", "Electrician" },
+	{ "detainee", "Detainee" },
+	{ "detainee_queue", "Detainee in queue" },
+	{ NULL, NULL }
+};
+
+static const char *EFW_ClientDisplayName( const char *target )
+{
+	int i;
+	if( !target || !target[0] )
+		return target;
+	for( i = 0; kClientDisplay[i].target; i++ )
+	{
+		if( !stricmp( target, kClientDisplay[i].target ) )
+			return kClientDisplay[i].display;
+	}
+	return target;
+}
+
+static void EFW_ClientRegisterDefaults( void )
+{
+	gEngfuncs.Con_Printf( ">>> FUN_10042140 n=4 Gate Guard Electrician Detainee Detainee in queue\n" );
+}
+
+/* FUN_10044880: map name → 2=level3, 1=level2, 0=level1. */
+static int EFW_MapLevelFromName( void )
+{
+	const char *level;
+	const char *base;
+	int ml;
+	static int s_logged = -1;
+
+	level = gEngfuncs.pfnGetLevelName ? gEngfuncs.pfnGetLevelName() : NULL;
+	if( !level )
+		level = "";
+	base = strrchr( level, '/' );
+	if( !base )
+		base = strrchr( level, '\\' );
+	base = base ? base + 1 : level;
+	if( !base[0] )
+		return g_mapLevel;
+	if( strstr( base, "efw_prototype_level3" ) )
+		ml = 2;
+	else if( strstr( base, "efw_prototype_level2" ) )
+		ml = 1;
+	else
+		ml = 0;
+	if( ml != s_logged && base[0] )
+	{
+		s_logged = ml;
+		gEngfuncs.Con_Printf( ">>> FUN_10044880 level=%d %s\n", ml, base );
+	}
+	return ml;
+}
+
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
@@ -547,12 +609,15 @@ int CHudEfw::Init( void )
 	gHUD.AddHudElem( this );
 	gEngfuncs.Con_Printf( "efw: HUD_Init\n" );
 	EFW_LoadTextScheme();
+	EFW_ClientRegisterDefaults();
+	g_mapLevel = EFW_MapLevelFromName();
 	return 1;
 }
 
 int CHudEfw::VidInit( void )
 {
 	gEngfuncs.Con_Printf( "efw: HUD_VidInit\n" );
+	g_mapLevel = EFW_MapLevelFromName();
 	g_hDiary = 0;
 	g_hLogo = 0;
 	g_loadedPage = -1;
@@ -1123,7 +1188,7 @@ static void EFW_DrawInteractPrompt( void )
 		}
 		return;
 	}
-	name = g_scan[0].name[0] ? g_scan[0].name : "";
+	name = g_scan[0].name[0] ? EFW_ClientDisplayName( g_scan[0].name ) : "";
 	w = 240;
 	x = ScreenWidth / 2 - 120;
 	y = ScreenHeight - 25;
@@ -1562,6 +1627,8 @@ int CHudEfw::Draw( float flTime )
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 		return 1;
+
+	g_mapLevel = EFW_MapLevelFromName();
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	hope = (int)( g_hope + 0.5f );

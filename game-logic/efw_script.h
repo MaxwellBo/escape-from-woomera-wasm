@@ -43,7 +43,7 @@ typedef void (*EfwScript_FlexFn)( const char *msg ); /* FUN_100c1f20 yy_get_next
 
 void EfwScript_Clear( EfwScript *script );
 void EfwScript_SetErrorFn( EfwScript_ErrorFn fn ); /* FUN_100c2620 bison yyerror */
-void EfwScript_SetFlexFn( EfwScript_FlexFn fn ); /* FUN_100c1f20..2640 flex / FUN_100be970 */
+void EfwScript_SetFlexFn( EfwScript_FlexFn fn ); /* FUN_100c1dc0/2360/1f20..2640 / FUN_100be970 */
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );

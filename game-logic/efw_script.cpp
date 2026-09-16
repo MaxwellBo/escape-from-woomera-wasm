@@ -61,8 +61,11 @@ static void EfwYyError( const char *msg, int line )
 		printf( "ERROR: %s, line: %i\n", msg, line );
 }
 
-/* FUN_100c1f20 yy_buffer_state + scanner. PE max read is 0x2000. */
+/* FUN_100c1f20 yy_buffer_state + scanner. PE max read is 0x2000;
+   FUN_100c2360 / FUN_100c1e80 create-buffer size is 0x4000. */
 #define EFW_YY_READ_BUF 0x2000
+#define EFW_YY_BUF_SIZE 0x4000
+#define EFW_YY_SCANNER 0x74 /* FUN_100c1dc0 efwConversationFile */
 
 typedef struct EfwYyScan
 {
@@ -286,6 +289,35 @@ static void EfwFlex_DeleteBuffer( EfwYyScan *yy )
 	if( yy->own_buf && yy->ch_buf )
 		free( yy->ch_buf );
 	free( yy );
+}
+
+/* FUN_100c1dc0: operator_new(0x74) scanner, vtable PTR_FUN_100f7ed0. */
+static unsigned char *EfwFlex_NewScanner( void )
+{
+	unsigned char *obj;
+	char log[40];
+
+	obj = (unsigned char *)calloc( 1, EFW_YY_SCANNER );
+	if( !obj )
+		return NULL;
+	*(unsigned int *)obj = 0x100f7ed0; /* PTR_FUN_100f7ed0 */
+	*(int *)( obj + 0xc ) = 1;
+	*(int *)( obj + 0x3c ) = 1;
+	snprintf( log, sizeof( log ), ">>> FUN_100c1dc0" );
+	EfwFlexMsg( log );
+	return obj;
+}
+
+/* FUN_100c2360 / FUN_100c1e80: yy_create_buffer(size=0x4000) then switch. */
+static EfwYyScan *EfwFlex_Restart( int size )
+{
+	EfwYyScan *yy;
+	char log[48];
+
+	yy = EfwFlex_CreateBuffer( size );
+	snprintf( log, sizeof( log ), ">>> FUN_100c2360 size=%d", size );
+	EfwFlexMsg( log );
+	return yy;
 }
 
 /* FUN_100c2640 yylex wrapper (DAT_10132468[5]=yylval, vtable+0x14).
@@ -623,7 +655,8 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	EfwQuestion *q;
 	EfwReply *r;
 	int inUnwanted;
-	EfwYyScan yy;
+	EfwYyScan *yy;
+	unsigned char *scanner;
 	char *feedBuf;
 	int feedLen;
 	char scanLog[64];
@@ -638,47 +671,45 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	if( len < 0 )
 		len = (int)strlen( src );
 
-	/* FUN_100c1f20: copy the conversation through a flex input buffer
-	   (max 0x2000 per refill) before the Q/A line parser. */
-	memset( &yy, 0, sizeof( yy ) );
+	/* FUN_100c2660: operator_new(0x74) + FUN_100c1dc0, then
+	   FUN_100c2360 yy_create_buffer(0x4000). Refill max is 0x2000. */
+	scanner = EfwFlex_NewScanner();
+	yy = EfwFlex_Restart( EFW_YY_BUF_SIZE );
 	feedBuf = (char *)malloc( (size_t)len + 2 );
-	yy.ch_buf = (char *)malloc( EFW_YY_READ_BUF + 2 );
-	if( !feedBuf || !yy.ch_buf )
+	if( !feedBuf || !yy || !yy->ch_buf )
 	{
 		free( feedBuf );
-		free( yy.ch_buf );
+		EfwFlex_DeleteBuffer( yy );
+		free( scanner );
 		return 0;
 	}
-	yy.buf_size = EFW_YY_READ_BUF;
-	yy.n_chars = 0;
-	yy.c_buf_p = yy.ch_buf;
-	yy.src = src;
-	yy.src_end = src + len;
-	yy.fill_ok = 1;
-	yy.own_buf = 1;
+	yy->src = src;
+	yy->src_end = src + len;
+	yy->fill_ok = 1;
 	feedLen = 0;
 	for( ;; )
 	{
-		int act = EfwFlex_GetNextBuffer( &yy );
-		if( !yy.ch_buf )
+		int act = EfwFlex_GetNextBuffer( yy );
+		if( !yy->ch_buf )
 			break;
-		if( yy.n_chars > 0 )
+		if( yy->n_chars > 0 )
 		{
-			int chunk = yy.n_chars;
+			int chunk = yy->n_chars;
 			if( feedLen + chunk > len )
 				chunk = len - feedLen;
 			if( chunk > 0 )
 			{
-				memcpy( feedBuf + feedLen, yy.ch_buf, (size_t)chunk );
+				memcpy( feedBuf + feedLen, yy->ch_buf, (size_t)chunk );
 				feedLen += chunk;
 			}
 		}
-		if( act != 0 || yy.src >= yy.src_end )
+		if( act != 0 || yy->src >= yy->src_end )
 			break;
 	}
 	snprintf( scanLog, sizeof( scanLog ), ">>> FUN_100c1f20 n=%d", feedLen );
 	EfwFlexMsg( scanLog );
-	free( yy.ch_buf );
+	EfwFlex_DeleteBuffer( yy );
+	free( scanner );
 	feedBuf[feedLen] = '\0';
 
 	/* FUN_100c2640 yylex + FUN_100be970 yyparse over the refilled buffer. */
