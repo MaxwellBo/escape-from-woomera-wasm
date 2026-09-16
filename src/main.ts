@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll78`;
+    return `${url}?v=efw-dll79`;
   return url;
 }
 
@@ -302,17 +302,15 @@ function releaseConsoleToGame() {
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
 }
 
-let bootMenuDismissed = false;
-function dismissBootMenu() {
-  if (bootMenuDismissed)
+function holdBootConsole() {
+  if (consoleForPlaque)
     return;
-  bootMenuDismissed = true;
-  /* After HUD has already looped with ui_renderworld (dll76 n=481),
-     two toggleconsoles: key_menu → key_console → UI_SetActiveMenu(false).
-     Doing this on HUD n=1 (dll74/75) stopped the software present. */
+  /* Opening the console only switches key_dest. GameUI stays drawn, so
+     this matches the CHANGE_LEVEL plaque hold. dll74–77 doubled this
+     immediately into UI_SetActiveMenu(false) and the present died. */
   runEngineCmd('toggleconsole');
-  runEngineCmd('toggleconsole');
-  log('listen: double toggleconsole after world present (boot menu → game)');
+  consoleForPlaque = true;
+  log('listen: key_console after first HUD (boot menu still drawn)');
 }
 
 function dismissMenuAfterHud() {
@@ -488,15 +486,22 @@ function onServerActivateSeen() {
   }, 4000);
   setTimeout(() => {
     if (changeWatch) return;
-    if (consoleForPlaque)
-      releaseConsoleToGame();
-    /* First-map key_game still stops the software present even after
-       HUD n=361 (dll77). Leave libmenu + ui_renderworld on the boot map. */
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
     log('listen: r_norefresh 0 ui_renderworld 1 (soft world present)');
+    /* CHANGE_LEVEL already released on HUD. Boot map: open console
+       (menu still drawn) then 400ms later close it while ca_active —
+       the same two steps as pfnChangeLevel, with a gap so we do not
+       double-toggle in one Host_Frame (dll77). */
+    if (!consoleForPlaque)
+      holdBootConsole();
+    setTimeout(() => {
+      if (changeWatch) return;
+      if (consoleForPlaque)
+        releaseConsoleToGame();
+    }, 400);
   }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
@@ -1117,7 +1122,6 @@ async function boot() {
     listenReady = false;
     menuDismissed = false;
     consoleForPlaque = false;
-    bootMenuDismissed = false;
     setTimeout(() => {
       const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
       loadMap(bootMap, 'deferred after Host_Init');
