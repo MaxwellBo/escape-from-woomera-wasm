@@ -1149,6 +1149,7 @@ static void EFW_HostFwd( void )
 			EFW_GiveToNpc( g_efw.player, pEnt, wep );
 		else
 			EFW_DebugPrint( ">>> efw_Give (not found)" );
+		EFW_PatrolAlertAll();
 		return;
 	}
 	if( !strcmp( pcmd, "efw_UseWithMarker" ) )
