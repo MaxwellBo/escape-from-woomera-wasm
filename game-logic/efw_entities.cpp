@@ -160,6 +160,7 @@ void CRefugee::IdleThink( void )
 	Vector delta;
 	float dist;
 	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
+	static int s_idleLog;
 
 	// CRefugee::IdleThink 0x100c6440
 	pev->framerate = 1.0f;
@@ -168,13 +169,12 @@ void CRefugee::IdleThink( void )
 		return;
 	if( pev->health == 2.0f )
 	{
-		UTIL_SetSize( pev, g_vecZero, g_vecZero );
 		StudioFrameAdvance();
 		return;
 	}
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
-	if( pev->modelindex )
-		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
+	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
 	tn = STRING( pev->targetname );
 	pPlayer = EFW_Player();
 	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
@@ -183,12 +183,18 @@ void CRefugee::IdleThink( void )
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
 		pev->movetype = MOVETYPE_STEP;
+		if( ( s_idleLog <= 2 ) || ( ( s_walkTick % 0x52 ) == 0 ) )
+		{
+			s_idleLog++;
+			EFW_DebugPrint( "IdleThink %s mi=%d dist=%.0f tick=%d",
+				( tn && tn[0] ) ? tn : "?", pev->modelindex, dist, s_walkTick );
+		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
+			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
 			SetActivity( ACT_WALK );
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
-			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
 			{
 				char line[80];
 				snprintf( line, sizeof( line ), "now walking %s", ( tn && tn[0] ) ? tn : "?" );
