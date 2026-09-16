@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll47`;
+    return `${url}?v=efw-dll48`;
   return url;
 }
 
@@ -132,6 +132,8 @@ function log(text: string) {
   if (!normalized) return;
   if (normalized.includes('efw: ServerActivate'))
     onServerActivateSeen();
+  if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
+    resumeAfterFirstClientFrame();
   if (applyEfwVgui(normalized)) return;
   logLines++;
   logCount.textContent = String(logLines);
@@ -197,15 +199,25 @@ function runEngineCmd(cmd: string) {
   }
 }
 
+let resumedAfterClientFrame = false;
 function resumeEngineLoop() {
-  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void; pauseMainLoop?: () => void } } | undefined)?.Module;
+  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
   try {
-    /* resume() increments currentlyRunningMainloop and kills the active rAF
-       runner. Only call it when we know the loop was paused. */
-    void mod;
+    /* pause() kills the rAF runner. After the first ClientFrame the loop
+       is left paused, so resume() is what starts Host_Frame again. */
+    mod?.resumeMainLoop?.();
   } catch {
     /* ignore */
   }
+}
+
+function resumeAfterFirstClientFrame() {
+  if (resumedAfterClientFrame) return;
+  resumedAfterClientFrame = true;
+  log('listen: resumeMainLoop after first ClientFrame');
+  resumeEngineLoop();
+  setTimeout(() => resumeEngineLoop(), 250);
+  setTimeout(() => resumeEngineLoop(), 1000);
 }
 
 let startedMap = '';
@@ -241,12 +253,23 @@ function onServerActivateSeen() {
     runEngineCmd('status');
   }, 2000);
   setTimeout(() => {
-    runEngineCmd('host_clientloaded');
-    runEngineCmd('host_gameloaded');
+    runEngineCmd('host_clientloaded 1');
+    runEngineCmd('host_gameloaded 1');
+    resumeEngineLoop();
   }, 8000);
   setInterval(() => {
     runEngineCmd('pausable 0');
   }, 4000);
+  let pumps = 0;
+  const pumpTimer = setInterval(() => {
+    if (pumps < 80) {
+      runEngineCmd('efw_pump');
+      pumps++;
+    } else {
+      clearInterval(pumpTimer);
+    }
+    resumeEngineLoop();
+  }, 120);
 }
 
 /** Host console plus EFW AddServerCommand (EFW_HostFwd). Do not prefix
@@ -840,7 +863,6 @@ async function boot() {
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
     log('engine main loop started; +map is in Host_Init argv');
     canvas.focus();
-    resumeEngineLoop();
     startedMap = '';
     listenReady = false;
     setTimeout(() => {

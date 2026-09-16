@@ -825,6 +825,26 @@ static void EFW_HostFwd( void )
 		EFW_ClientCommand( e );
 }
 
+static void EFW_HostPump( void )
+{
+	static int n;
+	CBasePlayer *pPlayer;
+	char line[80];
+
+	n++;
+	EFW_StartFrame();
+	pPlayer = EFW_Player();
+	if( pPlayer )
+		EFW_PlayerPreThink( pPlayer );
+	if( n <= 8 || ( n % 30 ) == 1 )
+	{
+		snprintf( line, sizeof( line ), "efw: hostpump n=%d\n", n );
+		ALERT( at_error, "%s", line );
+		if( g_engfuncs.pfnServerPrint )
+			g_engfuncs.pfnServerPrint( line );
+	}
+}
+
 static void EFW_RegisterHostCmds( void )
 {
 	static int done;
@@ -842,6 +862,7 @@ static void EFW_RegisterHostCmds( void )
 	done = 1;
 	for( i = 0; cmds[i]; i++ )
 		g_engfuncs.pfnAddServerCommand( cmds[i], EFW_HostFwd );
+	g_engfuncs.pfnAddServerCommand( "efw_pump", EFW_HostPump );
 }
 
 void EFW_LinkUserMessages( void )
