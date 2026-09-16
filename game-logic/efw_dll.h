@@ -96,6 +96,8 @@ void EFW_AddDiary( int page, int mode ); /* 0x100c6890 */
 void EFW_FlagDiary( int page ); /* 0x100c6910 — flag by page number */
 int EFW_DiaryCount( void ); /* 0x100c6880 */
 void EFW_YyError( const char *msg, int line ); /* FUN_100c2620 bison yyerror */
+void EFW_FlexMsg( const char *msg ); /* FUN_100c1f20 flex refill / fatals */
+void EFW_VguiAssignSlots( void *p0, void *p1, void *p2, void *p3, void *p4, void *p5 ); /* FUN_100c6d70 */
 void EFW_AddKeyword( const char *word, int unlocked ); /* 0x100c3500 */
 int EFW_HasKeyword( const char *word ); /* 0x100c3430 — unlocked flag */
 void EFW_DebugPrint( const char *fmt, ... ); /* 0x100c80d0 */

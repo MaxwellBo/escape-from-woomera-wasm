@@ -73,6 +73,7 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 	if( !buf )
 		return NULL;
 	EfwScript_SetErrorFn( EFW_YyError );
+	EfwScript_SetFlexFn( EFW_FlexMsg );
 	EfwScript_Parse( &slot->script, scriptName, buf, length );
 	if( fromMalloc )
 		free( buf );

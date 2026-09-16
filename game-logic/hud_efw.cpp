@@ -85,6 +85,7 @@ static HSPRITE EFW_LoadSpr( const char *path )
 
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
+static void EFW_LoadTextScheme( void );
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 {
@@ -545,6 +546,7 @@ int CHudEfw::Init( void )
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
 	gEngfuncs.Con_Printf( "efw: HUD_Init\n" );
+	EFW_LoadTextScheme();
 	return 1;
 }
 
@@ -789,6 +791,85 @@ static void EFW_VguiSync( void )
 	fflush( stdout );
 	fflush( stderr );
 	gEngfuncs.Con_Printf( "efw: vgui buttons=%d\n", g_vguiN );
+}
+
+/* FUN_100352e0: load efw_textscheme.txt (Win32 VGUI SchemeFile).
+   Missing file → "Unable to find *_textscheme.txt" then Default Scheme / Arial / 17. */
+static void EFW_LoadTextScheme( void )
+{
+	char schemeName[32];
+	char fontName[48];
+	int fontSize = 17;
+	int r = 255, g = 255, b = 255, a = 255;
+	char line[192];
+	byte *raw;
+	char *pFile;
+	char token[256];
+	int haveScheme = 0;
+	int current = -1;
+
+	strncpy( schemeName, "Default Scheme", sizeof( schemeName ) - 1 );
+	schemeName[sizeof( schemeName ) - 1] = '\0';
+	strncpy( fontName, "Arial", sizeof( fontName ) - 1 );
+	fontName[sizeof( fontName ) - 1] = '\0';
+
+	raw = gEngfuncs.COM_LoadFile( "efw_textscheme.txt", 5, NULL );
+	if( !raw )
+	{
+		gEngfuncs.Con_Printf( "Unable to find *_textscheme.txt\n" );
+	}
+	else
+	{
+		pFile = (char *)raw;
+		pFile = gEngfuncs.COM_ParseFile( pFile, token );
+		while( pFile && token[0] )
+		{
+			char paramName[64];
+			char paramValue[64];
+			strncpy( paramName, token, sizeof( paramName ) - 1 );
+			paramName[sizeof( paramName ) - 1] = '\0';
+			pFile = gEngfuncs.COM_ParseFile( pFile, token );
+			if( !pFile || stricmp( token, "=" ) )
+			{
+				if( current < 0 )
+					gEngfuncs.Con_Printf( "error parsing font scheme text file at file start - expected '=', found '%s''\n", token );
+				else
+					gEngfuncs.Con_Printf( "error parsing font scheme text file at scheme '%s' - expected '=', found '%s''\n", schemeName, token );
+				break;
+			}
+			pFile = gEngfuncs.COM_ParseFile( pFile, token );
+			strncpy( paramValue, token, sizeof( paramValue ) - 1 );
+			paramValue[sizeof( paramValue ) - 1] = '\0';
+			if( !stricmp( paramName, "SchemeName" ) )
+			{
+				haveScheme = 1;
+				current++;
+				strncpy( schemeName, paramValue, sizeof( schemeName ) - 1 );
+				schemeName[sizeof( schemeName ) - 1] = '\0';
+			}
+			else if( current < 0 )
+			{
+				gEngfuncs.Con_Printf( "font scheme text file MUST start with a 'SchemeName'\n" );
+				break;
+			}
+			else if( !stricmp( paramName, "FontName" ) )
+			{
+				strncpy( fontName, paramValue, sizeof( fontName ) - 1 );
+				fontName[sizeof( fontName ) - 1] = '\0';
+			}
+			else if( !stricmp( paramName, "FontSize" ) )
+				fontSize = atoi( paramValue );
+			else if( !stricmp( paramName, "FgColor" ) )
+				sscanf( paramValue, "%d %d %d %d", &r, &g, &b, &a );
+			pFile = gEngfuncs.COM_ParseFile( pFile, token );
+		}
+		gEngfuncs.COM_FreeFile( raw );
+		(void)haveScheme;
+	}
+	gEngfuncs.Con_Printf( ">>> FUN_100352e0 scheme=%s font=%s size=%d\n", schemeName, fontName, fontSize );
+	snprintf( line, sizeof( line ), "EFWVGUI SCHEME %s\t%s\t%d\t%d,%d,%d,%d",
+		schemeName, fontName, fontSize, r, g, b, a );
+	EFW_VguiEmit( NULL, line );
 }
 
 static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )

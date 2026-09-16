@@ -873,6 +873,13 @@ int EFW_ClientCommand( edict_t *pEntity )
 		EfwScript_Parse( &dummy, "yyerror", "GARBAGE TOKEN\n", -1 );
 		return 1;
 	}
+	if( FStrEq( pcmd, "efw_flexfatal" ) )
+	{
+		/* FUN_100c1f20: PE fatal scanner strings (not a ClientCommand). */
+		EfwScript_SetFlexFn( EFW_FlexMsg );
+		EfwScript_FlexProbe();
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_diary_next" ) )
 	{
 		EFW_StepDiary( 1 );

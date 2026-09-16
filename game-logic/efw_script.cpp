@@ -2,6 +2,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void EfwCopy( char *dst, int dstSize, const char *src, int srcLen )
@@ -37,10 +38,16 @@ void EfwScript_Clear( EfwScript *script )
 }
 
 static EfwScript_ErrorFn s_errorFn;
+static EfwScript_FlexFn s_flexFn;
 
 void EfwScript_SetErrorFn( EfwScript_ErrorFn fn )
 {
 	s_errorFn = fn;
+}
+
+void EfwScript_SetFlexFn( EfwScript_FlexFn fn )
+{
+	s_flexFn = fn;
 }
 
 /* FUN_100c2620: bison yyerror → "ERROR: %s, line: %i". */
@@ -52,6 +59,183 @@ static void EfwYyError( const char *msg, int line )
 		s_errorFn( msg, line );
 	else
 		printf( "ERROR: %s, line: %i\n", msg, line );
+}
+
+/* FUN_100c1f20 yy_buffer_state + scanner. PE max read is 0x2000. */
+#define EFW_YY_READ_BUF 0x2000
+
+typedef struct EfwYyScan
+{
+	char *ch_buf;
+	int buf_size;
+	int n_chars;
+	char *c_buf_p;
+	const char *src;
+	const char *src_end;
+	int fill_ok;
+	int grow_fail;
+	int read_fail;
+	int buf_status; /* 2 = EOB/EOF like yy_buffer_status */
+	int own_buf;
+} EfwYyScan;
+
+static void EfwFlexMsg( const char *msg )
+{
+	if( !msg )
+		return;
+	if( s_flexFn )
+		s_flexFn( msg );
+	else
+		printf( "%s\n", msg );
+}
+
+static void EfwFlexFatal( const char *msg )
+{
+	EfwFlexMsg( msg );
+	EfwFlexMsg( ">>> FUN_100c1f20" );
+}
+
+/* FUN_100c1f20 yy_get_next_buffer. */
+static int EfwFlex_GetNextBuffer( EfwYyScan *yy )
+{
+	int number_to_move;
+	int num_to_read;
+	int n;
+	int ret;
+
+	if( !yy || !yy->ch_buf )
+		return 1;
+	/* PE: if (yy_ch_buf + yy_n_chars + 1 < yy_c_buf_p) */
+	if( yy->ch_buf + yy->n_chars + 1 < yy->c_buf_p )
+	{
+		EfwFlexFatal( "fatal flex scanner internal error--end of buffer missed" );
+		return 0;
+	}
+	if( !yy->fill_ok )
+		return ( yy->c_buf_p - yy->ch_buf != 1 ) + 1;
+
+	number_to_move = (int)( yy->c_buf_p - yy->ch_buf ) - 1;
+	if( number_to_move < 0 )
+		number_to_move = 0;
+	if( number_to_move > 0 )
+		memmove( yy->ch_buf, yy->c_buf_p - number_to_move, (size_t)number_to_move );
+
+	if( yy->buf_status == 2 )
+		yy->n_chars = 0;
+	else
+	{
+		num_to_read = yy->buf_size - number_to_move;
+		while( num_to_read <= 0 )
+		{
+			if( !yy->own_buf )
+				yy->ch_buf = NULL;
+			else
+			{
+				int new_size = yy->buf_size * 2;
+				if( new_size < 1 )
+					new_size = yy->buf_size + ( yy->buf_size >> 3 );
+				yy->buf_size = new_size;
+				if( yy->grow_fail )
+					yy->ch_buf = NULL;
+				else
+					yy->ch_buf = (char *)realloc( yy->ch_buf, (size_t)new_size + 2 );
+			}
+			if( !yy->ch_buf )
+			{
+				EfwFlexFatal( "fatal error - scanner input buffer overflow" );
+				return 0;
+			}
+			num_to_read = yy->buf_size - number_to_move;
+		}
+		if( num_to_read > EFW_YY_READ_BUF )
+			num_to_read = EFW_YY_READ_BUF;
+		if( yy->read_fail )
+		{
+			EfwFlexFatal( "input in flex scanner failed" );
+			return 0;
+		}
+		n = (int)( yy->src_end - yy->src );
+		if( n < 0 )
+		{
+			EfwFlexFatal( "input in flex scanner failed" );
+			return 0;
+		}
+		if( n > num_to_read )
+			n = num_to_read;
+		if( n > 0 )
+		{
+			memcpy( yy->ch_buf + number_to_move, yy->src, (size_t)n );
+			yy->src += n;
+		}
+		yy->n_chars = n;
+	}
+
+	if( yy->n_chars == 0 )
+	{
+		if( number_to_move == 0 )
+			ret = 1;
+		else
+		{
+			ret = 2;
+			yy->buf_status = 2;
+		}
+	}
+	else
+		ret = 0;
+
+	yy->n_chars += number_to_move;
+	yy->ch_buf[yy->n_chars] = 0;
+	yy->ch_buf[yy->n_chars + 1] = 0;
+	yy->c_buf_p = yy->ch_buf;
+	return ret;
+}
+
+void EfwScript_FlexProbe( void )
+{
+	EfwYyScan yy;
+	char stack[8];
+
+	memset( &yy, 0, sizeof( yy ) );
+	yy.ch_buf = stack;
+	yy.buf_size = 4;
+	yy.n_chars = 1;
+	yy.c_buf_p = stack + 8; /* past yy_ch_buf + n_chars + 1 */
+	yy.fill_ok = 1;
+	yy.own_buf = 0;
+	yy.src = "";
+	yy.src_end = yy.src;
+	EfwFlex_GetNextBuffer( &yy );
+
+	memset( &yy, 0, sizeof( yy ) );
+	{
+		char *hold = (char *)malloc( 8 );
+		if( hold )
+		{
+			yy.ch_buf = hold;
+			yy.buf_size = 1;
+			yy.n_chars = 4;
+			yy.c_buf_p = hold + 4; /* number_to_move=3 > buf_size */
+			yy.fill_ok = 1;
+			yy.own_buf = 1;
+			yy.grow_fail = 1;
+			yy.src = "x";
+			yy.src_end = yy.src + 1;
+			EfwFlex_GetNextBuffer( &yy );
+			free( hold );
+		}
+	}
+
+	memset( &yy, 0, sizeof( yy ) );
+	yy.ch_buf = stack;
+	yy.buf_size = 8;
+	yy.n_chars = 0;
+	yy.c_buf_p = stack;
+	yy.fill_ok = 1;
+	yy.own_buf = 0;
+	yy.read_fail = 1;
+	yy.src = "x";
+	yy.src_end = yy.src + 1;
+	EfwFlex_GetNextBuffer( &yy );
 }
 
 int EfwFlags_Has( const char *flags, const char *token )
@@ -171,6 +355,11 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	EfwQuestion *q;
 	EfwReply *r;
 	int inUnwanted;
+	EfwYyScan yy;
+	char *feedBuf;
+	int feedLen;
+	char scanLog[64];
+	int questions;
 
 	EfwScript_Clear( script );
 	if( name )
@@ -180,12 +369,55 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 		return 0;
 	if( len < 0 )
 		len = (int)strlen( src );
-	end = src + len;
+
+	/* FUN_100c1f20: copy the conversation through a flex input buffer
+	   (max 0x2000 per refill) before the Q/A line parser. */
+	memset( &yy, 0, sizeof( yy ) );
+	feedBuf = (char *)malloc( (size_t)len + 2 );
+	yy.ch_buf = (char *)malloc( EFW_YY_READ_BUF + 2 );
+	if( !feedBuf || !yy.ch_buf )
+	{
+		free( feedBuf );
+		free( yy.ch_buf );
+		return 0;
+	}
+	yy.buf_size = EFW_YY_READ_BUF;
+	yy.n_chars = 0;
+	yy.c_buf_p = yy.ch_buf;
+	yy.src = src;
+	yy.src_end = src + len;
+	yy.fill_ok = 1;
+	yy.own_buf = 1;
+	feedLen = 0;
+	for( ;; )
+	{
+		int act = EfwFlex_GetNextBuffer( &yy );
+		if( !yy.ch_buf )
+			break;
+		if( yy.n_chars > 0 )
+		{
+			int chunk = yy.n_chars;
+			if( feedLen + chunk > len )
+				chunk = len - feedLen;
+			if( chunk > 0 )
+			{
+				memcpy( feedBuf + feedLen, yy.ch_buf, (size_t)chunk );
+				feedLen += chunk;
+			}
+		}
+		if( act != 0 || yy.src >= yy.src_end )
+			break;
+	}
+	snprintf( scanLog, sizeof( scanLog ), ">>> FUN_100c1f20 n=%d", feedLen );
+	EfwFlexMsg( scanLog );
+	free( yy.ch_buf );
+	feedBuf[feedLen] = '\0';
+
+	p = feedBuf;
+	end = feedBuf + feedLen;
 	inUnwanted = 0;
 	q = NULL;
 	lineNo = 0;
-
-	p = src;
 	while( p < end )
 	{
 		lineLen = 0;
@@ -273,7 +505,9 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	}
 
 	(void)i;
-	return script->questionCount;
+	questions = script->questionCount;
+	free( feedBuf );
+	return questions;
 }
 
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic )

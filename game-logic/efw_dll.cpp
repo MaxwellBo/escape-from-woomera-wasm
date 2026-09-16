@@ -13,6 +13,7 @@
 
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern int gmsgTextMsg;
@@ -76,6 +77,67 @@ void EFW_YyError( const char *msg, int line )
 	/* FUN_100c2620 bison yyerror. Format at 0x1011c610. */
 	EFW_DebugPrint( "ERROR: %s, line: %i", msg ? msg : "parse error", line );
 	EFW_DebugPrint( ">>> FUN_100c2620" );
+}
+
+void EFW_FlexMsg( const char *msg )
+{
+	/* FUN_100c1f20 yy_get_next_buffer strings at 0x1011c568/53c/51c. */
+	EFW_DebugPrint( "%s", msg ? msg : "" );
+}
+
+/* FUN_100c6d70: DAT_10134894..a8 — six CommandButton* slots.
+   Dtor-walk each occupied Panel* (virtual dtor(1)), zero, then assign. */
+#define EFW_PANEL_SLOTS 6
+static void *g_panelSlots[EFW_PANEL_SLOTS]; /* DAT_10134894 */
+
+void EFW_VguiAssignSlots( void *p0, void *p1, void *p2, void *p3, void *p4, void *p5 )
+{
+	void *in[EFW_PANEL_SLOTS];
+	int i;
+	int n = 0;
+
+	in[0] = p0;
+	in[1] = p1;
+	in[2] = p2;
+	in[3] = p3;
+	in[4] = p4;
+	in[5] = p5;
+	for( i = 0; i < EFW_PANEL_SLOTS; i++ )
+	{
+		if( g_panelSlots[i] )
+		{
+			free( g_panelSlots[i] );
+			g_panelSlots[i] = NULL;
+		}
+	}
+	for( i = 0; i < EFW_PANEL_SLOTS; i++ )
+	{
+		g_panelSlots[i] = in[i];
+		if( in[i] )
+			n++;
+	}
+	EFW_DebugPrint( ">>> FUN_100c6d70 n=%d", n );
+}
+
+/* FUN_100b9990: operator_new(0x14) CommandButton wrapper, vtable DAT_100f705c. */
+struct EfwCmdBtn
+{
+	void *vtable;
+	void *player;
+	void *question;
+	void *node;
+	void *script;
+};
+
+static void *EFW_NewCmdBtn( CBasePlayer *pPlayer, int index )
+{
+	EfwCmdBtn *b = (EfwCmdBtn *)calloc( 1, sizeof( EfwCmdBtn ) );
+	if( !b )
+		return NULL;
+	b->vtable = (void *)0x100f705c;
+	b->player = pPlayer;
+	b->question = (void *)(long)( index + 1 );
+	return b;
 }
 
 int EFW_FStrEq( const char *a, const char *b )
@@ -531,6 +593,8 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 	EfwDllState *st = EFW_Dll();
 	if( !pPlayer )
 		return;
+	/* FUN_100c6e60: FUN_100c6d70(0,0,0,0,0,0) before rebuilding slots. */
+	EFW_VguiAssignSlots( NULL, NULL, NULL, NULL, NULL, NULL );
 	EFW_SendEfwShow( pPlayer, 0xff, NULL );
 	if( ( !title || !title[0] ) && nLines <= 0 )
 		return;
@@ -569,6 +633,14 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		EFW_SendEfwShowChunks( pPlayer, i + 1, lines[i] ? lines[i] : "" );
 	}
 	EFW_DebugPrint( ">>> EFWShow lines=%d %s", nLines, st->menuTitle[0] ? st->menuTitle : "" );
+	{
+		/* FUN_100b9990: after ShowMenu, store 6 CommandButton wrappers. */
+		void *btns[6];
+		memset( btns, 0, sizeof( btns ) );
+		for( i = 0; i < nLines && i < 6; i++ )
+			btns[i] = EFW_NewCmdBtn( pPlayer, i );
+		EFW_VguiAssignSlots( btns[0], btns[1], btns[2], btns[3], btns[4], btns[5] );
+	}
 	EFW_HtmlVguiSync();
 }
 
@@ -581,6 +653,8 @@ void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *
 
 void EFW_CloseMenu( CBasePlayer *pPlayer )
 {
+	/* FUN_100c7430 → ShowMenu(0, nulls) → FUN_100c6d70(0,0,0,0,0,0). */
+	EFW_VguiAssignSlots( NULL, NULL, NULL, NULL, NULL, NULL );
 	if( !pPlayer )
 		return;
 	EFW_SendEfwShow( pPlayer, 0xff, NULL );
@@ -948,7 +1022,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
-		"efw_yyerror", NULL
+		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
 	if( done )

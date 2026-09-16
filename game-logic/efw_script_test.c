@@ -31,8 +31,19 @@ static int expect_action( const EfwReply *r, int i, const char *want )
 	return 0;
 }
 
+static char s_flexCap[8][96];
+static int s_flexN;
 static char s_capMsg[64];
 static int s_capLine;
+
+static void capture_flex( const char *msg )
+{
+	if( s_flexN < 8 && msg )
+	{
+		snprintf( s_flexCap[s_flexN], sizeof( s_flexCap[0] ), "%s", msg );
+		s_flexN++;
+	}
+}
 
 static void capture_yyerror( const char *msg, int line )
 {
@@ -102,6 +113,32 @@ int main( void )
 		}
 		else
 			printf( "ERROR: %s, line: %i\n", s_capMsg, s_capLine );
+	}
+
+	{
+		int i;
+		int gotMiss = 0, gotOv = 0, gotIn = 0;
+		s_flexN = 0;
+		EfwScript_SetFlexFn( capture_flex );
+		EfwScript_FlexProbe();
+		EfwScript_SetFlexFn( NULL );
+		for( i = 0; i < s_flexN; i++ )
+		{
+			if( strstr( s_flexCap[i], "end of buffer missed" ) )
+				gotMiss = 1;
+			if( strstr( s_flexCap[i], "scanner input buffer overflow" ) )
+				gotOv = 1;
+			if( strstr( s_flexCap[i], "input in flex scanner failed" ) )
+				gotIn = 1;
+		}
+		if( !gotMiss || !gotOv || !gotIn )
+		{
+			printf( "FUN_100c1f20 missing fatals miss=%d ov=%d in=%d n=%d\n",
+				gotMiss, gotOv, gotIn, s_flexN );
+			fail++;
+		}
+		else
+			printf( "fatal flex scanner internal error--end of buffer missed\n" );
 	}
 
 	if( fail )

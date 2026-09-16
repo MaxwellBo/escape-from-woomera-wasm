@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll98`;
+    return `${url}?v=efw-dll99`;
   return url;
 }
 
@@ -57,6 +57,25 @@ function applyEfwVgui(text: string): boolean {
   if (msg === 'EFWVGUI CLR') {
     layer.innerHTML = '';
     layer.hidden = true;
+    return true;
+  }
+  if (msg.startsWith('EFWVGUI SCHEME ')) {
+    /* FUN_100352e0: Default Scheme / Arial / 17 / FgColor 255 255 255 255 */
+    const rest = msg.slice('EFWVGUI SCHEME '.length);
+    const parts = rest.split('\t');
+    const font = parts[1] || 'Arial';
+    const size = Number(parts[2] || 17);
+    const rgba = (parts[3] || '255,255,255,255').split(',').map((n) => Number(n));
+    layer.dataset.scheme = parts[0] || 'Default Scheme';
+    layer.dataset.font = font;
+    layer.style.fontFamily = `${font}, Helvetica, sans-serif`;
+    layer.style.fontSize = `${size}px`;
+    layer.style.color = `rgba(${rgba[0] || 255}, ${rgba[1] || 255}, ${rgba[2] || 255}, ${(rgba[3] ?? 255) / 255})`;
+    for (const btn of layer.querySelectorAll('button')) {
+      btn.style.fontFamily = layer.style.fontFamily;
+      btn.style.fontSize = layer.style.fontSize;
+      btn.style.color = layer.style.color;
+    }
     return true;
   }
   if (msg.startsWith('EFWVGUI HOPE ')) {
@@ -94,6 +113,11 @@ function applyEfwVgui(text: string): boolean {
   btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
   btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
   btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+  if (layer.dataset.font) {
+    btn.style.fontFamily = layer.style.fontFamily;
+    btn.style.fontSize = layer.style.fontSize;
+    btn.style.color = layer.style.color;
+  }
   btn.addEventListener('pointerdown', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
@@ -325,6 +349,19 @@ function applyHopeHud(text: string): boolean {
 }
 
 function applyClockHud(text: string): boolean {
+  const scheme = text.match(/>>> FUN_100352e0 scheme=(.+) font=(.+) size=(\d+)/);
+  if (scheme) {
+    const layer = document.getElementById('efw-vgui');
+    if (layer) {
+      const font = scheme[2].trim();
+      const size = Number(scheme[3]);
+      layer.dataset.scheme = scheme[1].trim();
+      layer.dataset.font = font;
+      layer.style.fontFamily = `${font}, Helvetica, sans-serif`;
+      layer.style.fontSize = `${size}px`;
+      layer.style.color = 'rgb(255, 255, 255)';
+    }
+  }
   const m = text.match(/>>> FUN_1001db00 clock=(.+) fade=([\d.]+) logo=(\d+)/);
   if (!m) return false;
   const el = document.getElementById('efw-clock');

@@ -39,12 +39,15 @@ typedef struct
 } EfwScript;
 
 typedef void (*EfwScript_ErrorFn)( const char *msg, int line );
+typedef void (*EfwScript_FlexFn)( const char *msg ); /* FUN_100c1f20 yy_get_next_buffer */
 
 void EfwScript_Clear( EfwScript *script );
 void EfwScript_SetErrorFn( EfwScript_ErrorFn fn ); /* FUN_100c2620 bison yyerror */
+void EfwScript_SetFlexFn( EfwScript_FlexFn fn ); /* FUN_100c1f20 flex fatals / refill */
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );
+void EfwScript_FlexProbe( void ); /* FUN_100c1f20: hit PE fatal scanner strings */
 
 #ifdef __cplusplus
 }
