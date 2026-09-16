@@ -68,6 +68,8 @@ void EFW_SetPause( int on )
 	}
 	if( on )
 		EFW_DebugPrint( "efw_pause 1" );
+	else
+		EFW_DebugPrint( "efw_pause 0" );
 }
 
 static char s_queuedMap[64];

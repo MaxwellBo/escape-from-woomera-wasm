@@ -202,10 +202,15 @@ static void EFW_OpenStoryboard( int code )
 		return;
 	}
 	g_hStory = EFW_LoadSpr( spr );
+	/* FUN_10048590: storyboard Panel ctor ClientCmd efw_pause 1. */
+	gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
 }
 
 static void EFW_DismissStoryboard( void )
 {
+	/* FUN_100485d0: storyboard InputSignal ClientCmd efw_pause 0, then
+	   the stored changelevel string. */
+	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
 	if( g_storyChange[0] )
 	{
 		char buf[80];
@@ -412,8 +417,11 @@ static int EFW_Project( float wx, float wy, float wz, int *sx, int *sy )
 		{
 			*sx = (int)( XPROJECT( screen[0] ) );
 			*sy = (int)( YPROJECT( screen[1] ) );
-			if( *sx >= 8 && *sy >= 8 && *sx <= ScreenWidth - 8 && *sy <= ScreenHeight - 8 )
-				return 1;
+			/* FUN_10044f70: drop CommandButtons within 90px of any edge. */
+			if( *sx <= 90 || *sy <= 90
+				|| *sx >= ScreenWidth - 90 || *sy >= ScreenHeight - 90 )
+				return 0;
+			return 1;
 		}
 	}
 
@@ -437,7 +445,9 @@ static int EFW_Project( float wx, float wy, float wz, int *sx, int *sy )
 	py = ( delta[0] * up[0] + delta[1] * up[1] + delta[2] * up[2] ) / z;
 	*sx = (int)( ScreenWidth * 0.5f + px * ScreenWidth * 0.5f );
 	*sy = (int)( ScreenHeight * 0.5f - py * ScreenWidth * 0.5f );
-	if( *sx < 8 || *sy < 8 || *sx > ScreenWidth - 8 || *sy > ScreenHeight - 8 )
+	/* FUN_10044f70: drop CommandButtons within 90px of any edge, then
+	   clamp the rest into the 180px inset (EFW_VguiAdd). */
+	if( *sx <= 90 || *sy <= 90 || *sx >= ScreenWidth - 90 || *sy >= ScreenHeight - 90 )
 		return 0;
 	return 1;
 }
@@ -672,12 +682,8 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 					s->name[0] ? s->name : "?", x, y, s->type );
 			EFW_BuildVgui( s, x, y );
 		}
-		else
-		{
-			x = 200;
-			y = ScreenHeight - 32 * ( g_scanCount - i ) - 24;
-			EFW_BuildVgui( s, x, y );
-		}
+		/* FUN_10044f70 returns without creating CommandButtons when the
+		   projection misses or sits in the 90px edge band. */
 	}
 	for( i = 0; i < g_vguiN; i++ )
 	{

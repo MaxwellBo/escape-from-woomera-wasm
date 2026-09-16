@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll88`;
+    return `${url}?v=efw-dll89`;
   return url;
 }
 
@@ -130,13 +130,26 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
   0x52: { title: 'Help' },
 };
 let storyNext = '';
+let storyPaused = false;
+
+function storyboardPauses(code: number): boolean {
+  /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu. */
+  return code === 0x3f || code === 0x43 || (code >= 0x46 && code <= 0x52 && code !== 0x48);
+}
 
 function dismissEfwStory() {
   const layer = document.getElementById('efw-story');
   if (layer)
     layer.hidden = true;
   const next = storyNext;
+  const paused = storyPaused;
   storyNext = '';
+  storyPaused = false;
+  /* FUN_100485d0: efw_pause 0, then stored changelevel. */
+  if (paused) {
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 0');
+  }
   if (next) {
     log(`> ${next} (storyboard dismiss)`);
     runEngineCmd('pausable 0');
@@ -158,6 +171,11 @@ function showEfwStory(code: number, fallback?: string) {
   text.textContent = title;
   storyNext = spec?.next || '';
   layer.hidden = false;
+  if (storyboardPauses(code)) {
+    storyPaused = true;
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 1');
+  }
   if (document.pointerLockElement)
     document.exitPointerLock();
   log(`efw: storyboard 0x${code.toString(16)}`);
