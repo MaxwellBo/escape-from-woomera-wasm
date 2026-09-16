@@ -243,13 +243,17 @@ void CRefugee::Spawn( void )
 	   WASM SET_MODEL/PRECACHE of detainee studios stalls ED_LoadFromFile;
 	   apply the PE names after ServerActivate via EFW_StartFrame. */
 	ALERT( at_error, "efw: refugee Spawn enter defer=%d\n", EFW_DeferStudio() );
+	EFW_EnginePrint( EFW_DeferStudio()
+		? "efw: refugee Spawn enter defer=1\n"
+		: "efw: refugee Spawn enter defer=0\n" );
 	if( !EFW_DeferStudio() )
 		Precache();
 	tn = STRING( pev->targetname );
 	pev->movetype = MOVETYPE_STEP;
-	pev->solid = SOLID_BBOX;
+	pev->solid = EFW_DeferStudio() ? SOLID_NOT : SOLID_BBOX;
 	pev->takedamage = DAMAGE_YES;
-	pev->flags |= FL_MONSTER;
+	if( !EFW_DeferStudio() )
+		pev->flags |= FL_MONSTER;
 	pev->health = 80.0f;
 	pev->gravity = 1.0f;
 
@@ -282,7 +286,8 @@ void CRefugee::Spawn( void )
 
 	EFW_SetVisibleModel( this, model );
 	/* FUN_100c6040 hardcodes this hull; MonsterInit is stock HL, not in the PE Spawn. */
-	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+	if( !EFW_DeferStudio() )
+		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 	g_refugeeCount++;
 	ALERT( at_error, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ),

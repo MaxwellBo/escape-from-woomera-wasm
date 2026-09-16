@@ -948,6 +948,11 @@ static void EFW_LogLine( const char *line )
 		g_engfuncs.pfnServerPrint( line );
 }
 
+void EFW_EnginePrint( const char *line )
+{
+	EFW_LogLine( line );
+}
+
 int EFW_DeferStudio( void )
 {
 	return s_deferStudio;
@@ -981,6 +986,8 @@ void EFW_StartFrame( void )
 		if( !strstr( model, ".mdl" ) )
 			continue;
 		SET_MODEL( pent, model );
+		pent->v.solid = SOLID_BBOX;
+		pent->v.flags |= FL_MONSTER;
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
@@ -1087,6 +1094,13 @@ int EFW_ShouldSpawn( edict_t *pent )
 	{
 		s_skipThis = 1;
 		return 0;
+	}
+	if( !strncmp( cn, "monster_", 8 ) )
+	{
+		char line[160];
+		snprintf( line, sizeof( line ), "efw: will Spawn %s seen=%d defer=%d\n",
+			cn, s_seenN, s_deferStudio );
+		EFW_LogLine( line );
 	}
 	EFW_SpawnRemember( pent, cn );
 	return 1;

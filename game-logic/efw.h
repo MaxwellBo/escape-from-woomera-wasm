@@ -40,6 +40,7 @@ void EFW_OnServerActivate( void );
 void EFW_OnServerDeactivate( void );
 int EFW_DeferStudio( void ); /* skip SET_MODEL during ED_LoadFromFile (WASM stall) */
 void EFW_StartFrame( void ); /* apply one deferred studio model per frame */
+void EFW_EnginePrint( const char *line );
 #endif
 
 /* FUN_100c43b0 table 0x100f81e0: Pliers, Lever, Branch, MobilePhone, IDTag, Red, Green, Blue, Powder. */
