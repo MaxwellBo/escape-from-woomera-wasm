@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll75`;
+    return `${url}?v=efw-dll76`;
   return url;
 }
 
@@ -295,15 +295,14 @@ function releaseConsoleToGame() {
 }
 
 function dismissMenuAfterHud() {
-  if (consoleForPlaque) {
-    releaseConsoleToGame();
+  if (!consoleForPlaque)
     return;
-  }
-  /* Boot menu was VidInit'd with CL_IsActive false (no Resume). Two
-     toggleconsoles: key_menu → key_console → UI_SetActiveMenu(false). */
-  runEngineCmd('toggleconsole');
-  runEngineCmd('toggleconsole');
-  log('listen: double toggleconsole after first HUD (boot menu → game)');
+  /* First-map double toggleconsole (dll74/75) put key_game during the
+     first ClientFrames and the software present stopped returning, so
+     authentic CHANGE_LEVEL never reached SV_ExecChangeLevel. Leave the
+     boot menu up (ui_renderworld composites the BSP) until after a
+     chapter change, when HUD is already looping. */
+  releaseConsoleToGame();
 }
 
 function resumeAfterFirstClientFrame() {
