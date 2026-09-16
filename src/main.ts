@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll62`;
+    return `${url}?v=efw-dll63`;
   return url;
 }
 
@@ -331,25 +331,32 @@ function loadMap(name: string, reason: string) {
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
-  /* Only pfnChangeLevel (PE ClientCommand). Console `changelevel` is
-     SV_ChangeLevel_f and fights COM_ChangeLevel: Host RUNFRAME notices
-     nextstate, SCR_BeginLoadingPlaque (pauses rAF), then the *next*
-     COM_Frame runs SV_ExecChangeLevel. A second command plus resume()
-     during that Host_Frame aborts the load. */
-  runEngineCmd(`efw_changelevel ${name}`);
-  const kick = (ms: number) => {
+  runEngineCmd('sv_validate_changelevel');
+  /* Xash drops CHANGE_LEVEL when sv.framecount < 15 if validate is on.
+     Pump COM_Frames first so the queue is accepted, then pfnChangeLevel
+     only (no console `changelevel`). */
+  const kick = (ms: number, tag: string) => {
     setTimeout(() => {
       if (listenReady)
         return;
       lastResumeMs = 0;
-      log(`listen: CHANGE_LEVEL kick resume t=${ms}ms`);
+      log(`listen: CHANGE_LEVEL kick resume ${tag} t=${ms}ms`);
       resumeEngineLoop();
     }, ms);
   };
-  /* 80ms: finish RUNFRAME → plaque. 400ms: unpause into SV_ExecChangeLevel.
-     Do not resume while Exec is loading the BSP. */
-  kick(80);
-  kick(400);
+  kick(0, 'pump0');
+  kick(400, 'pump1');
+  kick(900, 'pump2');
+  kick(1400, 'pump3');
+  setTimeout(() => {
+    if (listenReady)
+      return;
+    log(`listen: pfnChangeLevel ${name}`);
+    runEngineCmd('sv_validate_changelevel 0');
+    runEngineCmd(`efw_changelevel ${name}`);
+    kick(80, 'plaque');
+    kick(500, 'exec');
+  }, 1500);
   if (changeWatch)
     clearTimeout(changeWatch);
   changeWatch = setTimeout(() => {
@@ -364,7 +371,7 @@ function loadMap(name: string, reason: string) {
       runEngineCmd('disconnect');
       setTimeout(() => loadMap(name, 'after disconnect'), 400);
     }, 400);
-  }, 16000);
+  }, 18000);
 }
 
 let lastActivateMs = 0;
@@ -388,6 +395,8 @@ function onServerActivateSeen() {
   runEngineCmd('r_drawviewmodel 0');
   runEngineCmd('r_drawparticles 0');
   runEngineCmd('r_norefresh 1');
+  runEngineCmd('sv_validate_changelevel 0');
+  runEngineCmd('sv_newunit 1');
   runEngineCmd('pausable 0');
   setTimeout(() => {
     runEngineCmd('developer 1');
@@ -886,6 +895,10 @@ async function boot() {
       '+r_drawparticles',
       '0',
       '+r_norefresh',
+      '1',
+      '+sv_validate_changelevel',
+      '0',
+      '+sv_newunit',
       '1',
       '+r_fullbright',
       '1',

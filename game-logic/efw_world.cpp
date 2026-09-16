@@ -79,7 +79,10 @@ void EFW_ChangeLevel( const char *map )
 	   STATE_CHANGELEVEL → SV_ExecChangeLevel on the next COM_Frame. */
 	CVAR_SET_FLOAT( "sv_validate_changelevel", 0.0f );
 	CVAR_SET_FLOAT( "sv_newunit", 1.0f );
-	EFW_DebugPrint( ">>> efw_changelevel %s time=%.2f", map, gpGlobals->time );
+	EFW_DebugPrint( ">>> efw_changelevel %s time=%.2f validate=%.0f newunit=%.0f",
+		map, gpGlobals->time,
+		CVAR_GET_FLOAT( "sv_validate_changelevel" ),
+		CVAR_GET_FLOAT( "sv_newunit" ) );
 	/* PE ClientCommand: pfnChangeLevel. Xash COM_ChangeLevel sets
 	   Host nextstate = STATE_CHANGELEVEL; Exec runs on the next COM_Frame. */
 	CHANGE_LEVEL( (char *)map, NULL );
