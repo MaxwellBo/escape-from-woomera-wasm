@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll59`;
+    return `${url}?v=efw-dll60`;
   return url;
 }
 
@@ -295,7 +295,9 @@ function onServerActivateSeen() {
   }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
   /* host_clientloaded starts the first 3D/overview ClientFrame, which
-     never returned after live ticks=1. Delay it until StartFrame is live. */
+     never returned after live ticks=1. Keep Host_Frame pumping without
+     it so pfnChangeLevel / STATE_CHANGELEVEL can run; arm it later. */
+  resumeEngineLoop();
   runEngineCmd('r_drawentities 0');
   runEngineCmd('r_drawworld 0');
   runEngineCmd('r_drawviewmodel 0');
@@ -305,23 +307,25 @@ function onServerActivateSeen() {
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
+    resumeEngineLoop();
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
     runEngineCmd('status');
   }, 2000);
   setTimeout(() => {
+    log('listen: host_clientloaded delayed for CHANGE_LEVEL window');
     runEngineCmd('host_clientloaded 1');
     runEngineCmd('host_gameloaded 1');
     resumeEngineLoop();
-  }, 8000);
+  }, 22000);
   setTimeout(() => {
     /* Software has no r_drawworld; leave r_norefresh off so the world
        can present once Host_Frame is ticking. */
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     log('listen: r_norefresh 0 (soft world present)');
-  }, 14000);
+  }, 28000);
   startHostPumps();
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
@@ -971,14 +975,15 @@ consoleForm.addEventListener('submit', (e) => {
 });
 
 document.getElementById('btn-talk')?.addEventListener('click', () => {
-  log('> talk (E / efw_Talk)');
+  log('> talk (efw_Talk)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
 });
 document.getElementById('btn-use')?.addEventListener('click', () => {
-  log('> use (efw_spider)');
+  log('> use (IN_USE / FUN_100c4af0)');
   runEngineCmd('pausable 0');
-  runGameCmd('efw_spider');
+  runGameCmd('efw_inuse');
+  runGameCmd('use');
 });
 document.getElementById('btn-give')?.addEventListener('click', () => {
   log('> give (efw_Give)');
@@ -1008,6 +1013,11 @@ document.addEventListener('keydown', (e) => {
     return;
   if (e.key >= '1' && e.key <= '9') {
     chooseTalkSlot(Number(e.key));
+  } else if (e.key === 'e' || e.key === 'E') {
+    log('> E (IN_USE)');
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_inuse');
+    runGameCmd('use');
   } else if (e.key === 'i' || e.key === 'I') {
     document.getElementById('btn-diary')?.click();
   }

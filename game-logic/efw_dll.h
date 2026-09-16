@@ -111,6 +111,10 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer ); /* 0x100c6740 + 0x100c6780 */
 void EFW_LoadAllConversations( void ); /* 0x100b8ff0 */
 void EFW_ThinkConversation( void ); /* 0x100c6c10 */
 void EFW_TalkScan( void ); /* 0x100c7830 */
+void EFW_HtmlVguiSync( void ); /* FUN_10044f70 stand-in: TalkScan → /efwvgui.txt */
+void EFW_PollMenuKeys( void ); /* FUN_100c6a60 → FUN_100c69a0 GetAsyncKeyState */
+void EFW_LatchInUse( void ); /* HostFwd +use when usercmds do not flush */
+void EFW_LatchMenuKey( int slot ); /* FUN_100c6a50 */
 void EFW_SendCntxt( void ); /* 0x100c7d30 */
 void EFW_Squark( const char *targetname, const char *text = 0, int flags = 0 ); /* 0x100ba040 */
 void EFW_GiveUnwanted( CBasePlayer *pPlayer, CBaseEntity *pNpc ); /* FUN_100c4550 → FUN_100b95a0 flag 8 */

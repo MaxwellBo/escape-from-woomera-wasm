@@ -48,7 +48,10 @@
 | 0x100c6890 | `efw_AddDiary` | append diary page; logs 'Diary active item added' |
 | 0x100c6980 | `efw_Player` | return DAT_10134888 (local CBasePlayer*) |
 | 0x100c6ad0 | `efw_ThinkHope` | hope -= dt*(1/12); clamp 0..100; at 0 fire menu 0x4d 'Run out of hope!' |
-| 0x100c6b60 | `efw_SendHudState` | pack hope / diary / conversation into EFWData slots |
+| 0x100c6b60 | `efw_SendHudState` | pack hope / diary / conversation into EFWData slots; calls FUN_100c6a60 |
+| 0x100c69a0 | `efw_PollTalkHotkeys` | GetAsyncKeyState('1'–'6') while talkActive; fire ShowMenu CommandButtons |
+| 0x100c6a50 | `efw_KeyDown` | GetAsyncKeyState(vk) & 1 |
+| 0x100c6a60 | `efw_PollMenuKeys` | if DAT_10134880 (talkActive) then FUN_100c69a0 |
 | 0x100c6c10 | `efw_ThinkConversation` | timeout + 'Conversation hidden, partner too far' |
 | 0x100c6e60 | `efw_ShowMenu` | GoldSrc ShowMenu with up to 7 lines; logs CONVERSATION (n messages) |
 | 0x100c80d0 | `efw_DebugPrint` | vsprintf + OutputDebugStringA |

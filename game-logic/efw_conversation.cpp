@@ -576,6 +576,199 @@ static void EFW_FillScan( int type, const char *name, const Vector &pos )
 	st->scanCount++;
 }
 
+/* FUN_100c43b0 table labels — same strings as client EFW_WepLabel. */
+static const char *EFW_HtmlWepLabel( int id )
+{
+	static const char *kNames[] = {
+		"pliers", "lever", "branch", "phone", "ID tag",
+		"red card", "green card", "blue card", "powder"
+	};
+	if( id < 16 || id > 24 )
+		return "item";
+	return kNames[id - 16];
+}
+
+static int EFW_HtmlHasWep( CBasePlayer *pPlayer, int id )
+{
+	if( id < 16 || id > 24 || !pPlayer )
+		return 0;
+	return ( EFW_WeaponMask( pPlayer ) & ( 1 << ( id - 16 ) ) ) != 0;
+}
+
+#define EFW_HTML_VGUI_MAX 12
+#define EFW_HTML_SW 640
+#define EFW_HTML_SH 480
+
+struct EfwHtmlVguiBtn
+{
+	int x, y, w, h;
+	char cmd[96];
+	char label[64];
+};
+
+static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const char *label, const char *cmd )
+{
+	EfwHtmlVguiBtn *b;
+	int w = 168;
+	int h = 28;
+	if( *n >= EFW_HTML_VGUI_MAX )
+		return;
+	if( x < 180 )
+		x = 180;
+	if( y < 180 )
+		y = 180;
+	if( x > EFW_HTML_SW - 180 )
+		x = EFW_HTML_SW - 180;
+	if( y > EFW_HTML_SH - 180 )
+		y = EFW_HTML_SH - 180;
+	y += ( *n ) * 32;
+	if( y > EFW_HTML_SH - 32 )
+		y = 32 + ( ( *n ) % 10 ) * 32;
+	b = &out[( *n )++];
+	b->w = w;
+	b->h = h;
+	b->x = x - w / 2;
+	b->y = y - h;
+	strncpy( b->label, label ? label : "", sizeof( b->label ) - 1 );
+	b->label[sizeof( b->label ) - 1] = '\0';
+	strncpy( b->cmd, cmd ? cmd : "", sizeof( b->cmd ) - 1 );
+	b->cmd[sizeof( b->cmd ) - 1] = '\0';
+}
+
+/* Match client EFW_BuildVgui / FUN_10044f70 CommandButton set. */
+static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CBasePlayer *pPlayer, int x, int y )
+{
+	char label[64];
+	char cmd[96];
+	if( s->type == 0 )
+	{
+		int id;
+		snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
+		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
+		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+		for( id = 16; id <= 24; id++ )
+		{
+			if( !EFW_HtmlHasWep( pPlayer, id ) )
+				continue;
+			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), s->name[0] ? s->name : "them" );
+			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
+			EFW_HtmlVguiAdd( out, n, x, y + 30, label, cmd );
+		}
+		return;
+	}
+	if( s->type == 1 )
+	{
+		if( !strcmp( s->name, "efw_IDTag_Position" ) )
+		{
+			if( EFW_HtmlHasWep( pPlayer, 20 ) )
+			{
+				snprintf( label, sizeof( label ), "Place %s on fence", EFW_HtmlWepLabel( 20 ) );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+			}
+			else
+			{
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
+				EFW_HtmlVguiAdd( out, n, x, y, "Take ID from fence", cmd );
+			}
+		}
+		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
+		{
+			if( EFW_HtmlHasWep( pPlayer, 16 ) )
+			{
+				snprintf( label, sizeof( label ), "Hide %s in bin", EFW_HtmlWepLabel( 16 ) );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+			}
+		}
+		else if( !strcmp( s->name, "efw_hiding_place" ) )
+			EFW_HtmlVguiAdd( out, n, x, y, "Hide under the building", "efw_HideUnderBuilding" );
+		else if( !strcmp( s->name, "efw_PliersMarker" ) )
+			EFW_HtmlVguiAdd( out, n, x, y, "Take pliers", "efw_PickupPliers" );
+		else if( !strcmp( s->name, "efw_cage_door" ) )
+		{
+			if( EFW_HtmlHasWep( pPlayer, 17 ) )
+			{
+				snprintf( label, sizeof( label ), "Force open cage door with %s", EFW_HtmlWepLabel( 17 ) );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+			}
+		}
+		else
+		{
+			snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
+			EFW_HtmlVguiAdd( out, n, x, y, s->name, cmd );
+		}
+		return;
+	}
+	if( s->type >= 100 )
+	{
+		int id = s->type - 100;
+		snprintf( label, sizeof( label ), "Pick up %s", EFW_HtmlWepLabel( id ) );
+		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
+		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+	}
+}
+
+void EFW_HtmlVguiSync( void )
+{
+	static char s_sig[512];
+	EfwDllState *st = EFW_Dll();
+	CBasePlayer *pPlayer = EFW_Player();
+	EfwHtmlVguiBtn btns[EFW_HTML_VGUI_MAX];
+	char sig[512];
+	char line[384];
+	int n = 0;
+	int i;
+	int used;
+	FILE *fp;
+
+	if( !pPlayer )
+		return;
+	memset( btns, 0, sizeof( btns ) );
+	for( i = 0; i < st->scanCount; i++ )
+	{
+		int x = 200;
+		int y = EFW_HTML_SH - 32 * ( st->scanCount - i ) - 24;
+		EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, x, y );
+	}
+	sig[0] = '\0';
+	used = 0;
+	for( i = 0; i < n; i++ )
+	{
+		used += snprintf( sig + used, sizeof( sig ) - used, "%s|", btns[i].cmd );
+		if( used >= (int)sizeof( sig ) - 1 )
+			break;
+	}
+	if( !strcmp( sig, s_sig ) )
+		return;
+	strncpy( s_sig, sig, sizeof( s_sig ) - 1 );
+	s_sig[sizeof( s_sig ) - 1] = '\0';
+	fp = fopen( "/efwvgui.txt", "w" );
+	EFW_EnginePrint( "EFWVGUI CLR\n" );
+	if( fp )
+		fprintf( fp, "EFWVGUI CLR\n" );
+	for( i = 0; i < n; i++ )
+	{
+		snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
+			(float)btns[i].x / (float)EFW_HTML_SW,
+			(float)btns[i].y / (float)EFW_HTML_SH,
+			(float)btns[i].w / (float)EFW_HTML_SW,
+			(float)btns[i].h / (float)EFW_HTML_SH,
+			btns[i].cmd, btns[i].label );
+		EFW_EnginePrint( line );
+		if( fp )
+			fputs( line, fp );
+	}
+	if( fp )
+	{
+		fflush( fp );
+		fclose( fp );
+	}
+	snprintf( line, sizeof( line ), "efw: vgui buttons=%d\n", n );
+	EFW_EnginePrint( line );
+}
+
 void EFW_SendCntxt( void )
 {
 	CBasePlayer *pPlayer = EFW_Player();
@@ -665,6 +858,9 @@ void EFW_TalkScan( void )
 		MESSAGE_END();
 	}
 	EFW_SendCntxt();
+	/* FUN_10044f70 CommandButtons live in client HUD_Redraw. When
+	   ClientFrame is stuck, emit the same prompts from TalkScan. */
+	EFW_HtmlVguiSync();
 }
 
 #endif

@@ -221,6 +221,8 @@ void EFW_SendHudState( void )
 		packed = ( EFW_WeaponMask( g_efw.player ) << 16 ) | ( active & 0xffff );
 		EFW_SetHudInt( 4, packed );
 	}
+	/* FUN_100c6b60 calls FUN_100c6a70 then FUN_100c6a60 (talk-menu hotkeys). */
+	EFW_PollMenuKeys();
 	if( gpGlobals->time - g_efw.hudRetry >= 0.1f )
 	{
 		g_efw.hudRetry = gpGlobals->time;
@@ -844,6 +846,18 @@ static void EFW_HostFwd( void )
 	ALERT( at_error, "%s", line );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( line );
+	if( pcmd && !strcmp( pcmd, "efw_inuse" ) )
+	{
+		int hit = 0;
+		if( e && !e->free && e->pvPrivateData )
+		{
+			hit = EFW_LookUse( pPlayer );
+			EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
+		}
+		else
+			EFW_LatchInUse();
+		return;
+	}
 	if( e && !e->free && e->pvPrivateData )
 		EFW_ClientCommand( e );
 }
@@ -877,7 +891,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
-		"efw_lookuse", "menuselect", "give", "drop", "use", NULL
+		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse", NULL
 	};
 	int i;
 	if( done )
@@ -1005,6 +1019,45 @@ static int s_waitPawn;
 static int s_thinkRestored;
 static int s_studioDelay;
 static int s_liveTicks;
+static int s_inUseLatch; /* HostFwd efw_inuse → PreThink IN_USE */
+static int s_menuKeyLatch; /* FUN_100c6a50 GetAsyncKeyState stand-in */
+
+void EFW_LatchInUse( void )
+{
+	s_inUseLatch = 1;
+}
+
+void EFW_LatchMenuKey( int slot )
+{
+	if( slot >= 1 && slot <= 9 )
+		s_menuKeyLatch = slot;
+}
+
+/* FUN_100c6a60: if FUN_100c7450 (talkActive), FUN_100c69a0 polls
+   GetAsyncKeyState(DAT_1011d134[i]) for slots 1..6 and fires the
+   matching ShowMenu CommandButton. WASM: impulse + HostFwd latch. */
+void EFW_PollMenuKeys( void )
+{
+	CBasePlayer *pPlayer;
+	int slot;
+
+	if( !g_efw.talkActive )
+		return;
+	pPlayer = EFW_Player();
+	if( !pPlayer )
+		return;
+	slot = s_menuKeyLatch;
+	if( slot < 1 || slot > 9 )
+	{
+		slot = pPlayer->pev->impulse;
+		if( slot < 1 || slot > 9 )
+			return;
+		pPlayer->pev->impulse = 0;
+	}
+	s_menuKeyLatch = 0;
+	EFW_DebugPrint( ">>> FUN_100c69a0 slot=%d", slot );
+	EFW_ChooseTalk( pPlayer, slot );
+}
 
 static void EFW_LogLine( const char *line )
 {
@@ -1110,6 +1163,10 @@ void EFW_StartFrame( void )
 		snprintf( line, sizeof( line ), "efw: StartFrame live ticks=%d\n", s_liveTicks );
 		EFW_LogLine( line );
 	}
+	/* FUN_100c6a60 also runs from StartFrame so HostPump can poll
+	   talk hotkeys while ClientFrame (and therefore HUD_Key_Event) is stuck. */
+	if( s_liveTicks >= 8 )
+		EFW_PollMenuKeys();
 	/* First live frames: do not SET_MODEL or unfreeze anyone. The 3D
 	   ClientFrame plus leftover STEP physics is what stalls Host_Frame. */
 	if( s_liveTicks < 45 )
@@ -1515,20 +1572,18 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 		return;
 	if( EFW_GetHudInt( 6 ) )
 		pPlayer->pev->movetype = MOVETYPE_NONE;
+	if( s_inUseLatch )
+	{
+		pPlayer->m_afButtonPressed |= IN_USE;
+		s_inUseLatch = 0;
+	}
 	/* FUN_100c4af0: PE has no callers; attach to IN_USE so look-use runs. */
 	if( pPlayer->m_afButtonPressed & IN_USE )
 	{
-		if( EFW_LookUse( pPlayer ) )
+		int hit = EFW_LookUse( pPlayer );
+		EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
+		if( hit )
 			pPlayer->m_afButtonPressed &= ~IN_USE;
-	}
-	if( g_efw.talkActive )
-	{
-		int slot = pPlayer->pev->impulse;
-		if( slot >= 1 && slot <= 9 )
-		{
-			EFW_ChooseTalk( pPlayer, slot );
-			pPlayer->pev->impulse = 0;
-		}
 	}
 	if( g_efw.lastTime != gpGlobals->time || !g_efw.inited )
 		EFW_SendHudState();
