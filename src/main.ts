@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll60`;
+    return `${url}?v=efw-dll61`;
   return url;
 }
 
@@ -95,6 +95,66 @@ function applyEfwVgui(text: string): boolean {
   return true;
 }
 
+/* FUN_10047830 VGUI storyboards: HTML Panel stand-in while HUD SPR cannot run. */
+const EFW_STORY: Record<number, { title: string; next?: string }> = {
+  0x3f: { title: 'You hide under the building until night falls.' },
+  0x43: { title: 'Night. You retrieve the pliers from the kitchen bin and wait in the hiding place.' },
+  0x46: { title: 'Isolation.', next: 'efw_changelevel efw_prototype_level2' },
+  0x47: { title: 'Help' },
+  0x48: { title: '' },
+  0x49: { title: 'Introduction' },
+  0x4a: { title: 'Introduction' },
+  0x4b: { title: 'Introduction' },
+  0x4c: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
+  0x4d: { title: 'Run out of hope!' },
+  0x4e: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
+  0x4f: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level2' },
+  0x50: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level3' },
+  0x51: { title: 'Isolation.' },
+  0x52: { title: 'Help' },
+};
+let storyNext = '';
+
+function dismissEfwStory() {
+  const layer = document.getElementById('efw-story');
+  if (layer)
+    layer.hidden = true;
+  const next = storyNext;
+  storyNext = '';
+  if (next) {
+    log(`> ${next} (storyboard dismiss)`);
+    runEngineCmd('pausable 0');
+    runGameCmd(next);
+  }
+}
+
+function showEfwStory(code: number, fallback?: string) {
+  if (code === 0x48)
+    return;
+  const spec = EFW_STORY[code];
+  const layer = document.getElementById('efw-story');
+  const text = document.getElementById('efw-story-text');
+  if (!layer || !text)
+    return;
+  const title = fallback || spec?.title;
+  if (!title)
+    return;
+  text.textContent = title;
+  storyNext = spec?.next || '';
+  layer.hidden = false;
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  log(`efw: storyboard 0x${code.toString(16)}`);
+}
+
+function applyEfwStory(text: string): boolean {
+  const m = />>> FailOrNarrate 0x([0-9a-fA-F]+)/.exec(text);
+  if (!m)
+    return false;
+  showEfwStory(parseInt(m[1], 16));
+  return false; /* still show the log line */
+}
+
 type WasmFS = {
   mkdir: (p: string) => void;
   writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
@@ -134,6 +194,7 @@ function log(text: string) {
     onServerActivateSeen();
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
     resumeAfterFirstClientFrame();
+  if (applyEfwStory(normalized)) return;
   if (applyEfwVgui(normalized)) return;
   logLines++;
   logCount.textContent = String(logLines);
@@ -200,11 +261,17 @@ function runEngineCmd(cmd: string) {
 }
 
 let resumedAfterClientFrame = false;
+let lastResumeMs = 0;
 function resumeEngineLoop() {
+  const now = Date.now();
+  /* resume() increments currentlyRunningMainloop and aborts the in-flight
+     Host_Frame. Do not call it from the 120ms pump or CHANGE_LEVEL never
+     finishes loading the next map. */
+  if (now - lastResumeMs < 1500)
+    return;
+  lastResumeMs = now;
   const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
   try {
-    /* pause() kills the rAF runner. After the first ClientFrame the loop
-       is left paused, so resume() is what starts Host_Frame again. */
     mod?.resumeMainLoop?.();
   } catch {
     /* ignore */
@@ -212,6 +279,7 @@ function resumeEngineLoop() {
 }
 
 function resumeAfterFirstClientFrame() {
+  if (changeWatch) return;
   if (resumedAfterClientFrame) return;
   resumedAfterClientFrame = true;
   log('listen: resumeMainLoop after first ClientFrame');
@@ -240,7 +308,6 @@ function startHostPumps() {
       clearInterval(pumpTimer);
       pumpTimer = null;
     }
-    resumeEngineLoop();
   }, 120);
 }
 
@@ -261,10 +328,13 @@ function loadMap(name: string, reason: string) {
   listenReady = false;
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
+  runEngineCmd('r_norefresh 1');
   runEngineCmd(`efw_changelevel ${name}`);
   runEngineCmd(`changelevel ${name}`);
+  /* One resume so Host_Frame can process STATE_CHANGELEVEL. Further
+     resume() calls abort that Host_Frame (map load > 120ms). */
+  lastResumeMs = 0;
   resumeEngineLoop();
-  startHostPumps();
   if (changeWatch)
     clearTimeout(changeWatch);
   changeWatch = setTimeout(() => {
@@ -273,12 +343,13 @@ function loadMap(name: string, reason: string) {
     log(`listen: CHANGE_LEVEL stalled, disconnect+map ${name}`);
     startedMap = '';
     runEngineCmd('disconnect');
+    lastResumeMs = 0;
     resumeEngineLoop();
     setTimeout(() => {
       runEngineCmd('disconnect');
       setTimeout(() => loadMap(name, 'after disconnect'), 400);
     }, 400);
-  }, 6000);
+  }, 12000);
 }
 
 let lastActivateMs = 0;
@@ -294,10 +365,9 @@ function onServerActivateSeen() {
     changeWatch = null;
   }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
-  /* host_clientloaded starts the first 3D/overview ClientFrame, which
-     never returned after live ticks=1. Keep Host_Frame pumping without
-     it so pfnChangeLevel / STATE_CHANGELEVEL can run; arm it later. */
-  resumeEngineLoop();
+  /* Client must be connected for pfnChangeLevel. Keep r_norefresh 1 so
+     the first ClientFrame returns; resume() is throttled so Host_Frame
+     can finish STATE_CHANGELEVEL. */
   runEngineCmd('r_drawentities 0');
   runEngineCmd('r_drawworld 0');
   runEngineCmd('r_drawviewmodel 0');
@@ -307,25 +377,25 @@ function onServerActivateSeen() {
   setTimeout(() => {
     runEngineCmd('developer 1');
     runEngineCmd('pausable 0');
-    resumeEngineLoop();
   }, 250);
   setTimeout(() => {
     log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
     runEngineCmd('status');
   }, 2000);
   setTimeout(() => {
-    log('listen: host_clientloaded delayed for CHANGE_LEVEL window');
+    if (changeWatch) return;
+    log('listen: host_clientloaded (r_norefresh 1)');
     runEngineCmd('host_clientloaded 1');
     runEngineCmd('host_gameloaded 1');
+    lastResumeMs = 0;
     resumeEngineLoop();
-  }, 22000);
+  }, 4000);
   setTimeout(() => {
-    /* Software has no r_drawworld; leave r_norefresh off so the world
-       can present once Host_Frame is ticking. */
+    if (changeWatch) return;
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     log('listen: r_norefresh 0 (soft world present)');
-  }, 28000);
+  }, 45000);
   startHostPumps();
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
@@ -974,6 +1044,15 @@ consoleForm.addEventListener('submit', (e) => {
   consoleInput.value = '';
 });
 
+document.getElementById('efw-story-dismiss')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  dismissEfwStory();
+});
+document.getElementById('efw-story')?.addEventListener('click', (ev) => {
+  if (ev.target === document.getElementById('efw-story'))
+    dismissEfwStory();
+});
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (efw_Talk)');
   runEngineCmd('pausable 0');
@@ -1011,6 +1090,13 @@ document.addEventListener('keydown', (e) => {
     return;
   if (e.repeat)
     return;
+  if (e.key === 'e' || e.key === 'E' || e.key === 'Escape' || e.key === 'Enter') {
+    const story = document.getElementById('efw-story');
+    if (story && !story.hidden) {
+      dismissEfwStory();
+      return;
+    }
+  }
   if (e.key >= '1' && e.key <= '9') {
     chooseTalkSlot(Number(e.key));
   } else if (e.key === 'e' || e.key === 'E') {
