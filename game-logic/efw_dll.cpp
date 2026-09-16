@@ -1112,8 +1112,31 @@ void EFW_WPrecache( void )
 	};
 	unsigned i;
 	extern void UTIL_PrecacheOtherWeapon( const char *szClassname );
+	static const char *kNpc[] = {
+		"models/DetaineeMaleT0.mdl",
+		"models/DetaineeMaleT1.mdl",
+		"models/DetaineeMaleT2.mdl",
+		"models/DetaineeMaleT3.mdl",
+		"models/DetaineeMaleT4.mdl",
+		"models/DetaineeMaleT5.mdl",
+		"models/DetaineeMaleT6.mdl",
+		"models/DetaineeMaleT7.mdl",
+		"models/DetaineeFemaleT0.mdl",
+		"models/DetaineeFemaleT1.mdl",
+		"models/DetaineeFemaleT2.mdl",
+		"models/Security.mdl",
+		"models/tradesman.mdl",
+		"models/barney.mdl",
+		"models/player.mdl",
+		"models/scientist.mdl"
+	};
 	for( i = 0; i < sizeof( kEfw ) / sizeof( kEfw[0] ); i++ )
 		UTIL_PrecacheOtherWeapon( kEfw[i] );
+	/* Load studio NPCs during CWorld::Precache so the first refugee SET_MODEL
+	   does not stall ED_LoadFromFile; WASM Host_Frame restarts the lump
+	   after that stall and never reaches markers. FUN_100c6000 list. */
+	for( i = 0; i < sizeof( kNpc ) / sizeof( kNpc[0] ); i++ )
+		PRECACHE_MODEL( (char *)kNpc[i] );
 }
 
 void EFW_OnDispatchSpawn( edict_t *pent )
@@ -1122,6 +1145,8 @@ void EFW_OnDispatchSpawn( edict_t *pent )
 	int used;
 	const char *cn;
 
+	if( s_mapLive == 0 && s_worldPasses == 0 )
+		s_n = 0;
 	s_n++;
 	used = NUMBER_OF_ENTITIES();
 	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "?";

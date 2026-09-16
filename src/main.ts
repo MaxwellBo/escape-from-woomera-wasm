@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll29`;
+    return `${url}?v=efw-dll30`;
   return url;
 }
 
@@ -128,13 +128,15 @@ function pollEfwVgui() {
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
+  if (normalized.includes('efw: ServerActivate'))
+    onServerActivateSeen();
   if (applyEfwVgui(normalized)) return;
   logLines++;
   logCount.textContent = String(logLines);
   logEl.textContent += normalized + '\n';
-  if (logLines > 2500) {
+  if (logLines > 8000) {
     const lines = logEl.textContent.split('\n');
-    logEl.textContent = lines.slice(lines.length - 2500).join('\n');
+    logEl.textContent = lines.slice(lines.length - 8000).join('\n');
   }
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -202,6 +204,7 @@ function resumeEngineLoop() {
 }
 
 let startedMap = '';
+let listenReady = false;
 function loadMap(name: string, reason: string) {
   if (startedMap === name) {
     log(`skip duplicate map ${name} (${reason})`);
@@ -210,6 +213,19 @@ function loadMap(name: string, reason: string) {
   startedMap = name;
   log(`> map ${name} (${reason})`);
   runEngineCmd(`map ${name}`);
+}
+
+function onServerActivateSeen() {
+  if (listenReady) return;
+  listenReady = true;
+  log('listen: ServerActivate — resume loop for local client signon');
+  setTimeout(() => {
+    runEngineCmd('pausable 0');
+    resumeEngineLoop();
+  }, 200);
+  setInterval(() => {
+    runEngineCmd('pausable 0');
+  }, 2000);
 }
 
 /** Host console, ClientCommand, and listen-server `cmd` forwarding. */
@@ -765,34 +781,15 @@ async function boot() {
     canvas.focus();
     resumeEngineLoop();
     startedMap = '';
+    listenReady = false;
     setTimeout(() => {
       loadMap('efw_prototype_level1', 'deferred after Host_Init');
     }, 1500);
-    setTimeout(() => {
-      runEngineCmd('pausable 0');
-      resumeEngineLoop();
-    }, 4000);
-    /* Listen-server join uses the loopback token. `connect 127.0.0.1`
-       is treated as a remote host and prints
-       "Server was killed due to connection to remote server". */
-    setTimeout(() => {
-      log('> connect localhost (listen-server loopback)');
-      runEngineCmd('connect localhost');
-      resumeEngineLoop();
-    }, 4500);
-    setTimeout(() => {
-      runEngineCmd('status');
-      resumeEngineLoop();
-    }, 6500);
-    setInterval(() => {
-      runEngineCmd('pausable 0');
-    }, 2000);
     setInterval(pollEfwVgui, 250);
     pollEfwVgui();
     document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) resumeEngineLoop();
+      if (!document.hidden && listenReady) resumeEngineLoop();
     });
-    setTimeout(resumeEngineLoop, 3000);
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
