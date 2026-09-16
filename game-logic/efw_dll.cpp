@@ -939,11 +939,56 @@ static void EFW_SpawnRemember( edict_t *pent, const char *cn )
 		s_refugees++;
 }
 
+static int s_deferStudio;
+
 static void EFW_LogLine( const char *line )
 {
 	ALERT( at_error, "%s", line );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( line );
+}
+
+int EFW_DeferStudio( void )
+{
+	return s_deferStudio;
+}
+
+void EFW_StartFrame( void )
+{
+	int i;
+	int maxEnts;
+
+	if( !s_mapLive )
+		return;
+	maxEnts = gpGlobals->maxEntities;
+	if( maxEnts > 1200 )
+		maxEnts = 1200;
+	for( i = 1; i < maxEnts; i++ )
+	{
+		edict_t *pent;
+		const char *model;
+
+		pent = INDEXENT( i );
+		if( !pent || pent->free )
+			continue;
+		if( pent->v.modelindex > 0 )
+			continue;
+		if( !pent->v.model )
+			continue;
+		model = STRING( pent->v.model );
+		if( !model || !model[0] || model[0] == '*' )
+			continue;
+		if( !strstr( model, ".mdl" ) )
+			continue;
+		SET_MODEL( pent, model );
+		{
+			char line[160];
+			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
+				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model );
+			EFW_LogLine( line );
+		}
+		return;
+	}
 }
 
 int EFW_PrecacheOnce( const char *szClassname )
@@ -1004,6 +1049,7 @@ void EFW_EndWorldPrecache( void )
 	EFW_LogLine( line );
 	s_worldPrecache = 0;
 	s_worldPrecacheDone = 1;
+	s_deferStudio = 1;
 }
 
 int EFW_ShouldSpawn( edict_t *pent )
@@ -1089,6 +1135,7 @@ void EFW_OnServerDeactivate( void )
 	s_dropped = 0;
 	s_mapLive = 0;
 	s_skipThis = 0;
+	s_deferStudio = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );

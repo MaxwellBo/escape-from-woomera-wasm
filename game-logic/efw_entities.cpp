@@ -34,6 +34,11 @@ static void EFW_SetVisibleModel( CBaseEntity *pEntity, const char *preferred )
 	for( i = 0; i < n; i++ )
 	{
 		PRECACHE_MODEL( (char *)choices[i] );
+		if( EFW_DeferStudio() )
+		{
+			pEntity->pev->model = MAKE_STRING( choices[i] );
+			return;
+		}
 		SET_MODEL( ENT( pEntity->pev ), choices[i] );
 		if( pEntity->pev->modelindex > 0 )
 			return;
@@ -65,7 +70,10 @@ void EFW_OverrideNpcModel( CBaseEntity *pEntity )
 	if( model )
 	{
 		PRECACHE_MODEL( (char *)model );
-		SET_MODEL( ENT( pEntity->pev ), model );
+		if( EFW_DeferStudio() )
+			pEntity->pev->model = MAKE_STRING( model );
+		else
+			SET_MODEL( ENT( pEntity->pev ), model );
 	}
 }
 

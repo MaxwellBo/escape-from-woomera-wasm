@@ -162,6 +162,16 @@ def main() -> None:
         f"	EFW_OnServerActivate(); {MARKER}\n"
         "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
     )
+    once(
+        client_cpp,
+        "void StartFrame( void )\n"
+        "{\n"
+        "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",
+        "void StartFrame( void )\n"
+        "{\n"
+        f"	EFW_StartFrame(); {MARKER}\n"
+        "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",
+    )
 
     player_cpp = dlls / "player.cpp"
     once(
@@ -399,7 +409,10 @@ def main() -> None:
         barney,
         '\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
         "\tUTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );\n",
-        '\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
+        '\tif( !EFW_DeferStudio() )\n'
+        '\t\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
+        '\telse\n'
+        '\t\tpev->model = MAKE_STRING( "models/barney.mdl" );\n'
         f"\tEFW_OverrideNpcModel( this ); {MARKER}\n"
         "\tUTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );\n",
     )
