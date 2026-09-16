@@ -4,6 +4,7 @@
 #include "util.h"
 #include "cbase.h"
 #include "monsters.h"
+#include "activity.h"
 #include "player.h"
 #include "efw_dll.h"
 
@@ -83,6 +84,7 @@ public:
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT IdleThink( void );
+	int m_iWalkState; /* this+0x284: 3 = walking toward player */
 };
 
 LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
@@ -110,30 +112,50 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 
 void CRefugee::IdleThink( void )
 {
-	CBaseEntity *pPlayer;
+	CBasePlayer *pPlayer;
 	const char *tn;
 	Vector delta;
 	float dist;
+	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
 
-	// CRefugee::IdleThink 0x100c6440 — skip "queue" NPCs; walk toward the
-	// player when they are 100–300 units away.
+	// CRefugee::IdleThink 0x100c6440
+	pev->framerate = 1.0f;
 	pev->nextthink = gpGlobals->time + 0.1f;
-	StudioFrameAdvance();
+	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
+	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 	tn = STRING( pev->targetname );
-	if( tn && strstr( tn, "queue" ) )
-		return;
-	pPlayer = UTIL_FindEntityByClassname( NULL, "player" );
-	if( !pPlayer )
-		return;
-	delta = pPlayer->pev->origin - pev->origin;
-	delta.z = 0;
-	dist = delta.Length();
-	if( dist < 100.0f || dist > 300.0f )
-		return;
-	pev->movetype = MOVETYPE_STEP;
-	pev->solid = SOLID_SLIDEBOX;
-	pev->angles.y = UTIL_VecToYaw( delta );
-	WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
+	pPlayer = EFW_Player();
+	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
+	{
+		s_walkTick++;
+		delta = pPlayer->pev->origin - pev->origin;
+		dist = delta.Length();
+		pev->movetype = MOVETYPE_STEP;
+		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
+		{
+			SetActivity( ACT_WALK );
+			m_iWalkState = 3;
+			m_hEnemy = pPlayer;
+			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
+			{
+				char line[80];
+				snprintf( line, sizeof( line ), "now walking %s", ( tn && tn[0] ) ? tn : "?" );
+				EFW_Print( pPlayer, line );
+			}
+		}
+		if( m_iWalkState == 3 && dist < 100.0f )
+			SetActivity( ACT_IDLE );
+		if( m_iWalkState == 3 && dist >= 100.0f )
+		{
+			delta.z = 0;
+			if( delta.Length() > 1.0f )
+			{
+				pev->angles.y = UTIL_VecToYaw( delta );
+				WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
+			}
+		}
+	}
+	StudioFrameAdvance();
 }
 
 void CRefugee::Precache( void )
@@ -191,6 +213,7 @@ void CRefugee::Spawn( void )
 	g_refugeeCount++;
 	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
+	m_iWalkState = 0;
 	SetUse( &CRefugee::TalkUse );
 	SetThink( &CRefugee::IdleThink );
 	pev->nextthink = gpGlobals->time + 0.1f;

@@ -76,6 +76,7 @@ def main() -> None:
         "efw_clientcmd.cpp": dlls / "efw_clientcmd.cpp",
         "efw_entities.cpp": dlls / "efw_entities.cpp",
         "efw_weapons.cpp": dlls / "efw_weapons.cpp",
+        "efw_world.cpp": dlls / "efw_world.cpp",
         "hud_efw.cpp": cldll / "hud_efw.cpp",
     }
     for src_name, dest in copies.items():
@@ -92,7 +93,8 @@ def main() -> None:
         "\tefw_conversation.cpp\n"
         "\tefw_clientcmd.cpp\n"
         "\tefw_entities.cpp\n"
-        "\tefw_weapons.cpp\n",
+        "\tefw_weapons.cpp\n"
+        "\tefw_world.cpp\n",
     )
 
     cmake_cl = cldll / "CMakeLists.txt"
@@ -217,6 +219,29 @@ def main() -> None:
         "{\n"
         "	return TRUE; /* EFW_OVERLAY */\n"
         "}\n",
+    )
+
+    subs = dlls / "subs.cpp"
+    once(
+        subs,
+        '#include "doors.h"\n',
+        '#include "doors.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        subs,
+        "void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )\n"
+        "{\n"
+        "	edict_t *pentTarget = NULL;\n"
+        "	if( !targetName )\n"
+        "		return;\n",
+        "void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )\n"
+        "{\n"
+        "	edict_t *pentTarget = NULL;\n"
+        "	if( !targetName )\n"
+        "		return;\n"
+        f"	if( EFW_FireTargets( targetName, pActivator, pCaller, (int)useType, value ) ) {MARKER}\n"
+        "		return;\n",
     )
 
     barney = dlls / "barney.cpp"

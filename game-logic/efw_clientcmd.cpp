@@ -10,6 +10,47 @@
 #include <stdio.h>
 #include <string.h>
 
+static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
+{
+	CBaseEntity *pScan;
+	char line[96];
+
+	if( !pPlayer )
+		return;
+	UTIL_SetOrigin( pPlayer->pev, pos );
+	pPlayer->pev->velocity = g_vecZero;
+	pPlayer->pev->flags &= ~FL_ONGROUND;
+	snprintf( line, sizeof( line ), "efw: setpos %.0f %.0f %.0f", pos.x, pos.y, pos.z );
+	EFW_Print( pPlayer, line );
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityInSphere( pScan, pos, 96.0f ) ) != NULL )
+	{
+		const char *cn;
+		if( pScan == pPlayer )
+			continue;
+		cn = STRING( pScan->pev->classname );
+		if( !strncmp( cn, "trigger_", 8 ) )
+			pScan->Touch( pPlayer );
+	}
+}
+
+static CBaseEntity *EFW_FindGoto( const char *name )
+{
+	CBaseEntity *pEnt;
+	if( !name || !name[0] )
+		return NULL;
+	pEnt = UTIL_FindEntityByTargetname( NULL, name );
+	if( pEnt )
+		return pEnt;
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, "trigger_multiple" ) ) != NULL )
+	{
+		if( EFW_FStrEq( STRING( pEnt->pev->target ), name ) )
+			return pEnt;
+	}
+	return NULL;
+}
+
 static Vector EFW_Place( CBaseEntity *pEnt )
 {
 	Vector c;
@@ -109,8 +150,48 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 {
 	EfwDllState *st = EFW_Dll();
+	const char *tn;
 	if( !pPlayer || !pNpc )
 		return;
+	tn = STRING( pNpc->pev->targetname );
+	if( EFW_FStrEq( tn, "Amir" ) )
+	{
+		CBasePlayerItem *pItem;
+		int slot;
+		st->items &= ~EFW_ITEM_PLIERS;
+		for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
+		{
+			for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; )
+			{
+				CBasePlayerItem *pNext = pItem->m_pNext;
+				if( !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pliers" )
+					|| !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pilers" ) )
+					pPlayer->RemovePlayerItem( pItem, true );
+				pItem = pNext;
+			}
+		}
+		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
+		if( 2 < EFW_MAX_DIARY )
+			st->diaryFlags[2] = 1;
+		EFW_AddDiary( 2, 2 );
+		EFW_FailOrNarrate( pPlayer, 0x4c );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Fashid" ) )
+	{
+		EFW_Squark( "Fashid", "Thanks, but I don't want them. A word of warning though, my friend. The guard outside often searches us, so you should find a way to hide them or smuggle them out.", 8 );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Nasir" ) )
+	{
+		EFW_Squark( "Nasir", "Well done, but you'll have to hide them in here somewhere, or the guard will find them when you leave the kitchen.", 8 );
+		return;
+	}
+	if( EFW_FStrEq( tn, "Mouhtaz" ) )
+	{
+		EFW_Squark( "Mouhtaz", "Are you crazy? Whatever you do, don't try to leave with them. The guard outside may search you!", 8 );
+		return;
+	}
 	if( st->items & EFW_ITEM_PLIERS )
 	{
 		st->items &= ~EFW_ITEM_PLIERS;
@@ -131,13 +212,23 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 
 	if( !strcmp( name, "efw_PliersMarker" ) )
 	{
-		if( !( st->items & EFW_ITEM_PLIERS ) )
+		int had;
+		if( EFW_ElectricianSees( pPlayer ) )
 		{
-			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+			return;
 		}
-		EFW_ShowGoldMenu( pPlayer, 0, 12,
-			"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
+		had = EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
+		if( !had )
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		if( EFW_MapLevel() == 0 )
+		{
+			if( had )
+				EFW_FailOrNarrate( pPlayer, 0x3d );
+		}
+		else
+			EFW_ShowGoldMenu( pPlayer, 0, 12,
+				"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
 		return;
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
@@ -145,30 +236,25 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 		if( st->items & EFW_ITEM_PLIERS )
 		{
 			st->items &= ~EFW_ITEM_PLIERS;
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound." );
+			EFW_FailOrNarrate( pPlayer, 0x3e );
 		}
 		else
 		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes." );
+			EFW_FailOrNarrate( pPlayer, 0x44 );
 		}
 		return;
 	}
 	if( !strcmp( name, "efw_hiding_place" ) )
 	{
-		if( st->items & EFW_ITEM_PLIERS )
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You return to the hiding place, with the pliers safely tucked away underneath your shirt." );
-		else
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You could hide again, but you haven't got the pliers yet." );
+		EFW_HideUnderBuilding( pPlayer );
 		return;
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
 		EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+		EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+		EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
 		return;
 	}
 }
@@ -271,9 +357,35 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_UseWithMarker" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		CBaseEntity *pEnt = NULL;
+		if( CMD_ARGC() > arg0 + 1 )
+			pEnt = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
+			pEnt = EFW_NearestMarker( pPlayer, 140.0f );
 		if( pEnt && !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
 			EFW_UseMarker( pPlayer, pEnt );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_setpos" ) || FStrEq( pcmd, "setpos" ) )
+	{
+		if( CMD_ARGC() > arg0 + 3 )
+		{
+			Vector pos;
+			pos.x = (float)atof( CMD_ARGV( arg0 + 1 ) );
+			pos.y = (float)atof( CMD_ARGV( arg0 + 2 ) );
+			pos.z = (float)atof( CMD_ARGV( arg0 + 3 ) );
+			EFW_Relocate( pPlayer, pos );
+		}
+		else if( CMD_ARGC() > arg0 + 1 )
+		{
+			CBaseEntity *pEnt = EFW_FindGoto( CMD_ARGV( arg0 + 1 ) );
+			if( pEnt )
+				EFW_Relocate( pPlayer, EFW_Place( pEnt ) );
+			else
+				EFW_DebugPrint( ">>> efw_setpos (not found) %s", CMD_ARGV( arg0 + 1 ) );
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_diary" ) )
@@ -304,17 +416,26 @@ int EFW_ClientCommand( edict_t *pEntity )
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_HideUnderBuilding" ) )
+	{
+		EFW_HideUnderBuilding( pPlayer );
 		return 1;
+	}
 	if( FStrEq( pcmd, "efw_PickupPliers" ) )
 	{
-		EFW_Squark( "efw_electrician" );
-		EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		if( EFW_ElectricianSees( pPlayer ) )
+			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
+		else
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )
 	{
-		int on = EFW_GetHudInt( 6 ) ? 0 : 1;
-		EFW_SetHudInt( 6, on );
+		int on = 1;
+		if( CMD_ARGC() > arg0 + 1 )
+			on = atoi( CMD_ARGV( arg0 + 1 ) ) != 0;
+		else
+			on = EFW_GetHudInt( 6 ) ? 0 : 1;
+		EFW_SetPause( on );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_set_state" ) )
@@ -324,7 +445,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_changelevel" ) )
+	{
+		if( CMD_ARGC() > arg0 + 1 )
+			EFW_ChangeLevel( CMD_ARGV( arg0 + 1 ) );
 		return 1;
+	}
 	return 0;
 }
 

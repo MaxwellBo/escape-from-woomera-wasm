@@ -90,9 +90,12 @@ void EFW_LoadAllConversations( void )
 	EFW_AddKeyword( "GOODBYE", 1 );
 }
 
-void EFW_Squark( const char *targetname )
+void EFW_Squark( const char *targetname, const char *text, int flags )
 {
 	CBaseEntity *pEnt;
+	CBasePlayer *pPlayer;
+	char line[512];
+	(void)flags;
 	if( !targetname || !targetname[0] )
 		return;
 	pEnt = UTIL_FindEntityByTargetname( NULL, targetname );
@@ -100,6 +103,15 @@ void EFW_Squark( const char *targetname )
 	{
 		EFW_DebugPrint( "WARNING -- efwConversation::Squark -- character (%s) is not found", targetname );
 		return;
+	}
+	if( !text || !text[0] )
+		return;
+	pPlayer = EFW_Player();
+	snprintf( line, sizeof( line ), "%s: %s", targetname, text );
+	if( pPlayer )
+	{
+		EFW_Print( pPlayer, line );
+		EFW_ShowDllMenu( pPlayer, text, NULL, 0 );
 	}
 }
 
@@ -350,46 +362,171 @@ void EFW_ThinkConversation( void )
 	EfwDllState *st = EFW_Dll();
 	CBasePlayer *pPlayer;
 	float dist;
+
 	if( !st->talkActive )
-		return;
-	pPlayer = EFW_Player();
-	if( !pPlayer || !st->talkNpc )
 	{
-		EFW_CloseTalk();
-		return;
+		st->talkIdleTicks++;
+		if( st->talkIdleTicks > 0x3c && st->diaryPending != -1 )
+		{
+			EFW_SetHudInt( 0, st->diaryPending );
+			EFW_SetHudInt( 5, 1 );
+			st->diaryPending = -1;
+		}
 	}
-	if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
+	else
 	{
-		EFW_CloseTalk();
+		pPlayer = EFW_Player();
+		if( !pPlayer || !st->talkNpc )
+			EFW_CloseTalk();
+		else if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
+			EFW_CloseTalk();
+		else
+		{
+			dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
+			if( dist >= st->hideDist )
+			{
+				EFW_DebugPrint( "Conversation hidden, partner too far" );
+				EFW_CloseTalk();
+			}
+		}
+		st->talkIdleTicks = 0;
+	}
+	EFW_ThinkPA();
+}
+
+static Vector EFW_AbsCenter( CBaseEntity *pEnt )
+{
+	Vector c;
+	if( !pEnt )
+		return g_vecZero;
+	c = ( pEnt->pev->absmin + pEnt->pev->absmax ) * 0.5f;
+	if( ( pEnt->pev->absmax - pEnt->pev->absmin ).Length() < 1.0f )
+		c = pEnt->pev->origin;
+	return c;
+}
+
+static int EFW_FacingDot( CBasePlayer *pPlayer, const Vector &target, float minDot )
+{
+	Vector dir;
+	float len;
+	if( !pPlayer )
+		return 0;
+	dir = target - ( pPlayer->pev->origin + pPlayer->pev->view_ofs );
+	len = dir.Length();
+	if( len < 1.0f )
+		return 1;
+	dir = dir * ( 1.0f / len );
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	return DotProduct( gpGlobals->v_forward, dir ) >= minDot;
+}
+
+static void EFW_FillScan( int type, const char *name, const Vector &pos )
+{
+	EfwDllState *st = EFW_Dll();
+	EfwScanSlot *slot;
+	if( st->scanCount >= EFW_MAX_SCAN )
 		return;
-	}
-	dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
-	if( dist >= st->hideDist )
-	{
-		EFW_DebugPrint( "Conversation hidden, partner too far" );
-		EFW_CloseTalk();
-	}
+	slot = &st->scan[st->scanCount];
+	memset( slot, 0, sizeof( *slot ) );
+	slot->type = type;
+	if( name )
+		strncpy( slot->name, name, EFW_SCAN_NAME - 1 );
+	slot->zero = 0;
+	slot->x = pos.x;
+	slot->y = pos.y;
+	slot->z = pos.z;
+	st->scanCount++;
+}
+
+void EFW_SendCntxt( void )
+{
+	CBasePlayer *pPlayer = EFW_Player();
+	EfwDllState *st = EFW_Dll();
+	int i;
+	unsigned char *raw;
+	if( !pPlayer || !gmsgEFWCntxt )
+		return;
+	MESSAGE_BEGIN( MSG_ONE, gmsgEFWCntxt, NULL, pPlayer->pev );
+		WRITE_BYTE( st->scanCount );
+		raw = (unsigned char *)st->scan;
+		for( i = 0; i < st->scanCount * EFW_SCAN_BYTES; i++ )
+			WRITE_BYTE( raw[i] );
+	MESSAGE_END();
 }
 
 void EFW_TalkScan( void )
 {
 	CBasePlayer *pPlayer = EFW_Player();
+	EfwDllState *st = EFW_Dll();
 	CBaseEntity *pScan = NULL;
-	int count = 0;
-	if( !pPlayer || !gmsgEFWCtPrv )
+	Vector origin;
+
+	if( !pPlayer )
 		return;
-	while( ( pScan = UTIL_FindEntityInSphere( pScan, pPlayer->pev->origin, EFW_TALK_SCAN ) ) != NULL )
+	st->scanCount = 0;
+	memset( st->scan, 0, sizeof( st->scan ) );
+	origin = pPlayer->pev->origin;
+
+	while( ( pScan = UTIL_FindEntityInSphere( pScan, origin, EFW_TALK_SCAN ) ) != NULL )
 	{
+		const char *cn;
+		const char *tn;
+		Vector pos;
+		float dist;
+		int wid;
+		if( st->scanCount > 2 )
+			break;
 		if( pScan == pPlayer )
 			continue;
-		if( EFW_IsTalkNpc( pScan ) )
-			count++;
-		if( count > 2 )
-			break;
+		cn = STRING( pScan->pev->classname );
+		tn = STRING( pScan->pev->targetname );
+		dist = ( pScan->pev->origin - origin ).Length();
+		if( dist >= EFW_TALK_SCAN && !EFW_FStrEq( cn, "efw_Marker" ) )
+			continue;
+
+		if( EFW_IsTalkNpc( pScan ) || !strcmp( cn, "monster_barney" ) )
+		{
+			pos = pScan->pev->origin;
+			pos.z += 64.0f;
+			EFW_FillScan( 0, tn, pos );
+			continue;
+		}
+		if( !strcmp( cn, "efw_Marker" ) )
+		{
+			pos = EFW_AbsCenter( pScan );
+			if( !EFW_FStrEq( tn, "efw_hiding_place" ) && !EFW_FacingDot( pPlayer, pos, 0.97f ) )
+				continue;
+			if( EFW_FStrEq( tn, "efw_PliersMarker" ) && EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
+				continue;
+			EFW_FillScan( 1, tn, pos );
+			continue;
+		}
+		if( !strcmp( cn, "func_door_rotating" ) && EFW_FStrEq( tn, "efw_cage_door" ) )
+		{
+			pos = EFW_AbsCenter( pScan );
+			EFW_FillScan( 1, tn, pos );
+			continue;
+		}
+		if( !strncmp( cn, "weapon_efw", 10 ) )
+		{
+			if( EFW_FStrEq( cn, "weapon_efw_Pliers" ) && !EFW_FacingDot( pPlayer, pScan->pev->origin, 0.97f ) )
+				continue;
+			if( pScan->pev->owner )
+				continue;
+			wid = EFW_WeaponTypeId( cn );
+			if( wid < 0 )
+				continue;
+			EFW_FillScan( wid + 100, tn && tn[0] ? tn : cn, pScan->pev->origin );
+		}
 	}
-	MESSAGE_BEGIN( MSG_ONE, gmsgEFWCtPrv, NULL, pPlayer->pev );
-		WRITE_BYTE( count != 0 );
-	MESSAGE_END();
+
+	if( gmsgEFWCtPrv )
+	{
+		MESSAGE_BEGIN( MSG_ONE, gmsgEFWCtPrv, NULL, pPlayer->pev );
+			WRITE_BYTE( st->scanCount != 0 );
+		MESSAGE_END();
+	}
+	EFW_SendCntxt();
 }
 
 #endif

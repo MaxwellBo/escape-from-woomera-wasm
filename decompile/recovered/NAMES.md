@@ -10,7 +10,16 @@
 | 0x100c1dc0 | `efwConversationFile ctor` | 0x74-byte conversation parser object |
 | 0x100c2660 | `efwConversation::ParseFile` | open one Conversations/*.txt |
 | 0x100c3120 | `efw_Marker` | LINK_ENTITY_TO_CLASS, alloc 0x15c |
-| 0x100c3500 | `efwConversation::AddKeyword` | insert ESCAPE/GREET/GOODBYE flags |
+| 0x100c3430 | `efw_HasKeyword` | return unlocked flag at keyword node +0x1c |
+| 0x100c3500 | `efwConversation::AddKeyword` | insert keyword and store unlocked flag (0 = locked topic) |
+| 0x100c4d70 | `efw_AdjustHope` | hope += delta, clamp 0..100 |
+| 0x100c4e30 | `weapon Give to NPC` | Amir / Fashid / Nasir / Mouhtaz Squark + diary 0x4c |
+| 0x100c59c0 | `efw_ElectricianSees` | dist < 256 or view cone ~35° |
+| 0x100c7510 | `efw_pause` | hudInt[6], MOVETYPE_NONE freeze |
+| 0x100c7830 | `efw_TalkScan` | sphere 123, up to 3×0x30 slots, EFW_CtPrv |
+| 0x100c7d30 | `efw_SendCntxt` | WRITE_BYTE(count) + count×0x30 raw EFW_Cntxt |
+| 0x100c7da0 | `efw_GateFSM` | kitchen door, 1st/2nd compound entry, approach_bin |
+| 0x100c81d0 | `efw_FailOrNarrate` | hope±15 for 0x3f/0x43; ShowMenu strings 0x3c–0x45; else EFW_Menu |
 | 0x100c4700 | `weapon_efw_Pliers` | w/v/p_Pliers.mdl |
 | 0x100c53c0 | `monster_patrol_guard` | LINK_ENTITY_TO_CLASS |
 | 0x100c5ea0 | `monster_refugee` | CRefugee, alloc 0x3a8, vtable 0x100f93a4 |
@@ -23,9 +32,7 @@
 | 0x100c6b60 | `efw_SendHudState` | pack hope / diary / conversation into EFWData slots |
 | 0x100c6c10 | `efw_ThinkConversation` | timeout + 'Conversation hidden, partner too far' |
 | 0x100c6e60 | `efw_ShowMenu` | GoldSrc ShowMenu with up to 7 lines; logs CONVERSATION (n messages) |
-| 0x100c7830 | `efw_TalkScan` | sphere search monster_refugee/barney; send EFW_CtPrv |
 | 0x100c80d0 | `efw_DebugPrint` | vsprintf + OutputDebugStringA |
-| 0x100c81d0 | `efw_FailOrNarrate` | hope-fail / 'Where do you think you are going' / EFW_Menu byte |
 | 0x100c8160 | `efw_FStrEq` | case-sensitive entity-name compare |
 | 0x1001a550 | `ClientCommand` | say/say_team plus EFW cmds; strcmp chain in ClientCommand_dispatch.c |
 

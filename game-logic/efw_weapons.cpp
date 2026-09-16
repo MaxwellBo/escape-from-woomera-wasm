@@ -106,7 +106,22 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 	{
 #ifndef CLIENT_DLL
 		const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
+		char picked[80];
+		const char *pretty;
 		EFW_Dll()->items |= def->itemBit;
+		pretty = def->classname;
+		if( !strncmp( pretty, "weapon_efw_", 11 ) )
+			pretty += 11;
+		snprintf( picked, sizeof( picked ), "You just picked up the %s.", pretty );
+		EFW_Print( pPlayer, picked );
+		if( def->itemBit == EFW_ITEM_PLIERS )
+		{
+			EFW_AddKeyword( "PLIERS", 0 );
+			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			EFW_AddKeyword( "ELECTRICIAN", 0 );
+			if( EFW_MapLevel() == 0 )
+				EFW_FailOrNarrate( pPlayer, 0x3d );
+		}
 		MESSAGE_BEGIN( MSG_ONE, gmsgWeapPickup, NULL, pPlayer->pev );
 			WRITE_BYTE( m_iId );
 		MESSAGE_END();
