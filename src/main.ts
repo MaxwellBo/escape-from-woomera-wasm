@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll101`;
+    return `${url}?v=efw-dll102`;
   return url;
 }
 
@@ -238,12 +238,13 @@ function dismissEfwStory() {
 
 function showEfwStory(code: number, fallback?: string) {
   if (code === 0x48) {
-    /* FUN_10048650: no storyboard SPR. FUN_10048710 pauses and FUN_10046370. */
+    /* FUN_10048650: 0xd4 Panel, no storyboard SPR. FUN_10048710 pauses. */
     if (!storyPaused) {
       storyPaused = true;
       runEngineCmd('pausable 0');
       runGameCmd('efw_pause 1');
     }
+    log('efw: FUN_10048650 panel 0xd4');
     return;
   }
   if (isCaptionMenu(code)) {
@@ -450,9 +451,10 @@ function applyLetterHud(text: string): boolean {
     showLetterbox(code, caption);
     return false;
   }
-  if (text.includes('>>> FUN_10043bb0')) {
+  if (text.includes('>>> FUN_10043bb0') || text.includes('>>> FUN_1001d750')) {
     const cont = document.getElementById('efw-letter-cont');
-    if (cont) cont.hidden = false;
+    if (cont && text.includes('>>> FUN_10043bb0'))
+      cont.hidden = false;
     return false;
   }
   return false;

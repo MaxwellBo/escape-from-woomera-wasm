@@ -25,6 +25,9 @@ struct EfwScanSlot
 #pragma pack(pop)
 
 static float g_hope = -1;
+static float g_clientHudFloat[2]; /* DAT_100bc498; FUN_10047650 / FUN_10047660 */
+static unsigned char g_panel48[0xd4]; /* FUN_10048650 operator_new(0xd4) Panel */
+static int g_panel48On;
 static int g_diaryPage;
 static int g_diaryOpen;
 static int g_mapLevel; /* hudInt[3]; FUN_1001db00 clock am/pm + hour base */
@@ -145,6 +148,29 @@ static int EFW_MapLevelFromName( void )
 	return ml;
 }
 
+/* FUN_10047650: *(DAT_100bc498 + idx*4) = v */
+static void EFW_SetClientHudFloat( int idx, float v )
+{
+	if( idx >= 0 && idx < 2 )
+		g_clientHudFloat[idx] = v;
+}
+
+/* FUN_10047660: return *(float*)(DAT_100bc498 + idx*4). Hope is slot 1. */
+static float EFW_GetClientHudFloat( int idx )
+{
+	float v = 0.0f;
+	static float s_loggedV = -9999.0f;
+
+	if( idx >= 0 && idx < 2 )
+		v = g_clientHudFloat[idx];
+	if( s_loggedV < -1000.0f || ( s_loggedV < 0.0f && v >= 0.0f ) )
+	{
+		s_loggedV = v;
+		gEngfuncs.Con_Printf( ">>> FUN_10047660 idx=%d v=%.1f\n", idx, v );
+	}
+	return v;
+}
+
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
@@ -162,7 +188,9 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 	memset( blob, 0, sizeof( blob ) );
 	for( i = 0; i < n; i++ )
 		blob[i] = (unsigned char)READ_BYTE();
+	memcpy( &g_clientHudFloat[0], blob, sizeof( float ) );
 	memcpy( &g_hope, blob + 4, sizeof( float ) );
+	EFW_SetClientHudFloat( 1, g_hope );
 	memcpy( &g_diaryPage, blob + 12, sizeof( int ) );
 	memcpy( &g_mapLevel, blob + 8 + 3 * 4, sizeof( int ) );
 	memcpy( &g_weaponId, blob + 8 + 4 * 4, sizeof( int ) );
@@ -366,8 +394,9 @@ static void EFW_OpenStoryboard( int code )
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level3", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x48:
-		/* FUN_10047830: 0.4s debounce on DAT_100bc9f4, then FUN_10048650
-		   0xd4 Panel. FUN_10048710: ClientCmd efw_pause 1 + FUN_10046370. */
+		/* FUN_10047830: 0.4s debounce on DAT_100bc9f4, then operator_new(0xd4)
+		   + FUN_10048650 Panel. FUN_10048710: setVisible(1), ClientCmd
+		   efw_pause 1, FUN_10046370. */
 		{
 			float now = gHUD.m_flTime;
 			float dt = now - g_contextDismissAt;
@@ -375,7 +404,19 @@ static void EFW_OpenStoryboard( int code )
 			g_hStory = 0;
 			if( dt >= 0.0f && dt <= 0.4f )
 				return;
+			memset( g_panel48, 0, sizeof( g_panel48 ) );
+			/* vgui::Panel(this, 0, 0, DAT_100a4dcc, DAT_100a4dd0) */
+			*(int *)( g_panel48 + 0xbc ) = 100;
+			*(int *)( g_panel48 + 0xc0 ) = 0;
+			*(int *)( g_panel48 + 0xc8 ) = 0;
+			*(int *)( g_panel48 + 0xcc ) = 0;
+			*(int *)( g_panel48 + 0xd0 ) = 0;
+			g_panel48On = 1;
 			g_contextMode = 1;
+			gEngfuncs.Con_Printf(
+				">>> FUN_10048650 size=0xd4 w=%d h=%d +0xbc=100 signal=4\n",
+				ScreenWidth, ScreenHeight );
+			gEngfuncs.Con_Printf( ">>> FUN_10048710 pause=1\n" );
 			gEngfuncs.Con_Printf( ">>> FUN_10046370 n=%d\n", g_scanCount );
 			if( g_storyPauseSent != code )
 			{
@@ -409,6 +450,7 @@ static void EFW_LeaveContext( void )
 	if( !g_contextMode )
 		return;
 	g_contextMode = 0;
+	g_panel48On = 0;
 	g_contextDismissAt = gHUD.m_flTime;
 	g_storyPauseSent = 0;
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
@@ -581,6 +623,10 @@ int EFW_ClientKey( int down, int keynum )
 int CHudEfw::Init( void )
 {
 	g_hope = -1;
+	g_clientHudFloat[0] = 0.0f;
+	g_clientHudFloat[1] = -1.0f;
+	g_panel48On = 0;
+	memset( g_panel48, 0, sizeof( g_panel48 ) );
 	g_diaryPage = 0;
 	g_diaryOpen = 0;
 	g_mapLevel = 0;
@@ -641,6 +687,9 @@ int CHudEfw::VidInit( void )
 void CHudEfw::Reset( void )
 {
 	g_hope = -1;
+	g_clientHudFloat[0] = 0.0f;
+	g_clientHudFloat[1] = -1.0f;
+	g_panel48On = 0;
 	g_talkPrompt = 0;
 	g_menuOn = 0;
 	g_scanCount = 0;
@@ -1299,6 +1348,66 @@ static void EFW_DrawStoryboardTiles( HSPRITE spr )
 	}
 }
 
+/* FUN_1001d750: TRIAPI textured quad. param_9!=0 uses SpriteTexture of that
+   SPR; param_9==0 SPR_Loads sprites/ascale.spr (RenderMode 4, CullFace
+   TRI_NONE). Vertex3f z=0.5, UV (0,v)/(1,v)/(1,v)/(0,v) for ascale, or
+   full 0..1 when spr!=0. Software present uses FillRGBA / SPR_DrawHoles
+   of the same screen rect (RGB floats * 255). */
+static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
+	float r, float g, float b, float v, HSPRITE spr )
+{
+	int ir, ig, ib, x, y, w, h;
+	static int s_logged = -2;
+	int key;
+
+	if( spr == 0 && !g_hAscale )
+	{
+		g_hAscale = EFW_LoadSpr( "sprites/ascale.spr" );
+		gEngfuncs.Con_Printf( ">>> FUN_10044e30 ascale=%d grey=%d\n",
+			g_hAscale != 0, g_hGrey != 0 );
+	}
+
+	key = spr ? 1 : 0;
+	if( s_logged != key )
+	{
+		s_logged = key;
+		gEngfuncs.Con_Printf( ">>> FUN_1001d750 spr=%d rgb=%.2f,%.2f,%.2f v=%.2f\n",
+			spr != 0, r, g, b, v );
+	}
+
+	ir = (int)( r * 255.0f + 0.5f );
+	ig = (int)( g * 255.0f + 0.5f );
+	ib = (int)( b * 255.0f + 0.5f );
+	if( ir < 0 ) ir = 0; if( ir > 255 ) ir = 255;
+	if( ig < 0 ) ig = 0; if( ig > 255 ) ig = 255;
+	if( ib < 0 ) ib = 0; if( ib > 255 ) ib = 255;
+	x = (int)x1;
+	y = (int)y1;
+	w = (int)( x2 - x1 );
+	h = (int)( y2 - y1 );
+	if( w < 1 )
+		w = 1;
+	if( h < 1 )
+		h = 1;
+
+	if( spr != 0 )
+	{
+		wrect_t rc;
+		rc.left = 0;
+		rc.top = 0;
+		rc.right = w;
+		rc.bottom = h;
+		SPR_Set( spr, ir, ig, ib );
+		SPR_DrawHoles( 0, x, y, &rc );
+		return;
+	}
+
+	/* PE uses TRIAPI Vertex3f z=0.5 + SpriteTexture(ascale). Software
+	   present hangs on mass SPR_DrawHoles; FillRGBA is the 2D stand-in
+	   of the same RGB rect. */
+	FillRGBA( x, y, w, h, ir, ig, ib, 255 );
+}
+
 /* FUN_1001e7d0: wrap at xmax-100 on space, hard wrap at xmax, 15px lines. */
 static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b )
 {
@@ -1309,9 +1418,16 @@ static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, in
 	int i;
 	int ch;
 	int w;
+	static int s_logged;
 
 	if( !text )
 		return;
+	if( !s_logged && text[0] )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e7d0 n=%d xmax=%d\n",
+			(int)strlen( text ), xmax );
+	}
 	line[0] = '\0';
 	for( i = 0; text[i]; i++ )
 	{
@@ -1374,14 +1490,19 @@ static void EFW_DrawLetterbox( float flTime )
 		y0 = 0;
 	if( y1 > h )
 		y1 = h;
-	FillRGBA( 0, y0 - 1, w, 1, 0, 0, 153, 255 );
-	FillRGBA( 0, y0, w, ( h / 2 ) - y0, 0, 0, 51, 255 );
-	FillRGBA( 0, h / 2, w, y1 - ( h / 2 ), 0, 0, 51, 255 );
-	FillRGBA( 0, y1, w, 1, 0, 0, 153, 255 );
+	/* FUN_1001d750 RGB 0,0,0.6 borders then 0,0,0.2 veil, param_9=0 ascale. */
+	EFW_DrawTriQuad( 0.0f, (float)y0 - 1.0f, (float)w, (float)y0,
+		0.0f, 0.0f, 0.6f, 1.0f, 0 );
+	EFW_DrawTriQuad( 0.0f, (float)y0, (float)w, (float)( h / 2 ),
+		0.0f, 0.0f, 0.2f, 1.0f, 0 );
+	EFW_DrawTriQuad( 0.0f, (float)( h / 2 ), (float)w, (float)y1,
+		0.0f, 0.0f, 0.2f, 1.0f, 0 );
+	EFW_DrawTriQuad( 0.0f, (float)y1, (float)w, (float)y1 + 1.0f,
+		0.0f, 0.0f, 0.6f, 1.0f, 0 );
 	EFW_DrawWrapped( 0x4b, y0, w - 0x4b, g_caption, 255, 255, 255 );
 	if( fade >= 1.0f )
 	{
-		gHUD.DrawHudString( w - 300, h - 0x73, w,
+		EFW_DrawWrapped( w - 300, h - 0x73, w,
 			"Press left mouse button to continue", 255, 255, 255 );
 		if( !s_logged )
 		{
@@ -1405,7 +1526,6 @@ static float EFW_LerpHudFade( float oldv, float target )
 static void EFW_DrawDiarySpr( int page, float fade )
 {
 	int dw, dh, dx, dy, vis;
-	wrect_t rc;
 
 	if( fade <= 0.0f )
 		return;
@@ -1429,12 +1549,10 @@ static void EFW_DrawDiarySpr( int page, float fade )
 	vis = (int)( (float)dh * fade );
 	if( vis < 1 )
 		return;
-	rc.left = 0;
-	rc.top = 0;
-	rc.right = dw;
-	rc.bottom = vis;
-	SPR_Set( g_hDiary, 255, 255, 255 );
-	SPR_DrawHoles( 0, dx, dy, &rc );
+	/* FUN_1001d750: x = width-sprW, y = height-sprW, y2 = y + sprH*fade,
+	   RGB 1,1,1, param_9 = diary SPR. */
+	EFW_DrawTriQuad( (float)dx, (float)dy, (float)( dx + dw ), (float)( dy + vis ),
+		1.0f, 1.0f, 1.0f, 1.0f, g_hDiary );
 }
 
 /* DAT_100a95b8 veil, DAT_100a95bc inventory, DAT_100a95c4 diary SPR. */
@@ -1474,13 +1592,16 @@ static void EFW_TickHudFades( void )
 
 static void EFW_DrawMenuVeil( void )
 {
-	int w;
+	float vw;
 	if( g_menuVeil <= 0.0f )
 		return;
-	w = (int)( (float)ScreenWidth * g_menuVeil * 1.1f );
-	if( w < 1 )
+	vw = (float)ScreenWidth * g_menuVeil * 1.1f;
+	if( vw < 1.0f )
 		return;
-	FillRGBA( 0, ScreenHeight - 0x140, w, 0x140, 51, 0, 0, 255 );
+	/* FUN_1001db00: FUN_1001d750(0, height-0x140, width*veil*1.1, height,
+	   0, 0, 0.2, 1, 0) — RGB 0,0,0.2 with ascale. */
+	EFW_DrawTriQuad( 0.0f, (float)( ScreenHeight - 0x140 ), vw, (float)ScreenHeight,
+		0.0f, 0.0f, 0.2f, 1.0f, 0 );
 }
 
 static void EFW_DrawDiaryWipe( void )
@@ -1631,23 +1752,26 @@ int CHudEfw::Draw( float flTime )
 	g_mapLevel = EFW_MapLevelFromName();
 
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
-	hope = (int)( g_hope + 0.5f );
-	if( g_hope >= 0.0f )
 	{
-		/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
-		EFW_DrawHopeTicks( hope / 10 );
-		snprintf( label, sizeof( label ), "HOPE  %d", hope );
-		gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, ScreenWidth - 8, label, 200, 0, 0 );
+		float hopeF = EFW_GetClientHudFloat( 1 );
+		hope = (int)( hopeF + 0.5f );
+		if( hopeF >= 0.0f )
 		{
-			static int s_hopeDraw;
-			s_hopeDraw++;
-			if( s_hopeDraw == 1 || ( s_hopeDraw % 60 ) == 0 )
-				gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
+			/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
+			EFW_DrawHopeTicks( hope / 10 );
+			snprintf( label, sizeof( label ), "HOPE  %d", hope );
+			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, ScreenWidth - 8, label, 200, 0, 0 );
+			{
+				static int s_hopeDraw;
+				s_hopeDraw++;
+				if( s_hopeDraw == 1 || ( s_hopeDraw % 60 ) == 0 )
+					gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
+			}
+			if( g_talkPrompt )
+				gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 4, ScreenWidth - 8, "TALK", r, g, b );
+			if( g_diaryOpen )
+				gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 20, ScreenWidth - 8, "DIARY", r, g, b );
 		}
-		if( g_talkPrompt )
-			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 4, ScreenWidth - 8, "TALK", r, g, b );
-		if( g_diaryOpen )
-			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 20, ScreenWidth - 8, "DIARY", r, g, b );
 	}
 
 	EFW_DrawArtsClock( flTime );
