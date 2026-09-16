@@ -123,7 +123,10 @@ void EFW_SetPause( int on ); /* 0x100c7510 */
 void EFW_ChangeLevel( const char *map ); /* ClientCommand 0x1001b2f3 */
 int EFW_ElectricianSees( CBasePlayer *pPlayer ); /* 0x100c59c0 */
 int EFW_WeaponTypeId( const char *classname ); /* 0x100c43b0 */
+int EFW_WeaponMask( CBasePlayer *pPlayer ); /* inventory bits for ids 16..31, packed into EFWData */
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
+void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
+void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard chases the player */
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */

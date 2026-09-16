@@ -252,9 +252,26 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
-		EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
-		EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
-		EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
+		/* FUN_100c2a20 place / FUN_100c29f0 collect. */
+		if( EFW_HasWeapon( pPlayer, "weapon_efw_IDTag" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_IDTag", EFW_ITEM_IDTAG );
+			EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+			EFW_Print( pPlayer, "ID Tag has been placed on the wall" );
+			EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
+		}
+		else if( EFW_HasKeyword( "Player'sIDTagOnFence" ) )
+		{
+			EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+			EFW_AddKeyword( "Player'sIDTagOnFence", 0 );
+			EFW_Print( pPlayer, "You just picked up the IDTag." );
+		}
+		return;
+	}
+	if( !strcmp( name, "efw_cage_door" ) )
+	{
+		if( EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+			EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
 		return;
 	}
 }
@@ -294,6 +311,20 @@ static void EFW_StepDiary( int dir )
 	EFW_SendEfwData();
 }
 
+static const char *EFW_CmdName( int arg0 )
+{
+	int argc = CMD_ARGC();
+	const char *a;
+	if( argc > arg0 + 2 )
+		return CMD_ARGV( arg0 + 2 );
+	if( argc <= arg0 + 1 )
+		return NULL;
+	a = CMD_ARGV( arg0 + 1 );
+	if( a && a[0] && ( a[0] < '0' || a[0] > '9' ) )
+		return a;
+	return NULL;
+}
+
 int EFW_ClientCommand( edict_t *pEntity )
 {
 	CBasePlayer *pPlayer;
@@ -323,8 +354,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_Talk" ) )
 	{
 		CBaseEntity *pEnt = NULL;
-		if( CMD_ARGC() > arg0 + 1 )
-			pEnt = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
+		const char *who = EFW_CmdName( arg0 );
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 384.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
@@ -337,13 +369,12 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_Give" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
-		if( CMD_ARGC() > arg0 + 1 )
-		{
-			CBaseEntity *named = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
-			if( named )
-				pEnt = named;
-		}
+		CBaseEntity *pEnt = NULL;
+		const char *who = EFW_CmdName( arg0 );
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 160.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
@@ -358,13 +389,19 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_UseWithMarker" ) )
 	{
 		CBaseEntity *pEnt = NULL;
-		if( CMD_ARGC() > arg0 + 1 )
-			pEnt = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
+		const char *who = EFW_CmdName( arg0 );
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+		{
+			EFW_UseMarker( pPlayer, pEnt );
+			return 1;
+		}
 		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
 			pEnt = EFW_NearestMarker( pPlayer, 140.0f );
-		if( pEnt && !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
+		if( pEnt )
 			EFW_UseMarker( pPlayer, pEnt );
 		return 1;
 	}

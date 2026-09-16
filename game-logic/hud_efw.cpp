@@ -39,9 +39,28 @@ static int g_scanCount;
 static HSPRITE g_hBubble;
 static HSPRITE g_hHide;
 static HSPRITE g_hPliers;
+static HSPRITE g_hGive;
 static HSPRITE g_hStory;
 static int g_storyCode;
 static char g_storyChange[64];
+static int g_weaponMask;
+
+#ifndef K_MOUSE1
+#define K_MOUSE1 107
+#define K_MOUSE2 108
+#endif
+
+#define EFW_VGUI_MAX 12
+struct EfwVguiBtn
+{
+	int x, y, w, h;
+	char cmd[96];
+	char label[64];
+	HSPRITE icon;
+};
+static EfwVguiBtn g_vgui[EFW_VGUI_MAX];
+static int g_vguiN;
+static char g_vguiSig[512];
 
 static HSPRITE EFW_LoadSpr( const char *path )
 {
@@ -64,6 +83,10 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 	memcpy( &g_hope, blob + 4, sizeof( float ) );
 	memcpy( &g_diaryPage, blob + 12, sizeof( int ) );
 	memcpy( &g_weaponId, blob + 8 + 4 * 4, sizeof( int ) );
+	g_weaponMask = ( (unsigned)g_weaponId ) >> 16;
+	g_weaponId = g_weaponId & 0xffff;
+	if( g_weaponId == 0xffff )
+		g_weaponId = -1;
 	{
 		int openFlag = 0;
 		memcpy( &openFlag, blob + 8 + 5 * 4, sizeof( int ) );
@@ -214,12 +237,41 @@ int EFW_ClientKey( int down, int keynum )
 {
 	int slot = 0;
 	char buf[32];
+	int i;
 	if( !down )
 		return 1;
 	if( g_storyCode )
 	{
 		EFW_DismissStoryboard();
 		return 0;
+	}
+	if( keynum == K_MOUSE1 || keynum == K_MOUSE2 )
+	{
+		/* Original VGUI CommandButtons eat the click. Under pointer-lock
+		   pick the widget nearest the crosshair (FUN_10044f70 screen pos). */
+		int best = -1;
+		int bestD = 80 * 80;
+		int cx = ScreenWidth / 2;
+		int cy = ScreenHeight / 2;
+		char cmd[96];
+		for( i = 0; i < g_vguiN; i++ )
+		{
+			EfwVguiBtn *b = &g_vgui[i];
+			int mx = b->x + b->w / 2;
+			int my = b->y + b->h / 2;
+			int d = ( mx - cx ) * ( mx - cx ) + ( my - cy ) * ( my - cy );
+			if( d < bestD && b->cmd[0] )
+			{
+				bestD = d;
+				best = i;
+			}
+		}
+		if( best >= 0 )
+		{
+			snprintf( cmd, sizeof( cmd ), "%s\n", g_vgui[best].cmd );
+			gEngfuncs.pfnServerCmd( cmd );
+			return 0;
+		}
 	}
 	if( keynum >= '1' && keynum <= '9' )
 		slot = keynum - '0';
@@ -249,6 +301,9 @@ int CHudEfw::Init( void )
 	g_scanCount = 0;
 	g_storyCode = 0;
 	g_weaponId = -1;
+	g_weaponMask = 0;
+	g_vguiN = 0;
+	g_vguiSig[0] = '\0';
 	memset( g_menuLine, 0, sizeof( g_menuLine ) );
 	memset( g_scan, 0, sizeof( g_scan ) );
 	gEngfuncs.pfnHookUserMsg( "EFWData", __MsgFunc_EFWData );
@@ -268,6 +323,7 @@ int CHudEfw::VidInit( void )
 	g_hBubble = EFW_LoadSpr( "sprites/efw_speech_bubble.spr" );
 	g_hHide = EFW_LoadSpr( "sprites/efw_hide_icon.spr" );
 	g_hPliers = EFW_LoadSpr( "sprites/efw_item_pliers.spr" );
+	g_hGive = EFW_LoadSpr( "sprites/efw_give_icon.spr" );
 	g_hStory = 0;
 	return 1;
 }
@@ -380,92 +436,188 @@ static void EFW_DrawPrompt( int x, int y, const char *label, HSPRITE icon, int r
 		gHUD.DrawHudString( x - 60, y, x + 120, label, r, g, b );
 }
 
-static void EFW_ScanLabel( const EfwScanSlot *s, char *label, int labelSize, HSPRITE *icon )
+static int EFW_HasWep( int id )
 {
-	label[0] = '\0';
-	*icon = 0;
+	if( id < 16 || id > 31 )
+		return 0;
+	if( g_weaponMask & ( 1 << ( id - 16 ) ) )
+		return 1;
+	return g_weaponId == id;
+}
+
+static int EFW_FirstWep( void )
+{
+	int i;
+	if( g_weaponId >= 16 )
+		return g_weaponId;
+	for( i = 0; i < 16; i++ )
+	{
+		if( g_weaponMask & ( 1 << i ) )
+			return 16 + i;
+	}
+	return -1;
+}
+
+static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRITE icon )
+{
+	EfwVguiBtn *b;
+	int w = 168;
+	int h = 28;
+	if( g_vguiN >= EFW_VGUI_MAX )
+		return;
+	if( x < 90 || y < 90 || x > ScreenWidth - 90 || y > ScreenHeight - 90 )
+		return;
+	if( x < 180 )
+		x = 180;
+	if( y < 180 )
+		y = 180;
+	if( x > ScreenWidth - 180 )
+		x = ScreenWidth - 180;
+	if( y > ScreenHeight - 180 )
+		y = ScreenHeight - 180;
+	b = &g_vgui[g_vguiN++];
+	b->w = w;
+	b->h = h;
+	b->x = x - w / 2;
+	b->y = y - h;
+	b->icon = icon;
+	strncpy( b->label, label ? label : "", sizeof( b->label ) - 1 );
+	b->label[sizeof( b->label ) - 1] = '\0';
+	strncpy( b->cmd, cmd ? cmd : "", sizeof( b->cmd ) - 1 );
+	b->cmd[sizeof( b->cmd ) - 1] = '\0';
+}
+
+static void EFW_VguiSync( void )
+{
+	char sig[512];
+	int i;
+	int n;
+	sig[0] = '\0';
+	n = 0;
+	for( i = 0; i < g_vguiN; i++ )
+	{
+		n += snprintf( sig + n, sizeof( sig ) - n, "%s|", g_vgui[i].cmd );
+		if( n >= (int)sizeof( sig ) - 1 )
+			break;
+	}
+	if( !strcmp( sig, g_vguiSig ) )
+		return;
+	strncpy( g_vguiSig, sig, sizeof( g_vguiSig ) - 1 );
+	g_vguiSig[sizeof( g_vguiSig ) - 1] = '\0';
+	gEngfuncs.Con_Printf( "EFWVGUI CLR\n" );
+	for( i = 0; i < g_vguiN; i++ )
+	{
+		EfwVguiBtn *b = &g_vgui[i];
+		gEngfuncs.Con_Printf( "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
+			(float)b->x / (float)ScreenWidth,
+			(float)b->y / (float)ScreenHeight,
+			(float)b->w / (float)ScreenWidth,
+			(float)b->h / (float)ScreenHeight,
+			b->cmd, b->label );
+	}
+}
+
+static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
+{
+	char label[64];
+	char cmd[96];
+	int wep;
 	if( s->type == 0 )
-		snprintf( label, labelSize, "Talk to %s", s->name[0] ? s->name : "them" ), *icon = g_hBubble;
-	else if( s->type == 1 )
+	{
+		snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
+		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
+		EFW_VguiAdd( x, y, label, cmd, g_hBubble );
+		wep = EFW_FirstWep();
+		if( wep >= 16 )
+		{
+			snprintf( label, sizeof( label ), "Give %d to %s", wep, s->name[0] ? s->name : "them" );
+			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", wep, s->name[0] ? s->name : "" );
+			EFW_VguiAdd( x, y + 30, label, cmd, g_hGive );
+		}
+		return;
+	}
+	if( s->type == 1 )
 	{
 		if( !strcmp( s->name, "efw_IDTag_Position" ) )
-			snprintf( label, labelSize, "Place ID on fence" );
+		{
+			if( EFW_HasWep( 20 ) )
+			{
+				snprintf( label, sizeof( label ), "Place %d on fence", 20 );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
+				EFW_VguiAdd( x, y, label, cmd, 0 );
+			}
+			else
+			{
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
+				EFW_VguiAdd( x, y, "Take ID from fence", cmd, 0 );
+			}
+		}
 		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
-			snprintf( label, labelSize, "Hide in bin" );
+		{
+			if( EFW_HasWep( 16 ) )
+			{
+				snprintf( label, sizeof( label ), "Hide %d in bin", 16 );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
+				EFW_VguiAdd( x, y, label, cmd, 0 );
+			}
+		}
 		else if( !strcmp( s->name, "efw_hiding_place" ) )
 		{
-			snprintf( label, labelSize, "Hide under the building" );
-			*icon = g_hHide;
+			EFW_VguiAdd( x, y, "Hide under the building", "efw_HideUnderBuilding", g_hHide );
 		}
 		else if( !strcmp( s->name, "efw_PliersMarker" ) )
 		{
-			snprintf( label, labelSize, "Take pliers" );
-			*icon = g_hPliers;
+			EFW_VguiAdd( x, y, "Take pliers", "efw_PickupPliers", g_hPliers );
 		}
 		else if( !strcmp( s->name, "efw_cage_door" ) )
-			snprintf( label, labelSize, "Use with marker" );
+		{
+			if( EFW_HasWep( 17 ) )
+			{
+				snprintf( label, sizeof( label ), "Force open cage door with %d", 17 );
+				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
+				EFW_VguiAdd( x, y, label, cmd, 0 );
+			}
+		}
 		else
-			snprintf( label, labelSize, "%s", s->name );
+		{
+			snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
+			EFW_VguiAdd( x, y, s->name, cmd, 0 );
+		}
+		return;
 	}
-	else if( s->type >= 100 )
+	if( s->type >= 100 )
 	{
-		snprintf( label, labelSize, "Pickup" );
-		*icon = g_hPliers;
+		int id = s->type - 100;
+		snprintf( label, sizeof( label ), "Pick up %d", id );
+		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
+		EFW_VguiAdd( x, y, label, cmd, g_hPliers );
 	}
 }
 
 static void EFW_DrawScanPrompts( int r, int g, int b )
 {
 	int i;
-	int fallback = 0;
-	int row;
+	g_vguiN = 0;
 	for( i = 0; i < g_scanCount; i++ )
 	{
 		EfwScanSlot *s = &g_scan[i];
 		int x, y;
-		char label[64];
-		HSPRITE icon = 0;
-		int projected;
-		EFW_ScanLabel( s, label, sizeof( label ), &icon );
-		projected = EFW_Project( s->x, s->y, s->z, &x, &y );
-		if( projected && label[0] )
-		{
-			EFW_DrawPrompt( x, y, label, icon, r, g, b );
-			if( s->type == 0 && g_weaponId >= 16 )
-			{
-				char give[64];
-				snprintf( give, sizeof( give ), "Give to %s", s->name[0] ? s->name : "them" );
-				EFW_DrawPrompt( x, y + 18, give, 0, r, g, b );
-			}
-		}
+		if( EFW_Project( s->x, s->y, s->z, &x, &y ) )
+			EFW_BuildVgui( s, x, y );
 		else
-			fallback++;
-	}
-	if( fallback == 0 )
-		return;
-	row = ScreenHeight - 18 * ( g_scanCount + ( g_weaponId >= 16 ? 1 : 0 ) ) - 12;
-	if( row < 64 )
-		row = 64;
-	for( i = 0; i < g_scanCount; i++ )
-	{
-		char label[64];
-		HSPRITE icon = 0;
-		int x, y;
-		EFW_ScanLabel( &g_scan[i], label, sizeof( label ), &icon );
-		if( !label[0] )
-			continue;
-		if( EFW_Project( g_scan[i].x, g_scan[i].y, g_scan[i].z, &x, &y ) )
-			continue;
-		gHUD.DrawHudString( 16, row, ScreenWidth - 16, label, r, g, b );
-		row += 16;
-		if( g_scan[i].type == 0 && g_weaponId >= 16 )
 		{
-			char give[64];
-			snprintf( give, sizeof( give ), "Give to %s", g_scan[i].name[0] ? g_scan[i].name : "them" );
-			gHUD.DrawHudString( 16, row, ScreenWidth - 16, give, r, g, b );
-			row += 16;
+			x = 200;
+			y = ScreenHeight - 32 * ( g_scanCount - i ) - 24;
+			EFW_BuildVgui( s, x, y );
 		}
 	}
+	for( i = 0; i < g_vguiN; i++ )
+	{
+		EfwVguiBtn *btn = &g_vgui[i];
+		EFW_DrawPrompt( btn->x + btn->w / 2, btn->y + btn->h, btn->label, btn->icon, r, g, b );
+		FillRGBA( btn->x, btn->y, btn->w, 2, r, g, b, 180 );
+	}
+	EFW_VguiSync();
 }
 
 int CHudEfw::Draw( float flTime )

@@ -68,11 +68,6 @@ Ghidra only decompiled the `say` / `say_team` prefix. Capstone recovered the lat
 
 Client issues `efw_Talk %c` / `efw_Give %d %c` / `efw_UseWithMarker %d %c` as `ClientCmd` strings; the server `ClientCommand` above is the matching half.
 
-## Next port (not in this change)
+Remaining thinner surfaces are CRT/STL helpers and Spirit-of-HL stock AI, not EFW overlay gameplay.
 
-Remaining DLL surfaces still thinner than Win32:
-
-- CRefugee IdleThink schedules (`queue`, `mad_scientist_entity`) beyond walk-to-player
-- PA / ambient audio hooks
-- Per-weapon touch extras beyond LINK + Give bit
-- VGUI button widgets (WASM draws sprites + HUD strings; clicks go through `efw_Talk` / HTML)
+Client VGUI CommandButtons (`FUN_10044f70`) are ported as HUD widgets plus an HTML overlay that issues the original `efw_Talk` / `efw_Give %d` / `efw_UseWithMarker %d` ClientCmds. Patrol `FUN_100c54e0` + `FUN_100c5480` chase-all-guards is in `CPatrolGuard::PatrolThink`.

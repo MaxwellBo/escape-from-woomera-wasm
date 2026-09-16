@@ -22,21 +22,24 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
 void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 void EFW_Spider( CBasePlayer *pPlayer );
 void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc );
+void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
+void EFW_PatrolAlertAll( void ); /* FUN_100c5480 */
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 #endif
 
+/* FUN_100c43b0 table 0x100f81e0: Pliers, Lever, Branch, MobilePhone, IDTag, Red, Green, Blue, Powder. */
 #define WEAPON_EFW_PLIERS			16
-#define WEAPON_EFW_PILERS			17
-#define WEAPON_EFW_LEVER			18
-#define WEAPON_EFW_BRANCH			19
-#define WEAPON_EFW_MOBILEPHONE		20
-#define WEAPON_EFW_IDTAG			21
-#define WEAPON_EFW_BLUEPHONECARD	22
-#define WEAPON_EFW_GREENPHONECARD	23
-#define WEAPON_EFW_REDPHONECARD		24
-#define WEAPON_EFW_WASHINGPOWDER	25
+#define WEAPON_EFW_LEVER			17
+#define WEAPON_EFW_BRANCH			18
+#define WEAPON_EFW_MOBILEPHONE		19
+#define WEAPON_EFW_IDTAG			20
+#define WEAPON_EFW_REDPHONECARD		21
+#define WEAPON_EFW_GREENPHONECARD	22
+#define WEAPON_EFW_BLUEPHONECARD		23
+#define WEAPON_EFW_WASHINGPOWDER	24
+#define WEAPON_EFW_PILERS			WEAPON_EFW_PLIERS
 
 #define EFW_ITEM_PLIERS			( 1 << 0 )
 #define EFW_ITEM_PILERS			( 1 << 1 )

@@ -188,10 +188,16 @@ void EFW_SendHudState( void )
 	EFW_SetHudInt( 1, page );
 	EFW_SetHudInt( 2, ( cursor < EFW_MAX_DIARY ) ? g_efw.diaryFlags[cursor] : 0 );
 	EFW_SetHudInt( 3, EFW_MapLevel() );
-	if( g_efw.player && g_efw.player->m_pActiveItem )
-		EFW_SetHudInt( 4, g_efw.player->m_pActiveItem->m_iId );
-	else
-		EFW_SetHudInt( 4, -1 );
+	{
+		int active = 0;
+		int packed;
+		if( g_efw.player && g_efw.player->m_pActiveItem )
+			active = g_efw.player->m_pActiveItem->m_iId;
+		if( active < 0 )
+			active = 0;
+		packed = ( EFW_WeaponMask( g_efw.player ) << 16 ) | ( active & 0xffff );
+		EFW_SetHudInt( 4, packed );
+	}
 	if( gpGlobals->time - g_efw.hudRetry >= 0.1f )
 	{
 		g_efw.hudRetry = gpGlobals->time;
@@ -319,20 +325,61 @@ int EFW_HasWeapon( CBasePlayer *pPlayer, const char *classname )
 
 int EFW_WeaponTypeId( const char *classname )
 {
+	/* FUN_100c43b0 walks PTR 0x100f81e0..0x100f8204, id = index + 0x10. */
 	static const char *kNames[] = {
-		"weapon_efw_Pliers", "weapon_efw_Pilers", "weapon_efw_Lever", "weapon_efw_Branch",
-		"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_BluePhoneCard",
-		"weapon_efw_GreenPhoneCard", "weapon_efw_RedPhoneCard", "weapon_efw_WashingPowder"
+		"weapon_efw_Pliers", "weapon_efw_Lever", "weapon_efw_Branch",
+		"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_RedPhoneCard",
+		"weapon_efw_GreenPhoneCard", "weapon_efw_BluePhoneCard", "weapon_efw_WashingPowder"
 	};
 	unsigned i;
 	if( !classname )
 		return -1;
+	if( !strcmp( classname, "weapon_efw_Pilers" ) )
+		return WEAPON_EFW_PLIERS;
 	for( i = 0; i < sizeof( kNames ) / sizeof( kNames[0] ); i++ )
 	{
 		if( !strcmp( classname, kNames[i] ) )
 			return (int)i + 0x10;
 	}
 	return -1;
+}
+
+int EFW_WeaponMask( CBasePlayer *pPlayer )
+{
+	int mask = 0;
+	int slot;
+	CBasePlayerItem *pItem;
+
+	if( g_efw.items & EFW_ITEM_PLIERS )
+		mask |= 1 << ( WEAPON_EFW_PLIERS - 16 );
+	if( g_efw.items & EFW_ITEM_LEVER )
+		mask |= 1 << ( WEAPON_EFW_LEVER - 16 );
+	if( g_efw.items & EFW_ITEM_BRANCH )
+		mask |= 1 << ( WEAPON_EFW_BRANCH - 16 );
+	if( g_efw.items & EFW_ITEM_PHONE )
+		mask |= 1 << ( WEAPON_EFW_MOBILEPHONE - 16 );
+	if( g_efw.items & EFW_ITEM_IDTAG )
+		mask |= 1 << ( WEAPON_EFW_IDTAG - 16 );
+	if( g_efw.items & EFW_ITEM_REDCARD )
+		mask |= 1 << ( WEAPON_EFW_REDPHONECARD - 16 );
+	if( g_efw.items & EFW_ITEM_GREENCARD )
+		mask |= 1 << ( WEAPON_EFW_GREENPHONECARD - 16 );
+	if( g_efw.items & EFW_ITEM_BLUECARD )
+		mask |= 1 << ( WEAPON_EFW_BLUEPHONECARD - 16 );
+	if( g_efw.items & EFW_ITEM_POWDER )
+		mask |= 1 << ( WEAPON_EFW_WASHINGPOWDER - 16 );
+	if( !pPlayer )
+		return mask;
+	for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
+	{
+		for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; pItem = pItem->m_pNext )
+		{
+			int id = pItem->m_iId;
+			if( id >= 16 && id < 32 )
+				mask |= 1 << ( id - 16 );
+		}
+	}
+	return mask;
 }
 
 int EFW_HasSeen( const char *npc, const char *topic )
@@ -455,6 +502,49 @@ void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 		pPlayer->GiveNamedItem( weaponName );
 }
 
+void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
+{
+	int slot;
+	CBasePlayerItem *pItem;
+
+	g_efw.items &= ~itemBit;
+	if( !pPlayer || !classname )
+		return;
+	for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
+	{
+		for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; )
+		{
+			CBasePlayerItem *pNext = pItem->m_pNext;
+			if( !strcmp( STRING( pItem->pev->classname ), classname ) )
+				pPlayer->RemovePlayerItem( pItem, true );
+			pItem = pNext;
+		}
+	}
+}
+
+static void EFW_SpawnFenceTag( void )
+{
+	CBaseEntity *pMark;
+	edict_t *pent;
+	Vector pos;
+
+	/* FUN_100c27f0: on maplevel 2, materialize weapon_efw_IDTag at efw_IDTag_Position. */
+	if( EFW_MapLevel() != 2 )
+		return;
+	pMark = UTIL_FindEntityByTargetname( NULL, "efw_IDTag_Position" );
+	if( !pMark )
+		return;
+	pos = ( pMark->pev->absmin + pMark->pev->absmax ) * 0.5f;
+	if( ( pMark->pev->absmax - pMark->pev->absmin ).Length() < 1.0f )
+		pos = pMark->pev->origin;
+	pent = CREATE_NAMED_ENTITY( MAKE_STRING( "weapon_efw_IDTag" ) );
+	if( FNullEnt( pent ) )
+		return;
+	pent->v.origin = pos;
+	DispatchSpawn( pent );
+	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+}
+
 void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 {
 	char name[48];
@@ -520,6 +610,22 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 			EFW_AddDiary( p, 2 );
 	}
 	EFW_SetHudInt( 0, 1 );
+	/* FUN_100c3020 starting loadout by maplevel. */
+	if( pPlayer )
+	{
+		if( level == 0 )
+		{
+			EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+			EFW_GiveItem( pPlayer, EFW_ITEM_REDCARD, "weapon_efw_RedPhoneCard" );
+		}
+		else if( level == 1 )
+			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+		else if( level == 2 )
+		{
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+			EFW_SpawnFenceTag();
+		}
+	}
 	g_efw.inited = 1;
 	EFW_SendHudState();
 }

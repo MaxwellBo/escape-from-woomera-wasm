@@ -167,14 +167,20 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 			return 1;
 		}
 		if( UTIL_FindEntityByTargetname( NULL, "efw_compound_gate" ) )
+		{
 			EFW_UseNamed( "efw_compound_gate", pPlayer, pPlayer, useType, value );
+			EFW_Print( pPlayer, "efw: compound gate opens" );
+		}
 		return 1;
 	}
 
 	if( EFW_FStrEq( targetName, "efw_1stcompound_entry" ) )
 	{
 		if( !EFW_HasKeyword( "Player'sIDTagOnFence" ) )
+		{
 			EFW_UseNamed( "efw_1stcompound_gate", pPlayer, pPlayer, useType, value );
+			EFW_Print( pPlayer, "efw: 1st compound gate opens" );
+		}
 		else
 			EFW_Squark( "efw_compound_gate_guard",
 				"The gate doesn't open til you collect your tag. No tag, no entry.",

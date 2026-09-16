@@ -25,15 +25,15 @@ struct EfwWeaponDef
 
 static const EfwWeaponDef g_efwWeapons[] = {
 	{ "weapon_efw_Pliers", WEAPON_EFW_PLIERS, 1, "models/v_pliers.mdl", "models/w_pliers.mdl", "models/p_pliers.mdl", EFW_ITEM_PLIERS },
-	{ "weapon_efw_Pilers", WEAPON_EFW_PILERS, 2, "models/v_pilers.mdl", "models/w_pilers.mdl", "models/p_pilers.mdl", EFW_ITEM_PILERS },
-	{ "weapon_efw_Lever", WEAPON_EFW_LEVER, 3, "models/v_lever.mdl", "models/w_lever.mdl", "models/p_lever.mdl", EFW_ITEM_LEVER },
-	{ "weapon_efw_Branch", WEAPON_EFW_BRANCH, 4, "models/v_branch.mdl", "models/w_branch.mdl", "models/p_branch.mdl", EFW_ITEM_BRANCH },
-	{ "weapon_efw_MobilePhone", WEAPON_EFW_MOBILEPHONE, 5, "models/v_mobilephone.mdl", "models/w_mobilephone.mdl", "models/p_mobilephone.mdl", EFW_ITEM_PHONE },
-	{ "weapon_efw_IDTag", WEAPON_EFW_IDTAG, 6, "models/v_idtag.mdl", "models/w_idtag.mdl", "models/p_idtag.mdl", EFW_ITEM_IDTAG },
-	{ "weapon_efw_BluePhoneCard", WEAPON_EFW_BLUEPHONECARD, 1, "models/v_bluephonecard.mdl", "models/w_bluephonecard.mdl", "models/p_bluephonecard.mdl", EFW_ITEM_BLUECARD },
-	{ "weapon_efw_GreenPhoneCard", WEAPON_EFW_GREENPHONECARD, 2, "models/v_greenphonecard.mdl", "models/w_greenphonecard.mdl", "models/p_greenphonecard.mdl", EFW_ITEM_GREENCARD },
-	{ "weapon_efw_RedPhoneCard", WEAPON_EFW_REDPHONECARD, 3, "models/v_redphonecard.mdl", "models/w_redphonecard.mdl", "models/p_redphonecard.mdl", EFW_ITEM_REDCARD },
-	{ "weapon_efw_WashingPowder", WEAPON_EFW_WASHINGPOWDER, 4, "models/v_washingpowder.mdl", "models/w_washingpowder.mdl", "models/p_washingpowder.mdl", EFW_ITEM_POWDER },
+	{ "weapon_efw_Pilers", WEAPON_EFW_PILERS, 1, "models/v_pilers.mdl", "models/w_pilers.mdl", "models/p_pilers.mdl", EFW_ITEM_PILERS },
+	{ "weapon_efw_Lever", WEAPON_EFW_LEVER, 2, "models/v_lever.mdl", "models/w_lever.mdl", "models/p_lever.mdl", EFW_ITEM_LEVER },
+	{ "weapon_efw_Branch", WEAPON_EFW_BRANCH, 3, "models/v_branch.mdl", "models/w_branch.mdl", "models/p_branch.mdl", EFW_ITEM_BRANCH },
+	{ "weapon_efw_MobilePhone", WEAPON_EFW_MOBILEPHONE, 4, "models/v_mobilephone.mdl", "models/w_mobilephone.mdl", "models/p_mobilephone.mdl", EFW_ITEM_PHONE },
+	{ "weapon_efw_IDTag", WEAPON_EFW_IDTAG, 5, "models/v_idtag.mdl", "models/w_idtag.mdl", "models/p_idtag.mdl", EFW_ITEM_IDTAG },
+	{ "weapon_efw_RedPhoneCard", WEAPON_EFW_REDPHONECARD, 6, "models/v_redphonecard.mdl", "models/w_redphonecard.mdl", "models/p_redphonecard.mdl", EFW_ITEM_REDCARD },
+	{ "weapon_efw_GreenPhoneCard", WEAPON_EFW_GREENPHONECARD, 7, "models/v_greenphonecard.mdl", "models/w_greenphonecard.mdl", "models/p_greenphonecard.mdl", EFW_ITEM_GREENCARD },
+	{ "weapon_efw_BluePhoneCard", WEAPON_EFW_BLUEPHONECARD, 8, "models/v_bluephonecard.mdl", "models/w_bluephonecard.mdl", "models/p_bluephonecard.mdl", EFW_ITEM_BLUECARD },
+	{ "weapon_efw_WashingPowder", WEAPON_EFW_WASHINGPOWDER, 9, "models/v_washingpowder.mdl", "models/w_washingpowder.mdl", "models/p_washingpowder.mdl", EFW_ITEM_POWDER },
 };
 
 static const EfwWeaponDef *EFW_FindDef( const char *classname )

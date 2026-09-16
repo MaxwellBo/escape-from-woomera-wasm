@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll12`;
+    return `${url}?v=efw-dll13`;
   return url;
 }
 
@@ -46,9 +46,50 @@ const staged = {
 let engine: XashInstance | null = null;
 let logLines = 0;
 
+function applyEfwVgui(text: string): boolean {
+  const layer = document.getElementById('efw-vgui');
+  if (!layer) return false;
+  if (text === 'EFWVGUI CLR') {
+    layer.innerHTML = '';
+    layer.hidden = true;
+    return true;
+  }
+  if (!text.startsWith('EFWVGUI ADD ')) return false;
+  const rest = text.slice('EFWVGUI ADD '.length);
+  const tab = rest.indexOf('\t');
+  const head = tab >= 0 ? rest.slice(0, tab) : rest;
+  const label = tab >= 0 ? rest.slice(tab + 1) : head;
+  const parts = head.split(' ');
+  if (parts.length < 5) return true;
+  const [nx, ny, nw, nh, ...cmdParts] = parts;
+  const cmd = cmdParts.join(' ');
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.textContent = label || cmd;
+  btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+  btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+  btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+  btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+  btn.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    log(`> ${cmd}`);
+    runEngineCmd('pausable 0');
+    runGameCmd(cmd);
+  });
+  layer.appendChild(btn);
+  layer.hidden = false;
+  return true;
+}
+
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
+  if (applyEfwVgui(normalized)) return;
   logLines++;
   logCount.textContent = String(logLines);
   logEl.textContent += normalized + '\n';

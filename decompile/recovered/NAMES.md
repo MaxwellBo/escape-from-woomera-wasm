@@ -22,6 +22,8 @@
 | 0x100c81d0 | `efw_FailOrNarrate` | hope±15 for 0x3f/0x43; ShowMenu strings 0x3c–0x45; else EFW_Menu |
 | 0x100c4700 | `weapon_efw_Pliers` | w/v/p_Pliers.mdl |
 | 0x100c53c0 | `monster_patrol_guard` | LINK_ENTITY_TO_CLASS |
+| 0x100c5480 | `efw_PatrolAlertAll` | every patrol sets chase state 4 |
+| 0x100c54e0 | `CPatrolGuard::Think` | sight/hear FSM; halt; isolation 0x46 |
 | 0x100c5ea0 | `monster_refugee` | CRefugee, alloc 0x3a8, vtable 0x100f93a4 |
 | 0x100c5f10 | `monster_efw_guard` | same CRefugee vtable |
 | 0x100c6440 | `CRefugee::IdleThink` | queue / mad_scientist_entity / walk-to-player |
