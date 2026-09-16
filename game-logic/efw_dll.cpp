@@ -34,7 +34,19 @@ EfwDllState *EFW_Dll( void )
 
 CBasePlayer *EFW_Player( void )
 {
-	return g_efw.player;
+	edict_t *e;
+
+	if( g_efw.player )
+	{
+		e = g_efw.player->edict();
+		if( e && !e->free && e->pvPrivateData )
+			return g_efw.player;
+		g_efw.player = NULL;
+	}
+	e = INDEXENT( 1 );
+	if( e && !e->free && e->pvPrivateData )
+		return (CBasePlayer *)GET_PRIVATE( e );
+	return NULL;
 }
 
 void EFW_SetPlayer( CBasePlayer *pPlayer )
@@ -542,7 +554,8 @@ void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName )
 	   GiveNamedItem never created the edict. FUN_100c2f70 is HasNamedPlayerItem. */
 	if( !pPlayer->HasNamedPlayerItem( weaponName ) )
 		pPlayer->GiveNamedItem( weaponName );
-	pPlayer->SelectItem( weaponName );
+	if( pPlayer->HasNamedPlayerItem( weaponName ) )
+		pPlayer->SelectItem( weaponName );
 }
 
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
@@ -825,13 +838,13 @@ static void EFW_HostFwd( void )
 	const char *pcmd = CMD_ARGV( 0 );
 
 	pPlayer = EFW_Player();
-	e = pPlayer ? pPlayer->edict() : INDEXENT( 1 );
+	e = pPlayer ? pPlayer->edict() : NULL;
 	snprintf( line, sizeof( line ), "efw: hostfwd %s pawn=%d\n",
-		pcmd ? pcmd : "?", ( e && e->pvPrivateData ) ? 1 : 0 );
+		pcmd ? pcmd : "?", ( e && !e->free && e->pvPrivateData ) ? 1 : 0 );
 	ALERT( at_error, "%s", line );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( line );
-	if( e && e->pvPrivateData )
+	if( e && !e->free && e->pvPrivateData )
 		EFW_ClientCommand( e );
 }
 
@@ -1344,7 +1357,10 @@ void EFW_OnServerActivate( void )
 	map = ( gpGlobals && gpGlobals->mapname ) ? STRING( gpGlobals->mapname ) : "";
 	if( s_mapLive && s_precacheMap[0] && map[0] && !strcmp( s_precacheMap, map ) )
 	{
-		EFW_LogLine( "efw: ServerActivate already live\n" );
+		static int s_liveSpam;
+		s_liveSpam++;
+		if( s_liveSpam <= 2 || ( s_liveSpam % 120 ) == 0 )
+			EFW_LogLine( "efw: ServerActivate already live\n" );
 		return;
 	}
 	if( s_mapLive )
@@ -1368,6 +1384,7 @@ void EFW_OnServerActivate( void )
 void EFW_OnServerDeactivate( void )
 {
 	EFW_LogLine( "efw: ServerDeactivate\n" );
+	g_efw.player = NULL;
 	s_worldPrecache = 0;
 	s_worldPrecacheDone = 0;
 	s_worldPasses = 0;

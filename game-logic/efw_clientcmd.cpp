@@ -579,14 +579,19 @@ int EFW_ClientCommand( edict_t *pEntity )
 		CBasePlayerItem *pItem = pPlayer->m_pActiveItem;
 		int slot;
 		int bit = 0;
-		if( !pItem )
+		const char *cn;
+
+		cn = ( pItem && pItem->pev ) ? STRING( pItem->pev->classname ) : "";
+		if( !cn || strncmp( cn, "weapon_efw", 10 ) )
 		{
+			pItem = NULL;
 			for( slot = 0; slot < MAX_ITEM_TYPES && !pItem; slot++ )
 			{
 				CBasePlayerItem *pWalk = pPlayer->m_rgpPlayerItems[slot];
 				while( pWalk )
 				{
-					if( !strncmp( STRING( pWalk->pev->classname ), "weapon_efw", 10 ) )
+					const char *walkCn = ( pWalk->pev ) ? STRING( pWalk->pev->classname ) : "";
+					if( walkCn && !strncmp( walkCn, "weapon_efw", 10 ) )
 					{
 						pItem = pWalk;
 						break;
@@ -595,9 +600,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 				}
 			}
 		}
-		if( pItem )
+		if( pItem && pItem->pev )
 		{
-			const char *cn = STRING( pItem->pev->classname );
+			cn = STRING( pItem->pev->classname );
 			if( strstr( cn, "Pliers" ) || strstr( cn, "Pilers" ) )
 				bit = EFW_ITEM_PLIERS;
 			else if( strstr( cn, "Lever" ) )
