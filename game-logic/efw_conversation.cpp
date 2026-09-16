@@ -362,25 +362,36 @@ void EFW_ThinkConversation( void )
 	EfwDllState *st = EFW_Dll();
 	CBasePlayer *pPlayer;
 	float dist;
+
 	if( !st->talkActive )
-		return;
-	pPlayer = EFW_Player();
-	if( !pPlayer || !st->talkNpc )
 	{
-		EFW_CloseTalk();
-		return;
+		st->talkIdleTicks++;
+		if( st->talkIdleTicks > 0x3c && st->diaryPending != -1 )
+		{
+			EFW_SetHudInt( 0, st->diaryPending );
+			EFW_SetHudInt( 5, 1 );
+			st->diaryPending = -1;
+		}
 	}
-	if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
+	else
 	{
-		EFW_CloseTalk();
-		return;
+		pPlayer = EFW_Player();
+		if( !pPlayer || !st->talkNpc )
+			EFW_CloseTalk();
+		else if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
+			EFW_CloseTalk();
+		else
+		{
+			dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
+			if( dist >= st->hideDist )
+			{
+				EFW_DebugPrint( "Conversation hidden, partner too far" );
+				EFW_CloseTalk();
+			}
+		}
+		st->talkIdleTicks = 0;
 	}
-	dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
-	if( dist >= st->hideDist )
-	{
-		EFW_DebugPrint( "Conversation hidden, partner too far" );
-		EFW_CloseTalk();
-	}
+	EFW_ThinkPA();
 }
 
 static Vector EFW_AbsCenter( CBaseEntity *pEnt )

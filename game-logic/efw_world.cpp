@@ -52,10 +52,20 @@ int EFW_ElectricianSees( CBasePlayer *pPlayer )
 void EFW_SetPause( int on )
 {
 	CBasePlayer *pPlayer = EFW_Player();
+	CBaseEntity *pGuard;
 	EFW_SetHudInt( 6, on ? 1 : 0 );
 	if( !pPlayer )
 		return;
 	pPlayer->pev->movetype = on ? MOVETYPE_NONE : MOVETYPE_WALK;
+	/* FUN_100c74a0: freeze monster_patrol_guard while paused. */
+	pGuard = NULL;
+	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
+	{
+		pGuard->pev->framerate = on ? 0.0f : 1.0f;
+		pGuard->pev->movetype = on ? MOVETYPE_NONE : MOVETYPE_STEP;
+		pGuard->pev->nextthink = gpGlobals->time + 0.05f;
+		UTIL_SetOrigin( pGuard->pev, pGuard->pev->origin );
+	}
 	if( on )
 		EFW_DebugPrint( "efw_pause 1" );
 }
@@ -183,6 +193,105 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 		return 1;
 	}
 	return 0;
+}
+
+/* FUN_100c7590 / 75c0 / 75e0 / 7670 / 7740 — camp PA + Dingaling. */
+struct EfwCue
+{
+	const char *sample;
+};
+
+struct EfwPA
+{
+	EfwCue slot[5];
+	float gap;       /* +0x50 init 120, unused by think */
+	float timer;     /* +0x54 init 5 */
+	float lastTime;  /* +0x58 */
+	int index;       /* +0x5c */
+	int rarLock;     /* +0x60 */
+	float remainUntil;
+	int inited;
+};
+
+static EfwPA g_pa;
+
+void EFW_PlayCue( const char *sample )
+{
+	CBaseEntity *pSrc;
+	edict_t *ed;
+	int pitch;
+
+	if( !sample || !sample[0] )
+	{
+		EFW_DebugPrint( "efw: play (null)" );
+		return;
+	}
+	pSrc = UTIL_FindEntityByTargetname( NULL, sample );
+	if( pSrc )
+		ed = pSrc->edict();
+	else if( EFW_Player() )
+		ed = EFW_Player()->edict();
+	else
+		return;
+	pitch = 100 - RANDOM_LONG( 0, 19 );
+	EMIT_SOUND_DYN( ed, CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
+	EFW_DebugPrint( "efw: play %s", sample );
+}
+
+void EFW_InitPA( void )
+{
+	int i;
+	static const char *kAnn[] = {
+		"Ann_RAR_124.wav",
+		"Ann_HAM_103.wav",
+		"Ann_TRE_046.wav",
+		"Ann_PHA_216.wav",
+		"callToPrayer.wav"
+	};
+	for( i = 0; i < 5; i++ )
+	{
+		g_pa.slot[i].sample = kAnn[i];
+		PRECACHE_SOUND( (char *)kAnn[i] );
+	}
+	g_pa.gap = 120.0f;
+	g_pa.timer = 5.0f;
+	g_pa.lastTime = 0.0f;
+	g_pa.index = 0;
+	g_pa.rarLock = 0;
+	g_pa.remainUntil = 0.0f;
+	g_pa.inited = 1;
+	PRECACHE_SOUND( "Dingaling.wav" );
+}
+
+void EFW_ThinkPA( void )
+{
+	float now;
+	float remain;
+	const char *sample;
+	if( !g_pa.inited )
+		EFW_InitPA();
+	if( EFW_MapLevel() != 0 )
+		return;
+	now = gpGlobals->time;
+	remain = g_pa.remainUntil - now;
+	if( remain <= 0.5f && g_pa.timer > 5.0f )
+	{
+		if( g_pa.rarLock == 1 )
+			sample = g_pa.slot[0].sample;
+		else
+			sample = g_pa.slot[g_pa.index + 1].sample;
+		EFW_PlayCue( sample );
+		g_pa.timer = 0.0f;
+		g_pa.index++;
+		if( g_pa.index > 3 )
+			g_pa.index = 0;
+		g_pa.remainUntil = now + ( sample && strstr( sample, "callToPrayer" ) ? 8.0f : 4.0f );
+	}
+	if( g_pa.lastTime > 0.0f )
+		g_pa.timer += now - g_pa.lastTime;
+	else if( now > 0.0f )
+		g_pa.timer += now;
+	g_pa.lastTime = now;
 }
 
 #endif

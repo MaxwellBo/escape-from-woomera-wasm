@@ -72,6 +72,7 @@ struct EfwDllState
 	int hopeFailed;
 	int scanCount; /* DAT_10134940 */
 	EfwScanSlot scan[EFW_MAX_SCAN]; /* DAT_101348b0 */
+	int talkIdleTicks; /* DAT_10134884: delay pending diary while idle */
 };
 
 EfwDllState *EFW_Dll( void );
@@ -123,6 +124,9 @@ void EFW_ChangeLevel( const char *map ); /* ClientCommand 0x1001b2f3 */
 int EFW_ElectricianSees( CBasePlayer *pPlayer ); /* 0x100c59c0 */
 int EFW_WeaponTypeId( const char *classname ); /* 0x100c43b0 */
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
+void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
+void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
+void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */
 
 extern int gmsgEFWShow;
 extern int gmsgEFWData;

@@ -115,8 +115,23 @@ void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	tn = STRING( pNpc->pev->targetname );
 	if( EFW_FStrEq( tn, "Amir" ) )
 	{
+		CBasePlayerItem *pItem;
+		int slot;
 		st->items &= ~EFW_ITEM_PLIERS;
+		for( slot = 0; slot < MAX_ITEM_TYPES; slot++ )
+		{
+			for( pItem = pPlayer->m_rgpPlayerItems[slot]; pItem; )
+			{
+				CBasePlayerItem *pNext = pItem->m_pNext;
+				if( !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pliers" )
+					|| !strcmp( STRING( pItem->pev->classname ), "weapon_efw_Pilers" ) )
+					pPlayer->RemovePlayerItem( pItem, true );
+				pItem = pNext;
+			}
+		}
 		EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
+		if( 2 < EFW_MAX_DIARY )
+			st->diaryFlags[2] = 1;
 		EFW_AddDiary( 2, 2 );
 		EFW_FailOrNarrate( pPlayer, 0x4c );
 		return;
@@ -156,20 +171,20 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
 
 	if( !strcmp( name, "efw_PliersMarker" ) )
 	{
+		int had;
 		if( EFW_ElectricianSees( pPlayer ) )
 		{
 			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
 			return;
 		}
-		if( !( st->items & EFW_ITEM_PLIERS ) )
-		{
+		had = EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
+		if( !had )
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_AddKeyword( "PLIERS", 0 );
-			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
-			EFW_AddKeyword( "ELECTRICIAN", 0 );
-		}
 		if( EFW_MapLevel() == 0 )
-			EFW_FailOrNarrate( pPlayer, 0x3d );
+		{
+			if( had )
+				EFW_FailOrNarrate( pPlayer, 0x3d );
+		}
 		else
 			EFW_ShowGoldMenu( pPlayer, 0, 12,
 				"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
@@ -343,14 +358,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 		if( EFW_ElectricianSees( pPlayer ) )
 			EFW_Squark( "efw_electrician", "Dammit! Electrician saw you, can't put pliers in bin.", 4 );
 		else
-		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_AddKeyword( "PLIERS", 0 );
-			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
-			EFW_AddKeyword( "ELECTRICIAN", 0 );
-			if( EFW_MapLevel() == 0 )
-				EFW_FailOrNarrate( pPlayer, 0x3d );
-		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )

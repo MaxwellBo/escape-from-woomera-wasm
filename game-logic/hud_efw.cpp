@@ -350,55 +350,90 @@ static void EFW_DrawPrompt( int x, int y, const char *label, HSPRITE icon, int r
 		gHUD.DrawHudString( x - 60, y, x + 120, label, r, g, b );
 }
 
+static void EFW_ScanLabel( const EfwScanSlot *s, char *label, int labelSize, HSPRITE *icon )
+{
+	label[0] = '\0';
+	*icon = 0;
+	if( s->type == 0 )
+		snprintf( label, labelSize, "Talk to %s", s->name[0] ? s->name : "them" ), *icon = g_hBubble;
+	else if( s->type == 1 )
+	{
+		if( !strcmp( s->name, "efw_IDTag_Position" ) )
+			snprintf( label, labelSize, "Place ID on fence" );
+		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
+			snprintf( label, labelSize, "Hide in bin" );
+		else if( !strcmp( s->name, "efw_hiding_place" ) )
+		{
+			snprintf( label, labelSize, "Hide under the building" );
+			*icon = g_hHide;
+		}
+		else if( !strcmp( s->name, "efw_PliersMarker" ) )
+		{
+			snprintf( label, labelSize, "Take pliers" );
+			*icon = g_hPliers;
+		}
+		else if( !strcmp( s->name, "efw_cage_door" ) )
+			snprintf( label, labelSize, "Use with marker" );
+		else
+			snprintf( label, labelSize, "%s", s->name );
+	}
+	else if( s->type >= 100 )
+	{
+		snprintf( label, labelSize, "Pickup" );
+		*icon = g_hPliers;
+	}
+}
+
 static void EFW_DrawScanPrompts( int r, int g, int b )
 {
 	int i;
+	int fallback = 0;
+	int row;
 	for( i = 0; i < g_scanCount; i++ )
 	{
 		EfwScanSlot *s = &g_scan[i];
 		int x, y;
 		char label[64];
 		HSPRITE icon = 0;
-		label[0] = '\0';
-		if( !EFW_Project( s->x, s->y, s->z, &x, &y ) )
+		int projected;
+		EFW_ScanLabel( s, label, sizeof( label ), &icon );
+		projected = EFW_Project( s->x, s->y, s->z, &x, &y );
+		if( projected && label[0] )
+		{
+			EFW_DrawPrompt( x, y, label, icon, r, g, b );
+			if( s->type == 0 && g_weaponId >= 16 )
+			{
+				char give[64];
+				snprintf( give, sizeof( give ), "Give to %s", s->name[0] ? s->name : "them" );
+				EFW_DrawPrompt( x, y + 18, give, 0, r, g, b );
+			}
+		}
+		else
+			fallback++;
+	}
+	if( fallback == 0 )
+		return;
+	row = ScreenHeight - 18 * ( g_scanCount + ( g_weaponId >= 16 ? 1 : 0 ) ) - 12;
+	if( row < 64 )
+		row = 64;
+	for( i = 0; i < g_scanCount; i++ )
+	{
+		char label[64];
+		HSPRITE icon = 0;
+		int x, y;
+		EFW_ScanLabel( &g_scan[i], label, sizeof( label ), &icon );
+		if( !label[0] )
 			continue;
-		if( s->type == 0 )
+		if( EFW_Project( g_scan[i].x, g_scan[i].y, g_scan[i].z, &x, &y ) )
+			continue;
+		gHUD.DrawHudString( 16, row, ScreenWidth - 16, label, r, g, b );
+		row += 16;
+		if( g_scan[i].type == 0 && g_weaponId >= 16 )
 		{
-			snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
-			icon = g_hBubble;
-			EFW_DrawPrompt( x, y, label, icon, r, g, b );
-			if( g_weaponId >= 16 )
-			{
-				snprintf( label, sizeof( label ), "Give to %s", s->name );
-				EFW_DrawPrompt( x, y + 18, label, 0, r, g, b );
-			}
-		}
-		else if( s->type == 1 )
-		{
-			if( !strcmp( s->name, "efw_IDTag_Position" ) )
-				snprintf( label, sizeof( label ), "Place ID on fence" );
-			else if( !strcmp( s->name, "efw_kitchen_bin" ) )
-				snprintf( label, sizeof( label ), "Hide in bin" );
-			else if( !strcmp( s->name, "efw_hiding_place" ) )
-			{
-				snprintf( label, sizeof( label ), "Hide under the building" );
-				icon = g_hHide;
-			}
-			else if( !strcmp( s->name, "efw_PliersMarker" ) )
-			{
-				snprintf( label, sizeof( label ), "Take pliers" );
-				icon = g_hPliers;
-			}
-			else if( !strcmp( s->name, "efw_cage_door" ) )
-				snprintf( label, sizeof( label ), "Use with marker" );
-			else
-				snprintf( label, sizeof( label ), "%s", s->name );
-			EFW_DrawPrompt( x, y, label, icon, r, g, b );
-		}
-		else if( s->type >= 100 )
-		{
-			snprintf( label, sizeof( label ), "Pickup" );
-			EFW_DrawPrompt( x, y, label, g_hPliers, r, g, b );
+			char give[64];
+			snprintf( give, sizeof( give ), "Give to %s", g_scan[i].name[0] ? g_scan[i].name : "them" );
+			gHUD.DrawHudString( 16, row, ScreenWidth - 16, give, r, g, b );
+			row += 16;
 		}
 	}
 }

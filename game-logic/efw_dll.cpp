@@ -253,8 +253,19 @@ void EFW_AddDiary( int page, int mode )
 	if( g_efw.diaryCount >= EFW_MAX_DIARY )
 		return;
 	g_efw.diaryPages[g_efw.diaryCount] = page;
+	EFW_PlayCue( "Dingaling.wav" );
 	if( mode == 0 )
 		EFW_SetHudInt( 0, g_efw.diaryCount );
+	else if( mode == 1 )
+	{
+		if( g_efw.talkActive )
+			g_efw.diaryPending = g_efw.diaryCount;
+		else
+		{
+			EFW_SetHudInt( 0, g_efw.diaryCount );
+			g_efw.diaryPending = -1;
+		}
+	}
 	g_efw.diaryCount++;
 	EFW_DebugPrint( "Diary active item added    %d", page );
 }
@@ -560,6 +571,7 @@ void EFW_Precache( void )
 	PRECACHE_MODEL( "models/w_Pliers.mdl" );
 	PRECACHE_MODEL( "models/v_Pliers.mdl" );
 	PRECACHE_MODEL( "models/p_Pliers.mdl" );
+	EFW_InitPA();
 }
 
 void EFW_PlayerSpawn( CBasePlayer *pPlayer )
