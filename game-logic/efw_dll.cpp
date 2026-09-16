@@ -1060,6 +1060,36 @@ void EFW_StartFrame( void )
 		snprintf( line, sizeof( line ), "efw: StartFrame live ticks=%d\n", s_liveTicks );
 		EFW_LogLine( line );
 	}
+	/* First live frames: do not SET_MODEL or unfreeze anyone. The 3D
+	   ClientFrame plus leftover STEP physics is what stalls Host_Frame. */
+	if( s_liveTicks < 45 )
+	{
+		int j;
+		CBasePlayer *pPlayer = EFW_Player();
+		if( pPlayer )
+			pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+		EFW_FreezeNpcPhysics();
+		for( j = 1; j < EFW_MaxEnts(); j++ )
+		{
+			edict_t *e = INDEXENT( j );
+			if( !e || e->free )
+				continue;
+			if( pPlayer && e == pPlayer->edict() )
+				continue;
+			if( e->v.flags & FL_CLIENT )
+				continue;
+			e->v.nextthink = 0;
+			if( e->v.movetype == MOVETYPE_STEP || e->v.movetype == MOVETYPE_FLY
+				|| e->v.movetype == MOVETYPE_TOSS || e->v.movetype == MOVETYPE_WALK )
+				e->v.movetype = MOVETYPE_NONE;
+		}
+		{
+			char line[80];
+			snprintf( line, sizeof( line ), "efw: StartFrame done live=%d\n", s_liveTicks );
+			EFW_LogLine( line );
+		}
+		return;
+	}
 	if( s_studioDelay < 10 )
 	{
 		s_studioDelay++;
@@ -1390,14 +1420,25 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 
 void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 {
+	static int s_preN;
 	if( !pPlayer )
 		return;
+	s_preN++;
+	if( s_preN <= 8 || ( s_preN % 60 ) == 1 )
+	{
+		char line[64];
+		snprintf( line, sizeof( line ), "efw: PreThink n=%d live=%d\n", s_preN, s_liveTicks );
+		EFW_LogLine( line );
+	}
 	if( g_efw.player != pPlayer )
 		EFW_SetPlayer( pPlayer );
 	if( !g_efw.inited )
 		EFW_InitFromSpawn( pPlayer );
 	if( g_efw.lastTime > 1.0f && gpGlobals->time + 0.5f < g_efw.lastTime )
 		EFW_InitFromSpawn( pPlayer );
+	/* Skip HUD/scan/look-use until StartFrame has proven it can return. */
+	if( s_liveTicks < 8 )
+		return;
 	if( EFW_GetHudInt( 6 ) )
 		pPlayer->pev->movetype = MOVETYPE_NONE;
 	/* FUN_100c4af0: PE has no callers; attach to IN_USE so look-use runs. */
