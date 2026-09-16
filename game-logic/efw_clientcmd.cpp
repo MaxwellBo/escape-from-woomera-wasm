@@ -875,7 +875,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_flexfatal" ) )
 	{
-		/* FUN_100c1f20: PE fatal scanner strings (not a ClientCommand). */
+		/* FUN_100c1f20/2220/22b0/2410/20a0: PE fatal scanner strings. */
 		EfwScript_SetFlexFn( EFW_FlexMsg );
 		EfwScript_FlexProbe();
 		return 1;

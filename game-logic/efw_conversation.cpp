@@ -79,7 +79,7 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		free( buf );
 	else
 		FREE_FILE( buf );
-	/* FUN_100c2660 returns DAT_10132460 after FUN_100c1dc0 scanner + FUN_100be970. */
+	/* FUN_100c2660 returns DAT_10132460 after FUN_100c1dc0 scanner + FUN_100be970 yyparse. */
 	EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';

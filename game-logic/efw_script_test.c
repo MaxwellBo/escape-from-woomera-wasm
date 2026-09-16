@@ -31,14 +31,14 @@ static int expect_action( const EfwReply *r, int i, const char *want )
 	return 0;
 }
 
-static char s_flexCap[8][96];
+static char s_flexCap[24][96];
 static int s_flexN;
 static char s_capMsg[64];
 static int s_capLine;
 
 static void capture_flex( const char *msg )
 {
-	if( s_flexN < 8 && msg )
+	if( s_flexN < 24 && msg )
 	{
 		snprintf( s_flexCap[s_flexN], sizeof( s_flexCap[0] ), "%s", msg );
 		s_flexN++;
@@ -118,6 +118,7 @@ int main( void )
 	{
 		int i;
 		int gotMiss = 0, gotOv = 0, gotIn = 0;
+		int gotPush = 0, gotLast = 0, gotMem = 0, gotAct = 0;
 		s_flexN = 0;
 		EfwScript_SetFlexFn( capture_flex );
 		EfwScript_FlexProbe();
@@ -130,6 +131,14 @@ int main( void )
 				gotOv = 1;
 			if( strstr( s_flexCap[i], "input in flex scanner failed" ) )
 				gotIn = 1;
+			if( strstr( s_flexCap[i], "push-back overflow" ) )
+				gotPush = 1;
+			if( strstr( s_flexCap[i], "unexpected last match in yyinput()" ) )
+				gotLast = 1;
+			if( strstr( s_flexCap[i], "out of dynamic memory in yy_create_buffer()" ) )
+				gotMem = 1;
+			if( strstr( s_flexCap[i], "no action found" ) )
+				gotAct = 1;
 		}
 		if( !gotMiss || !gotOv || !gotIn )
 		{
@@ -139,6 +148,14 @@ int main( void )
 		}
 		else
 			printf( "fatal flex scanner internal error--end of buffer missed\n" );
+		if( !gotPush || !gotLast || !gotMem || !gotAct )
+		{
+			printf( "flex leftover fatals push=%d last=%d mem=%d act=%d n=%d\n",
+				gotPush, gotLast, gotMem, gotAct, s_flexN );
+			fail++;
+		}
+		else
+			printf( "flex scanner push-back overflow\n" );
 	}
 
 	if( fail )

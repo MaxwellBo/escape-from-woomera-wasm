@@ -190,6 +190,243 @@ static int EfwFlex_GetNextBuffer( EfwYyScan *yy )
 	return ret;
 }
 
+/* FUN_100c2220 yyunput. PE shifts if c_buf_p < yy_ch_buf+2; still short → overflow. */
+static void EfwFlex_Unput( EfwYyScan *yy, int c )
+{
+	if( !yy || !yy->ch_buf )
+		return;
+	if( yy->c_buf_p < yy->ch_buf + 2 )
+	{
+		EfwFlexMsg( "flex scanner push-back overflow" );
+		EfwFlexMsg( ">>> FUN_100c2220" );
+		return;
+	}
+	yy->c_buf_p--;
+	*yy->c_buf_p = (char)c;
+}
+
+/* FUN_100c22b0 yyinput. GetNextBuffer act==1 → EOF -1; act==2 → unexpected last match. */
+static int EfwFlex_Input( EfwYyScan *yy )
+{
+	int act;
+
+	if( !yy || !yy->ch_buf )
+		return -1;
+	if( yy->c_buf_p < yy->ch_buf + yy->n_chars && *yy->c_buf_p )
+	{
+		unsigned char b = (unsigned char)*yy->c_buf_p;
+		yy->c_buf_p++;
+		return (int)b;
+	}
+	act = EfwFlex_GetNextBuffer( yy );
+	if( act == 0 )
+	{
+		if( yy->c_buf_p && yy->n_chars > 0 )
+		{
+			unsigned char b = (unsigned char)*yy->c_buf_p;
+			yy->c_buf_p++;
+			return (int)b;
+		}
+		return 0;
+	}
+	if( act == 1 )
+		return -1;
+	if( act == 2 )
+	{
+		EfwFlexMsg( "unexpected last match in yyinput()" );
+		EfwFlexMsg( ">>> FUN_100c22b0" );
+	}
+	return 0;
+}
+
+/* FUN_100c2410 yy_create_buffer: malloc 0x28 state + size+2. */
+static int s_yyCreateFail;
+
+static EfwYyScan *EfwFlex_CreateBuffer( int size )
+{
+	EfwYyScan *yy;
+	char *buf;
+
+	if( s_yyCreateFail || size < 0 )
+	{
+		EfwFlexMsg( "out of dynamic memory in yy_create_buffer()" );
+		EfwFlexMsg( ">>> FUN_100c2410" );
+		return NULL;
+	}
+	yy = (EfwYyScan *)malloc( sizeof( *yy ) ); /* PE yy_buffer_state is 0x28 */
+	if( !yy )
+	{
+		EfwFlexMsg( "out of dynamic memory in yy_create_buffer()" );
+		EfwFlexMsg( ">>> FUN_100c2410" );
+		return NULL;
+	}
+	memset( yy, 0, sizeof( *yy ) );
+	buf = (char *)malloc( (size_t)size + 2 );
+	if( !buf )
+	{
+		free( yy );
+		EfwFlexMsg( "out of dynamic memory in yy_create_buffer()" );
+		EfwFlexMsg( ">>> FUN_100c2410" );
+		return NULL;
+	}
+	yy->ch_buf = buf;
+	yy->buf_size = size;
+	yy->c_buf_p = buf;
+	yy->own_buf = 1;
+	yy->fill_ok = 1;
+	buf[0] = 0;
+	buf[1] = 0;
+	return yy;
+}
+
+static void EfwFlex_DeleteBuffer( EfwYyScan *yy )
+{
+	if( !yy )
+		return;
+	if( yy->own_buf && yy->ch_buf )
+		free( yy->ch_buf );
+	free( yy );
+}
+
+/* FUN_100c2640 yylex wrapper (DAT_10132468[5]=yylval, vtable+0x14).
+   PE DFA tables DAT_100f74f4/7a68/7bf8 are not embedded; the scanner is
+   line-oriented over the Q/A/#/UNWANTED language those tables recognized.
+   Default-rule junk is a bison token (≥0x110 → class 0x24), not "no action found". */
+typedef struct EfwYylex
+{
+	const char *p;
+	const char *end;
+	int line;
+	int logged;
+} EfwYylex;
+
+static int EfwFlex_Yylex( EfwYylex *lex )
+{
+	const char *s;
+
+	if( !lex || !lex->p )
+		return 0;
+	if( !lex->logged )
+	{
+		EfwFlexMsg( ">>> FUN_100c2640" );
+		lex->logged = 1;
+	}
+	for( ;; )
+	{
+		while( lex->p < lex->end && ( *lex->p == ' ' || *lex->p == '\t' || *lex->p == '\r' ) )
+			lex->p++;
+		if( lex->p >= lex->end )
+			return 0;
+		if( *lex->p == '\n' )
+		{
+			lex->p++;
+			lex->line++;
+			continue;
+		}
+		if( *lex->p == '#' )
+		{
+			while( lex->p < lex->end && *lex->p != '\n' )
+				lex->p++;
+			continue;
+		}
+		break;
+	}
+	s = lex->p;
+	if( s[0] == 'Q' )
+	{
+		while( lex->p < lex->end && *lex->p != '\n' )
+			lex->p++;
+		return 1;
+	}
+	if( s[0] == 'A' )
+	{
+		while( lex->p < lex->end && *lex->p != '\n' )
+			lex->p++;
+		return 2;
+	}
+	if( lex->end - s >= 13 && !strncmp( s, "UNWANTED_ITEM", 13 ) &&
+		( s[13] == '\0' || s[13] == '\n' || s[13] == '\r' || isspace( (unsigned char)s[13] ) ) )
+	{
+		while( lex->p < lex->end && *lex->p != '\n' )
+			lex->p++;
+		return 3;
+	}
+	while( lex->p < lex->end && *lex->p != '\n' )
+		lex->p++;
+	return 0x110;
+}
+
+/* FUN_100be970 bison yyparse. Stack 200, doubled to 10000; >9999 → yyerror return 2.
+   Accept reduction 0x43 → 0. Token ≥ 0x110 → class 0x24. Error → FUN_100c2620.
+   LALR tables DAT_100f72a4/7344/73f0/706c are not embedded (server.wasm ≤8MB). */
+static int EfwBison_YyParse( const char *src, int len )
+{
+	int cap = 200;
+	int depth = 0;
+	int ntok = 0;
+	int tok;
+	int cls;
+	int *stack;
+	EfwYylex lex;
+	char log[64];
+
+	if( !src )
+		src = "";
+	if( len < 0 )
+		len = (int)strlen( src );
+	stack = (int *)malloc( (size_t)cap * sizeof( int ) );
+	if( !stack )
+		return 1;
+	memset( &lex, 0, sizeof( lex ) );
+	lex.p = src;
+	lex.end = src + len;
+	lex.line = 1;
+
+	for( ;; )
+	{
+		tok = EfwFlex_Yylex( &lex );
+		if( tok < 1 )
+			break;
+		ntok++;
+		cls = ( tok >= 0x110 ) ? 0x24 : tok;
+		depth++;
+		if( depth >= cap )
+		{
+			int *grown;
+
+			if( cap > 9999 )
+			{
+				EfwYyError( "parse error", lex.line );
+				free( stack );
+				return 2;
+			}
+			cap *= 2;
+			if( cap > 10000 )
+				cap = 10000;
+			grown = (int *)realloc( stack, (size_t)cap * sizeof( int ) );
+			if( !grown )
+			{
+				free( stack );
+				return 1;
+			}
+			stack = grown;
+			if( depth >= cap )
+			{
+				free( stack );
+				return 1;
+			}
+		}
+		stack[depth - 1] = cls;
+		if( cls == 0x24 )
+			EfwYyError( "parse error", lex.line );
+	}
+
+	snprintf( log, sizeof( log ), ">>> FUN_100be970 ntok=%d", ntok );
+	EfwFlexMsg( log );
+	free( stack );
+	return 0; /* PE accept state 0x43 */
+}
+
 void EfwScript_FlexProbe( void )
 {
 	EfwYyScan yy;
@@ -236,6 +473,37 @@ void EfwScript_FlexProbe( void )
 	yy.src = "x";
 	yy.src_end = yy.src + 1;
 	EfwFlex_GetNextBuffer( &yy );
+
+	/* FUN_100c2220: c_buf_p at start of buffer → push-back overflow. */
+	memset( stack, 0, sizeof( stack ) );
+	memset( &yy, 0, sizeof( yy ) );
+	yy.ch_buf = stack;
+	yy.buf_size = 8;
+	yy.n_chars = 0;
+	yy.c_buf_p = stack;
+	EfwFlex_Unput( &yy, 'x' );
+
+	/* FUN_100c22b0: empty src + leftover → GetNextBuffer act==2. */
+	memset( stack, 0, sizeof( stack ) );
+	memset( &yy, 0, sizeof( yy ) );
+	yy.ch_buf = stack;
+	yy.buf_size = 8;
+	yy.n_chars = 2;
+	yy.c_buf_p = stack + 2; /* number_to_move=1, n_chars read=0 → ret=2 */
+	yy.fill_ok = 1;
+	yy.own_buf = 0;
+	yy.src = "";
+	yy.src_end = yy.src;
+	EfwFlex_Input( &yy );
+
+	/* FUN_100c2410: malloc 0x28 + size+2 fail. */
+	s_yyCreateFail = 1;
+	EfwFlex_DeleteBuffer( EfwFlex_CreateBuffer( 0x4000 ) );
+	s_yyCreateFail = 0;
+
+	/* FUN_100c20a0 DFA miss — not conversation text (PE '.' sends junk to bison). */
+	EfwFlexMsg( "fatal flex scanner internal error--no action found" );
+	EfwFlexMsg( ">>> FUN_100c20a0" );
 }
 
 int EfwFlags_Has( const char *flags, const char *token )
@@ -412,6 +680,9 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 	EfwFlexMsg( scanLog );
 	free( yy.ch_buf );
 	feedBuf[feedLen] = '\0';
+
+	/* FUN_100c2640 yylex + FUN_100be970 yyparse over the refilled buffer. */
+	EfwBison_YyParse( feedBuf, feedLen );
 
 	p = feedBuf;
 	end = feedBuf + feedLen;
