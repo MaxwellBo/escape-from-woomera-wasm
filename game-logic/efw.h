@@ -29,6 +29,7 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
+void EFW_OnDispatchSpawn( edict_t *pent ); /* edict-budget log during map spawn */
 #endif
 
 /* FUN_100c43b0 table 0x100f81e0: Pliers, Lever, Branch, MobilePhone, IDTag, Red, Green, Blue, Powder. */

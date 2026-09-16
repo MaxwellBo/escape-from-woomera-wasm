@@ -50,6 +50,8 @@ def main() -> None:
             "dlls/gamerules.cpp",
             "dlls/multiplay_gamerules.cpp",
             "dlls/barney.cpp",
+            "dlls/cbase.cpp",
+            "dlls/subs.cpp",
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
             "cl_dll/input.cpp",
@@ -242,6 +244,24 @@ def main() -> None:
         "		return;\n"
         f"	if( EFW_FireTargets( targetName, pActivator, pCaller, (int)useType, value ) ) {MARKER}\n"
         "		return;\n",
+    )
+
+    cbase_cpp = dlls / "cbase.cpp"
+    once(
+        cbase_cpp,
+        '#include\t"game.h"\n',
+        '#include\t"game.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        cbase_cpp,
+        "\t\tpEntity->Spawn();\n"
+        "\n"
+        "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
+        "\t\tpEntity->Spawn();\n"
+        f"\t\tEFW_OnDispatchSpawn( pent ); {MARKER}\n"
+        "\n"
+        "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
     )
 
     barney = dlls / "barney.cpp"

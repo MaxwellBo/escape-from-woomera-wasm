@@ -842,6 +842,24 @@ void EFW_LinkUserMessages( void )
 		gmsgEFWCtPrv = REG_USER_MSG( "EFW_CtPrv", 1 );
 }
 
+void EFW_OnDispatchSpawn( edict_t *pent )
+{
+	static int s_n;
+	int used;
+	const char *cn;
+
+	s_n++;
+	used = NUMBER_OF_ENTITIES();
+	cn = ( pent && pent->v.classname ) ? STRING( pent->v.classname ) : "?";
+	if( s_n <= 8 || ( s_n % 50 ) == 0 || used >= 900
+		|| ( cn && !strncmp( cn, "monster_", 8 ) )
+		|| ( cn && !strncmp( cn, "efw_", 4 ) ) )
+	{
+		ALERT( at_console, "efw: spawn #%d ents=%d %s\n", s_n, used, cn ? cn : "?" );
+		EFW_DebugPrint( "efw: spawn #%d ents=%d %s", s_n, used, cn ? cn : "?" );
+	}
+}
+
 void EFW_Precache( void )
 {
 	PRECACHE_MODEL( "models/w_pliers.mdl" );

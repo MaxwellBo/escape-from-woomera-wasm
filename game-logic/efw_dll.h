@@ -135,6 +135,7 @@ CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMarker ); /* FUN_1
 CBaseEntity *EFW_MaterializeIdTag( CBaseEntity *pMarker ); /* FUN_100c27f0 then FUN_100c2a20 */
 CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard chases the player */
+void EFW_OnDispatchSpawn( edict_t *pent ); /* NUMBER_OF_ENTITIES log; Host_ErrorInit cap is 1200 */
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */

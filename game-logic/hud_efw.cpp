@@ -451,19 +451,6 @@ static int EFW_HasWep( int id )
 	return g_weaponId == id;
 }
 
-static int EFW_FirstWep( void )
-{
-	int i;
-	if( g_weaponId >= 16 )
-		return g_weaponId;
-	for( i = 0; i < 16; i++ )
-	{
-		if( g_weaponMask & ( 1 << i ) )
-			return 16 + i;
-	}
-	return -1;
-}
-
 static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRITE icon )
 {
 	EfwVguiBtn *b;
@@ -551,17 +538,19 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 {
 	char label[64];
 	char cmd[96];
-	int wep;
 	if( s->type == 0 )
 	{
+		int id;
 		snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
 		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
 		EFW_VguiAdd( x, y, label, cmd, g_hBubble );
-		wep = EFW_FirstWep();
-		if( wep >= 16 )
+		/* FUN_10044f70 walks DAT_100a37a8 weapon slots 16..24, not just FirstWep. */
+		for( id = 16; id <= 24; id++ )
 		{
-			snprintf( label, sizeof( label ), "Give %d to %s", wep, s->name[0] ? s->name : "them" );
-			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", wep, s->name[0] ? s->name : "" );
+			if( !EFW_HasWep( id ) )
+				continue;
+			snprintf( label, sizeof( label ), "Give %d to %s", id, s->name[0] ? s->name : "them" );
+			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
 			EFW_VguiAdd( x, y + 30, label, cmd, g_hGive );
 		}
 		return;

@@ -23,7 +23,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll20`;
+    return `${url}?v=efw-dll21`;
   return url;
 }
 
@@ -635,39 +635,25 @@ async function boot() {
     if (shimOk) sizeGameCanvas();
     log(`boot: creating Xash3D (${view.width}x${view.height}) shim=${shimOk}`);
     logViewMetrics('pre-init');
+    const bootArgs = [
+      '-windowed',
+      '-nointro',
+      '-console',
+      '-game',
+      GAME_DIR,
+      '+mp_allowmonsters',
+      '1',
+      '+deathmatch',
+      '0',
+      '+pausable',
+      '0',
+    ];
+    if (shimOk) {
+      bootArgs.splice(1, 0, '-width', String(view.width), '-height', String(view.height));
+    }
     engine = new Xash3D({
       canvas,
-      arguments: shimOk
-        ? [
-            '-windowed',
-            '-width',
-            String(view.width),
-            '-height',
-            String(view.height),
-            '-game',
-            GAME_DIR,
-            '+mp_allowmonsters',
-            '1',
-            '+deathmatch',
-            '0',
-            '+pausable',
-            '0',
-            '+map',
-            'efw_prototype_level1',
-          ]
-        : [
-            '-windowed',
-            '-game',
-            GAME_DIR,
-            '+mp_allowmonsters',
-            '1',
-            '+deathmatch',
-            '0',
-            '+pausable',
-            '0',
-            '+map',
-            'efw_prototype_level1',
-          ],
+      arguments: bootArgs,
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -753,8 +739,12 @@ async function boot() {
     markDone('step-launch');
     launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
-    log('engine main loop started with +map efw_prototype_level1');
+    log('engine main loop started; map load deferred until after Host_Init');
     canvas.focus();
+    setTimeout(() => {
+      log('> map efw_prototype_level1');
+      runEngineCmd('map efw_prototype_level1');
+    }, 1500);
     setTimeout(() => {
       runEngineCmd('pausable 0');
     }, 4000);

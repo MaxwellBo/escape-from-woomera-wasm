@@ -93,24 +93,41 @@ int CRefugee::Classify( void )
 
 void CRefugee::SetObjectCollisionBox( void )
 {
-	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c. */
+	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c.
+	   Spawn still hardcodes -16/-16/0 .. 16/16/72; only trust the studio
+	   bbox when the header is IDST and the box is finite. */
 	studiohdr_t *hdr;
 	mstudioseqdesc_t *seq;
 	int index;
+	int i;
+	Vector mins, maxs;
 
 	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
-	if( !hdr )
+	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
 	{
 		ALERT( at_console, "Invalid model ptr! FUCK\n" );
-		CBaseMonster::SetObjectCollisionBox();
+		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 		return;
 	}
 	index = pev->sequence;
 	if( index < 0 || index >= hdr->numseq )
 		index = 0;
 	seq = (mstudioseqdesc_t *)( (unsigned char *)hdr + hdr->seqindex ) + index;
-	UTIL_SetSize( pev, Vector( seq->bbmin[0], seq->bbmin[1], seq->bbmin[2] ),
-		Vector( seq->bbmax[0], seq->bbmax[1], seq->bbmax[2] ) );
+	mins = Vector( seq->bbmin[0], seq->bbmin[1], seq->bbmin[2] );
+	maxs = Vector( seq->bbmax[0], seq->bbmax[1], seq->bbmax[2] );
+	for( i = 0; i < 3; i++ )
+	{
+		if( mins[i] < -128.0f )
+			mins[i] = -128.0f;
+		if( maxs[i] > 128.0f )
+			maxs[i] = 128.0f;
+		if( mins[i] > maxs[i] )
+		{
+			UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+			return;
+		}
+	}
+	UTIL_SetSize( pev, mins, maxs );
 }
 
 void CRefugee::SetYawSpeed( void )
@@ -252,12 +269,12 @@ void CRefugee::Spawn( void )
 	}
 
 	EFW_SetVisibleModel( this, model );
+	/* FUN_100c6040 hardcodes this hull; MonsterInit is stock HL, not in the PE Spawn. */
 	UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-	SetActivity( ACT_IDLE );
-	MonsterInit();
 	g_refugeeCount++;
-	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f\n",
-		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ), pev->origin.x, pev->origin.y, pev->origin.z );
+	ALERT( at_console, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
+		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ),
+		pev->origin.x, pev->origin.y, pev->origin.z, NUMBER_OF_ENTITIES() );
 	m_iWalkState = 0;
 	SetUse( &CRefugee::TalkUse );
 	SetThink( &CRefugee::IdleThink );

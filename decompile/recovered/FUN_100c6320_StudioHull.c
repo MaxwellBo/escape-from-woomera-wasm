@@ -9,6 +9,9 @@
  * pev->sequence at entvars +0x128.
  * bbmin at seqdesc+0x60, bbmax at +0x6c → UTIL_SetSize (0x100afdc0).
  * Null model: ALERT(1, "Invalid model ptr! FUCK\n") @ 0x1011d0dc.
+ * WASM also requires hdr->id == IDST and a finite bbox; otherwise it
+ * falls back to the Spawn hull so a junk GET_MODEL_PTR cannot explode
+ * SV_LinkEdict (Host_ErrorInit max 1200).
  */
 void CRefugee::SetObjectCollisionBox( void )
 {
