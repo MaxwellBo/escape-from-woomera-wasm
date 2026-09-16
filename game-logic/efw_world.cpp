@@ -170,6 +170,9 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 
 	if( EFW_FStrEq( targetName, "efw_kitchen_door" ) )
 	{
+		EFW_DebugPrint( ">>> GateFSM %s pliers=%d roster=%d", targetName,
+			EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ),
+			EFW_HasKeyword( "OnKitchenRoster" ) );
 		if( !EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
 		{
 			if( !EFW_HasKeyword( "OnKitchenRoster" ) )
@@ -245,6 +248,8 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 
 	if( EFW_FStrEq( targetName, "efw_approach_bin" ) )
 	{
+		EFW_DebugPrint( ">>> GateFSM %s pliers=%d", targetName,
+			EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) );
 		if( !EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
 		{
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
@@ -366,6 +371,7 @@ void EFW_PALockRAR( void )
 	if( !g_pa.inited )
 		EFW_InitPA();
 	g_pa.rarLock = 1;
+	EFW_DebugPrint( ">>> PALockRAR Ann_RAR_124" );
 	EFW_PlayCue( g_pa.slot[0].sample );
 	g_pa.timer = 0.0f;
 }

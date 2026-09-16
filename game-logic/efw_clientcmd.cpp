@@ -11,9 +11,42 @@
 #include <string.h>
 #include <math.h>
 
+static int EFW_PosInBox( const Vector &pos, CBaseEntity *pEnt )
+{
+	Vector mins;
+	Vector maxs;
+	if( !pEnt )
+		return 0;
+	mins = pEnt->pev->absmin;
+	maxs = pEnt->pev->absmax;
+	/* Brush triggers often have pev->origin 0; FindEntityInSphere misses them. */
+	if( ( maxs - mins ).Length() < 1.0f )
+		return ( pos - pEnt->pev->origin ).Length() <= 96.0f;
+	return pos.x >= mins.x && pos.x <= maxs.x
+		&& pos.y >= mins.y && pos.y <= maxs.y
+		&& pos.z >= mins.z - 16.0f && pos.z <= maxs.z + 48.0f;
+}
+
+static void EFW_TouchTriggers( CBasePlayer *pPlayer, const Vector &pos )
+{
+	CBaseEntity *pScan = NULL;
+	if( !pPlayer )
+		return;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_once" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+}
+
 static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
 {
-	CBaseEntity *pScan;
 	char line[96];
 
 	if( !pPlayer )
@@ -23,16 +56,9 @@ static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
 	pPlayer->pev->flags &= ~FL_ONGROUND;
 	snprintf( line, sizeof( line ), "efw: setpos %.0f %.0f %.0f", pos.x, pos.y, pos.z );
 	EFW_Print( pPlayer, line );
-	pScan = NULL;
-	while( ( pScan = UTIL_FindEntityInSphere( pScan, pos, 96.0f ) ) != NULL )
-	{
-		const char *cn;
-		if( pScan == pPlayer )
-			continue;
-		cn = STRING( pScan->pev->classname );
-		if( !strncmp( cn, "trigger_", 8 ) )
-			pScan->Touch( pPlayer );
-	}
+	/* GoldSrc trigger Touch is AABB. Sphere-from-origin skipped brush
+	   triggers (origin 0), so GateFSM approach_bin / kitchen_door never ran. */
+	EFW_TouchTriggers( pPlayer, pos );
 	/* FUN_100c7830 is per-frame from SendHudState. After a WASM setpos,
 	   rescan immediately so efw_spider (DAT_10134940 / FUN_100c7820) sees
 	   the new sphere instead of the previous spawn slot. */
@@ -372,10 +398,15 @@ void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
 	{
+		int hasPliers;
+		int sees;
 		/* FUN_100c4f90: pliers UseWithMarker on efw_kitchen_bin. */
-		if( weaponId != WEAPON_EFW_PLIERS && !EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
+		hasPliers = weaponId == WEAPON_EFW_PLIERS || EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
+		sees = EFW_ElectricianSees( pPlayer );
+		EFW_DebugPrint( ">>> kitchen_bin pliers=%d sees=%d", hasPliers, sees );
+		if( !hasPliers )
 			return;
-		if( EFW_ElectricianSees( pPlayer ) )
+		if( sees )
 		{
 			electricianFails++;
 			EFW_DebugPrint( "Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.", electricianFails );
@@ -785,12 +816,19 @@ int EFW_ClientCommand( edict_t *pEntity )
 			{
 				Vector pos = EFW_Place( pEnt );
 				const char *cn = STRING( pEnt->pev->classname );
+				const char *nm = CMD_ARGV( arg0 + 1 );
 				/* IdleThink walks when 100 < dist < 300; TalkScan sphere is
 				   123 (0x42f60000). 150 put the pawn outside DAT_10134940 so
 				   FUN_100c7820 always printed "Ignoring spider". */
 				if( cn && !strncmp( cn, "monster_", 8 ) )
 					pos = pos + Vector( 110.0f, 0.0f, 8.0f );
 				EFW_Relocate( pPlayer, pos );
+				if( cn && !strncmp( cn, "trigger_", 8 ) )
+					pEnt->Touch( pPlayer );
+				/* FUN_100c7da0: named GateFSM targets fire from trigger
+				   Touch; WASM setpos stands in for walking into the brush. */
+				if( nm && !strncmp( nm, "efw_", 4 ) )
+					EFW_FireTargets( nm, pPlayer, pPlayer, USE_TOGGLE, 0 );
 			}
 			else
 				EFW_DebugPrint( ">>> efw_setpos (not found) %s", CMD_ARGV( arg0 + 1 ) );
