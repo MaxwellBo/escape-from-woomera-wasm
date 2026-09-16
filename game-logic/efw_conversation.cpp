@@ -328,6 +328,7 @@ void EFW_CloseTalk( void )
 	st->menuCount = 0;
 	st->menuMode = 0;
 	st->talkStart = 0;
+	st->prevQuestion[0] = '\0';
 	if( pPlayer )
 		EFW_CloseMenu( pPlayer );
 }
@@ -465,6 +466,10 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	q = &script->questions[qi];
 	r = EFW_PickReply( npc, q );
 	EFW_MarkSeen( npc, q->topic );
+	/* FUN_100c69a0 copies the pressed ShowMenu line into DAT_10134480. */
+	strncpy( st->prevQuestion, q->text[0] ? q->text : q->topic,
+		sizeof( st->prevQuestion ) - 1 );
+	st->prevQuestion[sizeof( st->prevQuestion ) - 1] = '\0';
 	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic );
 	body[0] = '\0';
 	if( r && r->text[0] )

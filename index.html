@@ -26,7 +26,19 @@
             <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="Game view"></canvas>
             <div id="efw-hope" class="efw-hope" hidden>
               <span id="efw-hope-label">HOPE  80</span>
-              <div class="efw-hope-bar"><i id="efw-hope-fill"></i></div>
+              <div id="efw-hope-ticks" class="efw-hope-ticks" aria-hidden="true"></div>
+            </div>
+            <div id="efw-diary" class="efw-diary" hidden>
+              <span id="efw-diary-label">DIARY  1</span>
+              <div class="efw-diary-nav">
+                <button type="button" data-diary="prev" title="efw_diary_prev">[</button>
+                <button type="button" data-diary="next" title="efw_diary_next">]</button>
+                <button type="button" data-diary="close" title="efw_diary">Close</button>
+              </div>
+            </div>
+            <div id="efw-prevq" class="efw-prevq" hidden>
+              <span>PREVIOUS QUESTION</span>
+              <p id="efw-prevq-text"></p>
             </div>
             <div id="efw-vgui" class="efw-vgui" hidden></div>
             <div id="efw-story" class="efw-story" hidden>

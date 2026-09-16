@@ -67,6 +67,7 @@ struct EfwDllState
 	int menuMode; /* 0 none, 1 topics, 2 reply */
 	char menuTitle[80];
 	char menuText[EFW_MENU_LINES][160];
+	char prevQuestion[160]; /* DAT_10134480; FUN_100c69a0 copies the hotkey line */
 
 	int items;
 	int mapLevel; /* FUN_100c5b80: 0 level1, 1 level2, 2 level3 */

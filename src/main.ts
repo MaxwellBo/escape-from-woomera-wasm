@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll87`;
+    return `${url}?v=efw-dll88`;
   return url;
 }
 
@@ -60,13 +60,7 @@ function applyEfwVgui(text: string): boolean {
     return true;
   }
   if (msg.startsWith('EFWVGUI HOPE ')) {
-    const n = Math.max(0, Math.min(100, parseInt(msg.slice('EFWVGUI HOPE '.length), 10) || 0));
-    const hope = document.getElementById('efw-hope');
-    const label = document.getElementById('efw-hope-label');
-    const fill = document.getElementById('efw-hope-fill');
-    if (hope) hope.hidden = false;
-    if (label) label.textContent = `HOPE  ${n}`;
-    if (fill) fill.style.width = `${n}%`;
+    setHopeHud(parseInt(msg.slice('EFWVGUI HOPE '.length), 10) || 0);
     return true;
   }
   if (!msg.startsWith('EFWVGUI ADD ')) return true;
@@ -209,16 +203,53 @@ function pollEfwVgui() {
   }
 }
 
+/* FUN_1001daa0: 10 ticks, filled while ticks >= i (empty when ticks < i). */
+function setHopeHud(n: number): void {
+  const hope = Math.max(0, Math.min(100, Math.round(n)));
+  const ticks = Math.floor(hope / 10);
+  const el = document.getElementById('efw-hope');
+  const label = document.getElementById('efw-hope-label');
+  const row = document.getElementById('efw-hope-ticks');
+  if (el) el.hidden = false;
+  if (label) label.textContent = `HOPE  ${hope}`;
+  if (!row) return;
+  if (row.childElementCount !== 10) {
+    row.innerHTML = '';
+    for (let i = 0; i < 10; i++) row.appendChild(document.createElement('i'));
+  }
+  [...row.children].forEach((tick, i) => tick.classList.toggle('on', !(ticks < i)));
+}
+
 function applyHopeHud(text: string): boolean {
   const m = text.match(/>>> hopehud ([\d.]+)/);
   if (!m) return false;
-  const n = Math.max(0, Math.min(100, Math.round(Number(m[1]))));
-  const hope = document.getElementById('efw-hope');
-  const label = document.getElementById('efw-hope-label');
-  const fill = document.getElementById('efw-hope-fill');
-  if (hope) hope.hidden = false;
-  if (label) label.textContent = `HOPE  ${n}`;
-  if (fill) fill.style.width = `${n}%`;
+  setHopeHud(Number(m[1]));
+  return false;
+}
+
+function applyDiaryHud(text: string): boolean {
+  const m = text.match(/>>> (?:diaryhud|efw_diary) open=(\d+) page=(\d+)/);
+  if (!m) return false;
+  const open = m[1] !== '0';
+  const page = m[2];
+  const el = document.getElementById('efw-diary');
+  const label = document.getElementById('efw-diary-label');
+  if (el) el.hidden = !open;
+  if (label) label.textContent = `DIARY  ${page}`;
+  return false;
+}
+
+function applyPrevQuestion(text: string): boolean {
+  const m = text.match(/>>> prevq (.+)$/);
+  const el = document.getElementById('efw-prevq');
+  const p = document.getElementById('efw-prevq-text');
+  if (text.includes('Conversation hidden, partner too far') || text.includes('<conversation inactive>')) {
+    if (el) el.hidden = true;
+    return false;
+  }
+  if (!m) return false;
+  if (el) el.hidden = false;
+  if (p) p.textContent = m[1];
   return false;
 }
 
@@ -226,6 +257,8 @@ function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
   applyHopeHud(normalized);
+  applyDiaryHud(normalized);
+  applyPrevQuestion(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
@@ -1199,6 +1232,16 @@ document.getElementById('btn-give')?.addEventListener('click', () => {
   log('> give (efw_Give)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Give');
+});
+document.getElementById('efw-diary')?.addEventListener('click', (ev) => {
+  const btn = (ev.target as HTMLElement).closest('button[data-diary]') as HTMLButtonElement | null;
+  if (!btn) return;
+  ev.preventDefault();
+  const which = btn.dataset.diary;
+  const cmd = which === 'prev' ? 'efw_diary_prev' : which === 'next' ? 'efw_diary_next' : 'efw_diary';
+  log(`> ${cmd}`);
+  runEngineCmd('pausable 0');
+  runGameCmd(cmd);
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
   log('> diary (I / efw_diary)');

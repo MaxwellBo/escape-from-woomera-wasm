@@ -93,6 +93,15 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		g_diaryOpen = openFlag != 0;
 	}
 	{
+		static int s_diaryLog = -1;
+		int packed = ( g_diaryOpen ? 1 : 0 ) * 100 + g_diaryPage;
+		if( packed != s_diaryLog )
+		{
+			s_diaryLog = packed;
+			gEngfuncs.Con_Printf( ">>> diaryhud open=%d page=%d\n", g_diaryOpen, g_diaryPage );
+		}
+	}
+	{
 		static int s_hopeLog;
 		s_hopeLog++;
 		if( s_hopeLog == 1 || ( s_hopeLog % 40 ) == 0 )
@@ -775,7 +784,21 @@ int CHudEfw::Draw( float flTime )
 		int li;
 		if( g_menuLine[0][0] )
 		{
-			gHUD.DrawHudString( 16, row, ScreenWidth - 16, g_menuLine[0], r, g, b );
+			const char *prev = strstr( g_menuLine[0], " ... PREVIOUS QUESTION: " );
+			if( prev )
+			{
+				char body[256];
+				int n = (int)( prev - g_menuLine[0] );
+				if( n >= (int)sizeof( body ) )
+					n = (int)sizeof( body ) - 1;
+				memcpy( body, g_menuLine[0], (size_t)n );
+				body[n] = '\0';
+				gHUD.DrawHudString( 16, row, ScreenWidth - 16, prev + 24, 100, 200, 100 );
+				row += 16;
+				gHUD.DrawHudString( 16, row, ScreenWidth - 16, body, 200, 200, 0 );
+			}
+			else
+				gHUD.DrawHudString( 16, row, ScreenWidth - 16, g_menuLine[0], r, g, b );
 			row += 16;
 		}
 		for( li = 1; li <= 6; li++ )
