@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll116`;
+    return `${url}?v=efw-dll117`;
   return url;
 }
 
@@ -624,6 +624,10 @@ let lastResumeMs = 0;
    Hold key_console only for SCR_BeginLoadingPlaque, then release after
    HUD_Redraw (proof of ca_active). */
 let consoleForPlaque = false;
+/* First-map libmenu pause is why engine StartFrame never advances without
+   HostPump. Software present hung on UI_SetActiveMenu(false). WebGL2
+   (gles3compat) is the new present path that can survive key_game. */
+let firstMapKeyGame = false;
 function resumeEngineLoop() {
   const now = Date.now();
   /* resume() increments currentlyRunningMainloop and aborts the in-flight
@@ -650,8 +654,30 @@ function releaseConsoleToGame() {
 }
 
 function dismissMenuAfterHud() {
-  if (consoleForPlaque)
+  if (consoleForPlaque) {
     releaseConsoleToGame();
+    startHostPumps();
+    return;
+  }
+  if (firstMapKeyGame)
+    return;
+  firstMapKeyGame = true;
+  /* HUD_Redraw skip proves ca_active. Open then close console so
+     Con_ToggleConsole_f calls UI_SetActiveMenu(false) → key_game.
+     Deferred: never nest Cmd_ExecuteString inside HUD_Redraw. */
+  log('listen: gles3compat first-map double toggleconsole → key_game');
+  runEngineCmd('toggleconsole');
+  setTimeout(() => {
+    runEngineCmd('toggleconsole');
+    runEngineCmd('setpause 0');
+    runEngineCmd('unpause');
+    runEngineCmd('pausable 0');
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawentities 1');
+    runEngineCmd('ui_renderworld 0');
+    startHostPumps();
+    log('listen: key_game (gles3compat present)');
+  }, 250);
 }
 
 function resumeAfterFirstClientFrame() {
@@ -713,6 +739,7 @@ function loadMap(name: string, reason: string) {
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
   consoleForPlaque = false;
+  firstMapKeyGame = false;
   if (pumpTimer) {
     clearInterval(pumpTimer);
     pumpTimer = null;
@@ -776,8 +803,9 @@ function onServerActivateSeen() {
     changeWatch = null;
   }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
-  /* Keep r_norefresh 1 until HUD_Redraw has looped; software has no
-     r_drawworld. Host_Frame now returns so HostPump is not required. */
+  startHostPumps();
+  /* Keep r_norefresh 1 until HUD_Redraw has looped. HostPump drives
+     StartFrame while libmenu still has the listen server paused. */
   runEngineCmd('r_drawviewmodel 0');
   runEngineCmd('r_norefresh 1');
   runEngineCmd('sv_validate_changelevel 0');
@@ -822,11 +850,15 @@ function onServerActivateSeen() {
   }, 4000);
   setTimeout(() => {
     if (changeWatch) return;
+    if (firstMapKeyGame) {
+      log('listen: skip late ui_renderworld (already key_game)');
+      return;
+    }
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
-    log('listen: r_norefresh 0 ui_renderworld 1 (soft world present)');
+    log('listen: r_norefresh 0 ui_renderworld 1 (world present)');
   }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
@@ -1317,7 +1349,7 @@ async function boot() {
     }
     engine = new Xash3D({
       canvas,
-      renderer: 'soft',
+      renderer: 'gles3compat',
       arguments: bootArgs,
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
@@ -1447,6 +1479,7 @@ async function boot() {
     listenReady = false;
     menuDismissed = false;
     consoleForPlaque = false;
+    firstMapKeyGame = false;
     setTimeout(() => {
       const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
       loadMap(bootMap, 'deferred after Host_Init');
