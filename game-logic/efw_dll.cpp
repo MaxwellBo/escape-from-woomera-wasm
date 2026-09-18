@@ -2147,10 +2147,6 @@ void EFW_StartFrame( void )
 	{
 		edict_t *pent;
 		const char *model;
-		const char *apply;
-		char lower[80];
-		int n;
-		int c;
 
 		pent = INDEXENT( i );
 		if( !pent || pent->free )
@@ -2164,25 +2160,15 @@ void EFW_StartFrame( void )
 			continue;
 		if( !strstr( model, ".mdl" ) )
 			continue;
-		/* Detainee SET_MODEL (and player.mdl stand-in) never returns in
-		   WASM. Bind the precached MODEL_INDEX and keep the PE name. */
-		apply = model;
-		n = 0;
-		for( c = 0; model[c] && n < (int)sizeof( lower ) - 1; c++ )
-		{
-			char ch = model[c];
-			if( ch >= 'A' && ch <= 'Z' )
-				ch = (char)( ch + 32 );
-			lower[n++] = ch;
-		}
-		lower[n] = 0;
+		/* SET_MODEL of remaining studios (barney / Security.mdl / tradesman)
+		   wipes WebGL2 present after live>=45. Bind MODEL_INDEX like
+		   detainees. MOVETYPE_STEP without SET_MODEL also stalls. */
 		{
 			char line[192];
-			snprintf( line, sizeof( line ), "efw: studio begin edict=%d %s %s -> %s\n",
-				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model, apply );
+			snprintf( line, sizeof( line ), "efw: studio begin edict=%d %s %s\n",
+				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model );
 			EFW_LogLine( line );
 		}
-		if( strstr( lower, "detainee" ) )
 		{
 			int idx = MODEL_INDEX( (char *)model );
 			if( idx <= 0 )
@@ -2200,18 +2186,6 @@ void EFW_StartFrame( void )
 			EFW_EnableNpcThink( pent );
 			return;
 		}
-		SET_MODEL( pent, apply );
-		pent->v.solid = SOLID_BBOX;
-		pent->v.flags |= FL_MONSTER;
-		pent->v.movetype = MOVETYPE_STEP;
-		{
-			char line[160];
-			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s %s\n",
-				i, pent->v.classname ? STRING( pent->v.classname ) : "?", apply );
-			EFW_LogLine( line );
-		}
-		EFW_EnableNpcThink( pent );
-		return;
 	}
 }
 
