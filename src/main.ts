@@ -24,7 +24,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll117`;
+    return `${url}?v=efw-dll117b`;
   return url;
 }
 
@@ -705,14 +705,14 @@ function startHostPumps() {
     pumpTimer = null;
   }
   let pumps = 0;
+  /* Keep pulsing StartFrame after key_game. Libmenu used to pause the
+     listen server; a 80-tick cap left hope/TalkScan frozen once HostPump
+     stopped even though WebGL2 was still presenting. */
   pumpTimer = setInterval(() => {
-    if (pumps < 80) {
-      runEngineCmd('efw_pump');
-      pumps++;
-    } else if (pumpTimer) {
-      clearInterval(pumpTimer);
-      pumpTimer = null;
-    }
+    runEngineCmd('efw_pump');
+    pumps++;
+    if (pumps === 1 || (pumps % 80) === 0)
+      log(`listen: hostpump n=${pumps}`);
   }, 120);
 }
 
