@@ -2058,8 +2058,6 @@ static void EFW_PulseRefugeeThinks( void )
 
 void EFW_StartFrame( void )
 {
-	int i;
-
 	if( !s_mapLive )
 		return;
 	/* SET_MODEL of detainee studios stalls the WASM loop. Wait until the
@@ -2106,9 +2104,10 @@ void EFW_StartFrame( void )
 		EFW_BindOneDetainee();
 		EFW_PulseRefugeeThinks();
 	}
-	/* First live frames: do not SET_MODEL other studios. Bound detainees
-	   keep IdleThink; FreezeNpcPhysics skips modelindex>0 refugees. */
-	if( s_liveTicks < 45 )
+	/* Keep noclip + freeze remaining unbound studios. After live>=45 the
+	   old path dropped NOCLIP (player fell into the void) and SET_MODEL /
+	   MODEL_INDEX of barney/Security.mdl/tradesman wiped WebGL2 present.
+	   Detainees already bind MODEL_INDEX one-per-frame above. */
 	{
 		int j;
 		CBasePlayer *pPlayer = EFW_Player();
@@ -2131,60 +2130,13 @@ void EFW_StartFrame( void )
 				|| e->v.movetype == MOVETYPE_TOSS || e->v.movetype == MOVETYPE_WALK )
 				e->v.movetype = MOVETYPE_NONE;
 		}
+		if( s_liveTicks == 45 )
+			EFW_LogLine( "efw: skip remaining studio bind (keep barracks present)\n" );
+		if( s_liveTicks <= 8 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
 		{
 			char line[80];
 			snprintf( line, sizeof( line ), "efw: StartFrame done live=%d\n", s_liveTicks );
 			EFW_LogLine( line );
-		}
-		return;
-	}
-	if( s_studioDelay < 10 )
-	{
-		s_studioDelay++;
-		return;
-	}
-	for( i = 1; i < EFW_MaxEnts(); i++ )
-	{
-		edict_t *pent;
-		const char *model;
-
-		pent = INDEXENT( i );
-		if( !pent || pent->free )
-			continue;
-		if( pent->v.modelindex > 0 )
-			continue;
-		if( !pent->v.model )
-			continue;
-		model = STRING( pent->v.model );
-		if( !model || !model[0] || model[0] == '*' )
-			continue;
-		if( !strstr( model, ".mdl" ) )
-			continue;
-		/* SET_MODEL of remaining studios (barney / Security.mdl / tradesman)
-		   wipes WebGL2 present after live>=45. Bind MODEL_INDEX like
-		   detainees. MOVETYPE_STEP without SET_MODEL also stalls. */
-		{
-			char line[192];
-			snprintf( line, sizeof( line ), "efw: studio begin edict=%d %s %s\n",
-				i, pent->v.classname ? STRING( pent->v.classname ) : "?", model );
-			EFW_LogLine( line );
-		}
-		{
-			int idx = MODEL_INDEX( (char *)model );
-			if( idx <= 0 )
-				idx = MODEL_INDEX( "models/Security.mdl" );
-			pent->v.modelindex = idx;
-			pent->v.solid = SOLID_NOT;
-			pent->v.flags |= FL_MONSTER;
-			pent->v.movetype = MOVETYPE_NONE;
-			{
-				char line[160];
-				snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
-					i, pent->v.classname ? STRING( pent->v.classname ) : "?", idx );
-				EFW_LogLine( line );
-			}
-			EFW_EnableNpcThink( pent );
-			return;
 		}
 	}
 }
