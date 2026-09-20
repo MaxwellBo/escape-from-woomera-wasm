@@ -2122,7 +2122,13 @@ void EFW_StartFrame( void )
 					pPlayer->pev->angles = Vector( 0, 90, 0 );
 					pPlayer->pev->v_angle = pPlayer->pev->angles;
 					pPlayer->pev->fixangle = 1;
-					EFW_LogLine( "efw: DROP_TO_FLOOR ok — MOVETYPE_WALK\n" );
+					{
+						char pos[96];
+						snprintf( pos, sizeof( pos ),
+							"efw: DROP_TO_FLOOR ok — MOVETYPE_WALK origin=%.0f %.0f %.0f yaw=90\n",
+							pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
+						EFW_LogLine( pos );
+					}
 				}
 				else
 				{
@@ -2155,8 +2161,14 @@ void EFW_StartFrame( void )
 			EFW_LogLine( "efw: skip remaining studio SET_MODEL (keep barracks present)\n" );
 		if( s_liveTicks <= 8 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
 		{
-			char line[96];
-			snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d\n", s_liveTicks, s_walkOn );
+			char line[128];
+			if( pPlayer )
+				snprintf( line, sizeof( line ),
+					"efw: StartFrame done live=%d walk=%d origin=%.0f %.0f %.0f\n",
+					s_liveTicks, s_walkOn,
+					pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
+			else
+				snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d\n", s_liveTicks, s_walkOn );
 			EFW_LogLine( line );
 		}
 	}

@@ -2263,6 +2263,17 @@ int CHudEfw::Draw( float flTime )
 		gEngfuncs.Con_Printf( "efw: HUD_Draw skip n=%d\n", s_drawN );
 		return 1;
 	}
+	if( s_drawN <= 16 || ( s_drawN % 60 ) == 1 )
+	{
+		cl_entity_t *lp = gEngfuncs.GetLocalPlayer();
+		float ang[3];
+		gEngfuncs.GetViewAngles( ang );
+		if( lp )
+			gEngfuncs.Con_Printf( "efw: view origin=%.0f %.0f %.0f yaw=%.0f idx=%d\n",
+				lp->origin[0], lp->origin[1], lp->origin[2], ang[1], lp->index );
+		else
+			gEngfuncs.Con_Printf( "efw: view origin=(no local player)\n" );
+	}
 	/* FUN_10044f30 leftover unique: quote even if interact / inv HUD
 	   never walks slots (HIDEHUD_ALL / no look-use on boot map). */
 	{

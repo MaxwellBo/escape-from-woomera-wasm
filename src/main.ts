@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll122`;
+    return `${url}?v=efw-dll123`;
   return url;
 }
 
@@ -680,16 +680,21 @@ function dismissMenuAfterHud() {
     runEngineCmd('setpause 0');
     runEngineCmd('unpause');
     runEngineCmd('pausable 0');
-    runEngineCmd('spawn');
-    runEngineCmd('begin');
+    /* SV_Spawn_f already ran (PreThink + game_playerspawn). Bare `spawn`
+       is an unknown console command; `cmd spawn` with no spawncount calls
+       SV_New_f and restarts signon. SV_Begin_f is the missing step. */
+    runEngineCmd('cmd begin');
+    runEngineCmd('cmd sendents');
+    runEngineCmd('fullupdate');
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawworld 1');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('r_fullbright 1');
+    runEngineCmd('r_novis 1');
     runEngineCmd('gl_clear 1');
     runEngineCmd('ui_renderworld 1');
     startHostPumps();
-    log('listen: key_game (gles3compat present, world draw on, spawn/begin)');
+    log('listen: key_game (gles3compat present, world draw on, cmd begin)');
   }, 250);
 }
 
@@ -821,12 +826,19 @@ function finishListenSpawn() {
   if (spawnTries >= 8)
     return;
   spawnTries++;
-  runEngineCmd('spawn');
-  runEngineCmd('begin');
-  runEngineCmd('r_norefresh 0');
-  runEngineCmd('r_drawworld 1');
-  runEngineCmd('r_drawentities 1');
-  log(`listen: spawn/begin try=${spawnTries}`);
+  /* Nested Cmd_ExecuteString from Con_Printf (status) aborts Host_Frame.
+     SV_Begin_f requires cs_spawning; GoldSrc protocol sends sendents. */
+  const n = spawnTries;
+  setTimeout(() => {
+    runEngineCmd('cmd begin');
+    runEngineCmd('cmd sendents');
+    runEngineCmd('fullupdate');
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
+    runEngineCmd('r_drawentities 1');
+    runEngineCmd('r_novis 1');
+    log(`listen: cmd begin/sendents try=${n}`);
+  }, 0);
 }
 function onServerActivateSeen() {
   const now = Date.now();
@@ -894,6 +906,7 @@ function onServerActivateSeen() {
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
     finishListenSpawn();
+    runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
   }, 8000);
   if (!pausableTimer) {
