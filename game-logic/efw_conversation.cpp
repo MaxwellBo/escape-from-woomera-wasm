@@ -344,9 +344,19 @@ int EFW_IsTalkNpc( CBaseEntity *pEnt )
 		|| !strcmp( cn, "monster_efw_guard" );
 }
 
+/* FUN_100bdc40: walk the question's flag range and call vtable+4
+   (HasKeyword / FirstTime). WASM: unlocked topic + FirstTime seen-bit. */
 static int EFW_QuestionVisible( const char *npc, const EfwQuestion *q )
 {
 	int seen;
+	{
+		static int s_match;
+		if( !s_match )
+		{
+			s_match = 1;
+			EFW_DebugPrint( ">>> FUN_100bdc40 %s %s", npc ? npc : "-", q->topic );
+		}
+	}
 	if( !q->topic[0] || !strcmp( q->topic, "UNWANTED_ITEM" ) )
 		return 0;
 	if( !EFW_HasKeyword( q->topic ) )
@@ -619,6 +629,14 @@ void EFW_ThinkConversation( void )
 	else
 	{
 		pPlayer = EFW_Player();
+		{
+			static int s_now;
+			if( !s_now )
+			{
+				s_now = 1;
+				EFW_DebugPrint( ">>> FUN_100c5b60 t=%.2f", gpGlobals->time );
+			}
+		}
 		if( !pPlayer || !st->talkNpc )
 			EFW_CloseTalk();
 		else if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )

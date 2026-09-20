@@ -12,7 +12,7 @@
 
 #define EFW_HUD_BLOB 36
 #define EFW_MAX_DIARY 24 /* collected slots; flags indexed by page number (AddDiary 0..16) */
-#define EFW_MAX_KEYWORDS 48
+#define EFW_MAX_KEYWORDS 64 /* unique Q<> topics plus world-state flags */
 #define EFW_MAX_SEEN 80
 #define EFW_MENU_LINES 7
 #define EFW_MAX_SCAN 3

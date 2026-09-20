@@ -1,6 +1,7 @@
 import './style.css';
 import { Xash3D } from 'xash3d-fwgs';
 import { unzipSync } from 'fflate';
+import ValveUnpackWorker from './valve-unpack.worker.ts?worker';
 import { EfwLoopbackNet } from './loopback-net';
 
 type XashInstance = InstanceType<typeof Xash3D>;
@@ -24,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll120`;
+    return `${url}?v=efw-dll121`;
   return url;
 }
 
@@ -895,8 +896,17 @@ function formatErr(err: unknown): string {
   return String(err);
 }
 
+function yieldFrame(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
 /** Split a GoldSrc PACK into loose files so we never FS.writeFile a 50MB blob. */
-function explodePak(pak: Uint8Array, dest: Map<string, Uint8Array>, prefix: string) {
+async function explodePakYielding(
+  pak: Uint8Array,
+  dest: Map<string, Uint8Array>,
+  prefix: string,
+  onProgress?: (done: number, total: number) => void,
+) {
   const magic = String.fromCharCode(pak[0] ?? 0, pak[1] ?? 0, pak[2] ?? 0, pak[3] ?? 0);
   if (magic !== 'PACK') {
     dest.set(`${prefix}pak0.pak`, pak);
@@ -905,19 +915,69 @@ function explodePak(pak: Uint8Array, dest: Map<string, Uint8Array>, prefix: stri
   const view = new DataView(pak.buffer, pak.byteOffset, pak.byteLength);
   const off = view.getUint32(4, true);
   const length = view.getUint32(8, true);
+  const total = Math.floor(length / 64);
+  const decoder = new TextDecoder('latin1');
+  let n = 0;
   for (let i = 0; i < length; i += 64) {
-    let name = '';
-    for (let j = 0; j < 56; j++) {
-      const c = pak[off + i + j];
-      if (!c) break;
-      name += String.fromCharCode(c);
+    const raw = pak.subarray(off + i, off + i + 56);
+    let nlen = raw.indexOf(0);
+    if (nlen < 0) nlen = 56;
+    const name = decoder.decode(raw.subarray(0, nlen)).replace(/\\/g, '/');
+    if (name) {
+      const eoff = view.getUint32(off + i + 56, true);
+      const esize = view.getUint32(off + i + 60, true);
+      dest.set(`${prefix}${name}`, pak.subarray(eoff, eoff + esize));
     }
-    name = name.replace(/\\/g, '/');
-    if (!name) continue;
-    const eoff = view.getUint32(off + i + 56, true);
-    const esize = view.getUint32(off + i + 60, true);
-    dest.set(`${prefix}${name}`, pak.subarray(eoff, eoff + esize));
+    n++;
+    if (n % 64 === 0) {
+      onProgress?.(n, total);
+      await yieldFrame();
+    }
   }
+  onProgress?.(total, total);
+}
+
+function unzipZipOnMain(buf: Uint8Array): Record<string, Uint8Array> {
+  return unzipSync(buf);
+}
+
+function unzipZipInWorker(buf: Uint8Array): Promise<Record<string, Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new ValveUnpackWorker();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('valve unzip worker timed out'));
+    }, 180000);
+    worker.onmessage = (ev: MessageEvent<{ names?: string[]; buffers?: ArrayBuffer[]; error?: string }>) => {
+      clearTimeout(timer);
+      worker.terminate();
+      if (ev.data?.error) {
+        reject(new Error(ev.data.error));
+        return;
+      }
+      const names = ev.data?.names || [];
+      const buffers = ev.data?.buffers || [];
+      const entries: Record<string, Uint8Array> = {};
+      for (let i = 0; i < names.length; i++) {
+        const raw = buffers[i];
+        if (raw) entries[names[i]] = new Uint8Array(raw);
+      }
+      resolve(entries);
+    };
+    worker.onerror = (err) => {
+      clearTimeout(timer);
+      worker.terminate();
+      reject(err.error || new Error(err.message || 'valve unzip worker failed'));
+    };
+    const copy = buf.slice();
+    worker.postMessage(copy.buffer, [copy.buffer]);
+  });
 }
 
 // ---- staged-file helpers -------------------------------------------------
@@ -965,9 +1025,18 @@ async function stageValveZip() {
   const res = await fetch(VALVE_ZIP_URL);
   if (!res.ok) throw new Error(`valve zip fetch failed: HTTP ${res.status}`);
   const buf = new Uint8Array(await res.arrayBuffer());
-  setVeil('Unpacking Half-Life data…', 'Inflating pak0, wads, sprites, sounds.', 0.58);
-  await new Promise((r) => setTimeout(r, 30));
-  const entries = unzipSync(buf);
+  setVeil('Unpacking Half-Life data…', 'Inflating pak0, wads, sprites, sounds (worker).', 0.58);
+  await yieldFrame();
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = await unzipZipInWorker(buf);
+    log(`valve unzip worker: ${Object.keys(entries).length} zip entries`);
+  } catch (err) {
+    log(`valve unzip worker failed (${formatErr(err)}) — main thread fallback`);
+    setVeil('Unpacking Half-Life data…', 'Inflating on the main thread (slower).', 0.58);
+    await yieldFrame();
+    entries = unzipZipOnMain(buf);
+  }
   staged.valve.clear();
   let bytes = 0;
   let skipped = 0;
@@ -979,9 +1048,12 @@ async function stageValveZip() {
       skipped++;
       continue;
     }
-    const file = data as Uint8Array;
+    const file = data;
     if (lower.endsWith('.pak')) {
-      explodePak(file, staged.valve, 'valve/');
+      await explodePakYielding(file, staged.valve, 'valve/', (done, total) => {
+        setVeil('Unpacking Half-Life data…', `Exploding pak0 ${done}/${total}`, 0.58);
+        valveStatus.textContent = `exploding pak0 ${done}/${total}`;
+      });
       bytes += file.length;
       continue;
     }
@@ -1065,7 +1137,7 @@ function mkdirTree(FS: { mkdir: (p: string) => void }, path: string) {
   }
 }
 
-function writeTree(
+async function writeTree(
   FS: {
     mkdir: (p: string) => void;
     writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
@@ -1075,7 +1147,8 @@ function writeTree(
   onProgress?: (done: number, total: number) => void,
 ) {
   const entries = [...files.entries()];
-  entries.forEach(([path, data], i) => {
+  for (let i = 0; i < entries.length; i++) {
+    const [path, data] = entries[i];
     const dest = path.startsWith('/') ? path : `/${path.replace(/^\//, '')}`;
     const slash = dest.lastIndexOf('/');
     if (slash > 0) mkdirTree(FS, dest.slice(0, slash));
@@ -1085,12 +1158,14 @@ function writeTree(
       /* not present */
     }
     try {
-      FS.writeFile(dest, data.slice());
+      const copy = data.slice();
+      FS.writeFile(dest, copy, { canOwn: true });
     } catch (err) {
       throw new Error(`write ${dest} (${data.length} bytes): ${formatErr(err)}`);
     }
-    if (onProgress && i % 50 === 0) onProgress(i, entries.length);
-  });
+    if (onProgress && i % 32 === 0) onProgress(i, entries.length);
+    if (i % 32 === 0) await yieldFrame();
+  }
   onProgress?.(entries.length, entries.length);
 }
 
@@ -1372,6 +1447,7 @@ async function boot() {
     engine.net = loopbackNet;
     (window as Window & { __efwNet?: EfwLoopbackNet }).__efwNet = loopbackNet;
     (window as Window & { __efwRun?: typeof runEngineCmd }).__efwRun = runEngineCmd;
+    (window as Window & { __efwGame?: typeof runGameCmd }).__efwGame = runGameCmd;
     log('boot: init() with in-process loopback net');
     await engine.init();
     log('boot: init ok');
@@ -1395,12 +1471,12 @@ async function boot() {
     log(`boot: writing ${staged.valve.size} valve files + ${staged.woomera.size} woomera files`);
 
     setVeil('Installing game files…', 'Writing woomera/ + valve/ into WASM memory.', 0.8);
-    await new Promise((r) => setTimeout(r, 30));
-    writeTree(FS, staged.valve, (done, total) =>
+    await yieldFrame();
+    await writeTree(FS, staged.valve, (done, total) =>
       setVeil('Installing game files…', `valve/ ${done}/${total}`, 0.8 + 0.1 * (done / Math.max(1, total))),
     );
     log('boot: valve files written');
-    writeTree(FS, staged.woomera);
+    await writeTree(FS, staged.woomera);
     log('boot: woomera files written');
     mkdirTree(FS, `/${GAME_DIR}/overviews`);
     {
