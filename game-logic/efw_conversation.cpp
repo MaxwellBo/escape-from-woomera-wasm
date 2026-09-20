@@ -30,6 +30,26 @@ static const char *kConversationFiles[] = {
 };
 
 static void EFW_RegisterDefaults( void );
+static void EFW_SeedScriptTopics( const EfwScript *script );
+
+static void EFW_SeedScriptTopics( const EfwScript *script )
+{
+	int qi;
+	if( !script )
+		return;
+	for( qi = 0; qi < script->questionCount; qi++ )
+	{
+		const char *topic = script->questions[qi].topic;
+		int locked;
+		if( !topic[0] || !strcmp( topic, "UNWANTED_ITEM" ) )
+			continue;
+		/* FUN_100b9990: world-knowledge Qs start unlocked. SUBSEQUENT
+		   greetings and PLIERS_GOT_PLIERS wait for AddTopic. */
+		locked = strstr( topic, "SUBSEQUENT" ) != NULL
+			|| !strcmp( topic, "PLIERS_GOT_PLIERS" );
+		EFW_AddKeyword( topic, locked ? 0 : 1 );
+	}
+}
 
 static EfwScriptCache *EFW_ScriptSlots( void )
 {
@@ -56,7 +76,10 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 	for( i = 0; i < EFW_SCRIPT_CACHE; i++ )
 	{
 		if( slots[i].loaded && !strcmp( slots[i].name, scriptName ) )
+		{
+			EFW_SeedScriptTopics( &slots[i].script );
 			return &slots[i].script;
+		}
 		if( !slots[i].loaded && !slot )
 			slot = &slots[i];
 	}
@@ -92,6 +115,7 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		else
 			EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
 	}
+	EFW_SeedScriptTopics( &slot->script );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
@@ -443,13 +467,8 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	{
 		/* FUN_100c6420: MapLevel then FUN_100b9990 conversation match. */
-		static int s_talk;
-		if( !s_talk )
-		{
-			s_talk = 1;
-			EFW_DebugPrint( ">>> FUN_100c6420 %s", STRING( pNpc->pev->targetname ) );
-			EFW_DebugPrint( ">>> FUN_100b9990 %s", STRING( pNpc->pev->targetname ) );
-		}
+		EFW_DebugPrint( ">>> FUN_100c6420 %s level=%d", STRING( pNpc->pev->targetname ), EFW_MapLevel() );
+		EFW_DebugPrint( ">>> FUN_100b9990 %s", STRING( pNpc->pev->targetname ) );
 	}
 	(void)EFW_MapLevel();
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );

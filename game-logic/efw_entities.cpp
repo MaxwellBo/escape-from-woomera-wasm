@@ -228,6 +228,23 @@ void CRefugee::IdleThink( void )
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
 		}
+		/* FUN_100c6440 Spirit walk state 3 (FUN_1005d500). WALK_MOVE without
+		   a studio stalls Host_Frame, so close the gap by origin lerp. */
+		if( m_iWalkState == 3 && dist > 100.0f )
+		{
+			Vector step;
+			float len = dist;
+			if( len < 1.0f )
+				len = 1.0f;
+			step = delta * ( 12.0f / len );
+			step.z = 0;
+			UTIL_SetOrigin( pev, pev->origin + step );
+			pev->angles.y = UTIL_VecToYaw( delta );
+			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
+				m_iWalkState = 0;
+		}
+		else if( dist <= 100.0f )
+			m_iWalkState = 0;
 	}
 	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
 }

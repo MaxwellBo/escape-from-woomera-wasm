@@ -1301,18 +1301,7 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 	if( !strcmp( name, "AddTopic" ) )
 		EFW_AddKeyword( arg, 1 );
 	else if( !strcmp( name, "DeleteTopic" ) )
-	{
-		int i;
-		for( i = 0; i < g_efw.keywordCount; i++ )
-		{
-			if( !strcmp( g_efw.keywords[i], arg ) )
-			{
-				g_efw.keywords[i][0] = '\0';
-				g_efw.keywordUnlocked[i] = 0;
-				break;
-			}
-		}
-	}
+		EFW_AddKeyword( arg, 0 ); /* FUN_100c3500 flag 0 keeps the node so FUN_100b9990 hides it */
 	else if( !strcmp( name, "AddDiary" ) )
 		EFW_AddDiary( atoi( arg ), 2 );
 	else if( !strcmp( name, "ServerCommand" ) )
@@ -1823,6 +1812,7 @@ static int s_studioDelay;
 static int s_liveTicks;
 static int s_inUseLatch; /* HostFwd efw_inuse → PreThink IN_USE */
 static int s_menuKeyLatch; /* FUN_100c6a50 GetAsyncKeyState stand-in */
+static int s_walkOn; /* DROP_TO_FLOOR succeeded; stop forcing noclip */
 
 void EFW_LatchInUse( void )
 {
@@ -2103,16 +2093,43 @@ void EFW_StartFrame( void )
 		EFW_PollMenuKeys();
 		EFW_BindOneDetainee();
 		EFW_PulseRefugeeThinks();
+		EFW_PulseWorld( pLive );
 	}
-	/* Keep noclip + freeze remaining unbound studios. After live>=45 the
-	   old path dropped NOCLIP (player fell into the void) and SET_MODEL /
-	   MODEL_INDEX of barney/Security.mdl/tradesman wiped WebGL2 present.
-	   Detainees already bind MODEL_INDEX one-per-frame above. */
+	/* After HUD_Redraw has proven ca_active, DROP_TO_FLOOR then WALK.
+	   dll119 kept noclip forever because dropping it at live>=45 without a
+	   hull put the pawn in the void. SET_MODEL of barney/Security.mdl
+	   still wiped WebGL2 present, so remaining unbound studios stay frozen. */
 	{
 		int j;
 		CBasePlayer *pPlayer = EFW_Player();
 		if( pPlayer )
-			pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+		{
+			if( EFW_GetHudInt( 6 ) )
+				pPlayer->pev->movetype = MOVETYPE_NONE;
+			else if( s_walkOn )
+				pPlayer->pev->movetype = MOVETYPE_WALK;
+			else if( s_liveTicks >= 16 )
+			{
+				pPlayer->pev->solid = SOLID_SLIDEBOX;
+				UTIL_SetSize( pPlayer->pev, VEC_HULL_MIN, VEC_HULL_MAX );
+				if( DROP_TO_FLOOR( pPlayer->edict() ) )
+				{
+					s_walkOn = 1;
+					pPlayer->pev->movetype = MOVETYPE_WALK;
+					pPlayer->pev->flags |= FL_ONGROUND;
+					pPlayer->pev->velocity = g_vecZero;
+					EFW_LogLine( "efw: DROP_TO_FLOOR ok — MOVETYPE_WALK\n" );
+				}
+				else
+				{
+					pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+					if( s_liveTicks == 16 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
+						EFW_LogLine( "efw: DROP_TO_FLOOR miss — keep noclip (NOHANG)\n" );
+				}
+			}
+			else
+				pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+		}
 		EFW_FreezeNpcPhysics();
 		for( j = 1; j < EFW_MaxEnts(); j++ )
 		{
@@ -2131,11 +2148,11 @@ void EFW_StartFrame( void )
 				e->v.movetype = MOVETYPE_NONE;
 		}
 		if( s_liveTicks == 45 )
-			EFW_LogLine( "efw: skip remaining studio bind (keep barracks present)\n" );
+			EFW_LogLine( "efw: skip remaining studio SET_MODEL (keep barracks present)\n" );
 		if( s_liveTicks <= 8 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
 		{
-			char line[80];
-			snprintf( line, sizeof( line ), "efw: StartFrame done live=%d\n", s_liveTicks );
+			char line[96];
+			snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d\n", s_liveTicks, s_walkOn );
 			EFW_LogLine( line );
 		}
 	}
@@ -2297,6 +2314,7 @@ void EFW_OnServerActivate( void )
 	s_thinkRestored = 0;
 	s_studioDelay = 0;
 	s_liveTicks = 0;
+	s_walkOn = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -2321,6 +2339,7 @@ void EFW_OnServerDeactivate( void )
 	s_thinkRestored = 0;
 	s_studioDelay = 0;
 	s_liveTicks = 0;
+	s_walkOn = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );

@@ -135,6 +135,7 @@ const char *EFW_ScriptNameForNpc( CBaseEntity *pNpc );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value ); /* 0x100c7da0 */
+void EFW_PulseWorld( CBasePlayer *pPlayer ); /* trigger AABB + GateFSM while noclip */
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b969 */
 void EFW_SetPause( int on ); /* 0x100c7510 */
 void EFW_ChangeLevel( const char *map ); /* ClientCommand 0x1001b2f3 */

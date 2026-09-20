@@ -311,6 +311,83 @@ int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntit
 	return 0;
 }
 
+static int EFW_PosInBox( const Vector &pos, CBaseEntity *pEnt )
+{
+	Vector mins;
+	Vector maxs;
+	if( !pEnt )
+		return 0;
+	mins = pEnt->pev->absmin;
+	maxs = pEnt->pev->absmax;
+	if( ( maxs - mins ).Length() < 1.0f )
+		return ( pos - pEnt->pev->origin ).Length() <= 96.0f;
+	return pos.x >= mins.x && pos.x <= maxs.x
+		&& pos.y >= mins.y && pos.y <= maxs.y
+		&& pos.z >= mins.z - 16.0f && pos.z <= maxs.z + 48.0f;
+}
+
+/* GoldSrc trigger Touch is AABB. Noclip / deferred studios never fire
+   pfnTouch, so FUN_100c7da0 GateFSM never ran while walking the barracks. */
+void EFW_PulseWorld( CBasePlayer *pPlayer )
+{
+	static char s_lastGate[32];
+	static float s_lastGateTime;
+	CBaseEntity *pScan;
+	Vector pos;
+	int i;
+	static const char *kGates[] = {
+		"efw_kitchen_door",
+		"efw_2ndcompound_entry",
+		"efw_1stcompound_entry",
+		"efw_approach_bin",
+		NULL
+	};
+
+	if( !pPlayer )
+		return;
+	pos = pPlayer->pev->origin;
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_once" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+	for( i = 0; kGates[i]; i++ )
+	{
+		CBaseEntity *pGate = UTIL_FindEntityByTargetname( NULL, kGates[i] );
+		int inside = 0;
+		if( pGate )
+			inside = EFW_PosInBox( pos, pGate );
+		if( !inside )
+		{
+			pScan = NULL;
+			while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+			{
+				if( EFW_FStrEq( STRING( pScan->pev->target ), kGates[i] )
+					&& EFW_PosInBox( pos, pScan ) )
+				{
+					inside = 1;
+					break;
+				}
+			}
+		}
+		if( !inside )
+			continue;
+		if( !strcmp( s_lastGate, kGates[i] ) && gpGlobals->time < s_lastGateTime + 1.5f )
+			continue;
+		strncpy( s_lastGate, kGates[i], sizeof( s_lastGate ) - 1 );
+		s_lastGate[sizeof( s_lastGate ) - 1] = '\0';
+		s_lastGateTime = gpGlobals->time;
+		EFW_FireTargets( kGates[i], pPlayer, pPlayer, USE_TOGGLE, 0.0f );
+	}
+}
+
 /* FUN_100c7590 / 75c0 / 75e0 / 7670 / 7740 — camp PA + Dingaling. */
 struct EfwCue
 {

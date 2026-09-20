@@ -730,10 +730,17 @@ static void EFW_OpenStoryboard( int code )
 	switch( code )
 	{
 	case 0x3f:
+		/* FUN_10047830: Hiding_Day Panel copies DAT_100bc9b0, then
+		   ClientCmd stored next to the sprite: changelevel level2. */
 		spr = "Storyboard/EFW_Storyboards_Hiding_Day.spr";
+		strncpy( g_storyChange, "efw_changelevel efw_prototype_level2", sizeof( g_storyChange ) - 1 );
+		g_storyChange[sizeof( g_storyChange ) - 1] = '\0';
 		break;
 	case 0x43:
+		/* FUN_10047830: Hiding_Night Panel copies DAT_100bc9c0 -> level3. */
 		spr = "Storyboard/EFW_Storyboards_Hiding_Night.spr";
+		strncpy( g_storyChange, "efw_changelevel efw_prototype_level3", sizeof( g_storyChange ) - 1 );
+		g_storyChange[sizeof( g_storyChange ) - 1] = '\0';
 		break;
 	case 0x52:
 		spr = "Storyboard/EFW_Storyboards_Help_Screen.spr";
