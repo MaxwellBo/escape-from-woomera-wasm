@@ -233,7 +233,12 @@ function dismissEfwStory() {
   if (next) {
     log(`> ${next} (storyboard dismiss)`);
     runEngineCmd('pausable 0');
-    runGameCmd(next);
+    /* FUN_10047830 stores DAT_100bc9b0/c0 as a changelevel. pfnChangeLevel
+       returns while Host stays RUNFRAME, so SV_ExecChangeLevel never ran.
+       loadMap() keeps the rAF runner then falls back to disconnect+map. */
+    const change = /^efw_changelevel\s+(\S+)/.exec(next);
+    if (change) loadMap(change[1], 'storyboard dismiss');
+    else runGameCmd(next);
   }
 }
 
