@@ -2118,6 +2118,10 @@ void EFW_StartFrame( void )
 					pPlayer->pev->movetype = MOVETYPE_WALK;
 					pPlayer->pev->flags |= FL_ONGROUND;
 					pPlayer->pev->velocity = g_vecZero;
+					/* info_player_start angles "0 90 0" — look +Y into the barracks. */
+					pPlayer->pev->angles = Vector( 0, 90, 0 );
+					pPlayer->pev->v_angle = pPlayer->pev->angles;
+					pPlayer->pev->fixangle = 1;
 					EFW_LogLine( "efw: DROP_TO_FLOOR ok — MOVETYPE_WALK\n" );
 				}
 				else

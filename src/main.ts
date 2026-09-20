@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll121`;
+    return `${url}?v=efw-dll122`;
   return url;
 }
 
@@ -557,6 +557,8 @@ function log(text: string) {
     logChangeLevelProgress(normalized);
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
     resumeAfterFirstClientFrame();
+  if (/\bSpawning\b/.test(normalized) && normalized.includes('loopback'))
+    finishListenSpawn();
   if (applyEfwStory(normalized)) return;
   if (applyEfwVgui(normalized)) return;
   logLines++;
@@ -678,11 +680,16 @@ function dismissMenuAfterHud() {
     runEngineCmd('setpause 0');
     runEngineCmd('unpause');
     runEngineCmd('pausable 0');
+    runEngineCmd('spawn');
+    runEngineCmd('begin');
     runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
     runEngineCmd('r_drawentities 1');
-    runEngineCmd('ui_renderworld 0');
+    runEngineCmd('r_fullbright 1');
+    runEngineCmd('gl_clear 1');
+    runEngineCmd('ui_renderworld 1');
     startHostPumps();
-    log('listen: key_game (gles3compat present)');
+    log('listen: key_game (gles3compat present, world draw on, spawn/begin)');
   }, 250);
 }
 
@@ -809,11 +816,24 @@ function loadMap(name: string, reason: string) {
 
 let lastActivateMs = 0;
 let menuDismissed = false;
+let spawnTries = 0;
+function finishListenSpawn() {
+  if (spawnTries >= 8)
+    return;
+  spawnTries++;
+  runEngineCmd('spawn');
+  runEngineCmd('begin');
+  runEngineCmd('r_norefresh 0');
+  runEngineCmd('r_drawworld 1');
+  runEngineCmd('r_drawentities 1');
+  log(`listen: spawn/begin try=${spawnTries}`);
+}
 function onServerActivateSeen() {
   const now = Date.now();
   if (now - lastActivateMs < 800)
     return;
   lastActivateMs = now;
+  spawnTries = 0;
   listenReady = true;
   resumedAfterClientFrame = false;
   if (changeWatch) {
@@ -868,15 +888,13 @@ function onServerActivateSeen() {
   }, 4000);
   setTimeout(() => {
     if (changeWatch) return;
-    if (firstMapKeyGame) {
-      log('listen: skip late ui_renderworld (already key_game)');
-      return;
-    }
     runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
-    log('listen: r_norefresh 0 ui_renderworld 1 (world present)');
+    finishListenSpawn();
+    log('listen: r_norefresh 0 r_drawworld 1 (world present)');
   }, 8000);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
