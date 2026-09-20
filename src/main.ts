@@ -735,6 +735,18 @@ function loadMap(name: string, reason: string) {
   const prev = startedMap;
   startedMap = name;
   log(`> map ${name} (${reason})`);
+  /* FUN_100c6d70 slot dtor: drop HTML CommandButtons so level1 Talk
+     widgets do not sit on the next chapter's splash. */
+  {
+    const layer = document.getElementById('efw-vgui');
+    if (layer) {
+      layer.innerHTML = '';
+      layer.hidden = true;
+    }
+    const story = document.getElementById('efw-story');
+    if (story) story.hidden = true;
+    hideLetterbox();
+  }
   /* Extra `map` is a no-op while Host is in RUNFRAME. CHANGE_LEVEL (the
      PE ClientCommand pfnChangeLevel) queues Host STATE_CHANGELEVEL. */
   if (!prev) {
