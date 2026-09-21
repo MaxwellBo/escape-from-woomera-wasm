@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll125`;
+    return `${url}?v=efw-dll126`;
   return url;
 }
 
@@ -265,6 +265,10 @@ function showEfwStory(code: number, fallback?: string) {
   const title = fallback || spec?.title;
   if (!title)
     return;
+  /* Intro 0x49–0x4b are SPR-only in the PE. Do not cover the WASM view
+     with an empty Continue — that blocked every browser play session. */
+  if (code >= 0x49 && code <= 0x4b)
+    return;
   text.textContent = title;
   storyNext = spec?.next || '';
   layer.hidden = false;
@@ -352,6 +356,16 @@ function applyHopeHud(text: string): boolean {
   const num = text.match(/>>> FUN_1001e880 n=(\d+)/);
   if (num) {
     setHopeHud(Number(num[1]));
+    return false;
+  }
+  const persist = text.match(/persist hope=([\d.]+)/);
+  if (persist) {
+    setHopeHud(Number(persist[1]));
+    return false;
+  }
+  const pulse = text.match(/>>> hope ([\d.]+)/);
+  if (pulse) {
+    setHopeHud(Number(pulse[1]));
     return false;
   }
   const m = text.match(/>>> hopehud ([\d.]+)/);
@@ -862,16 +876,22 @@ function onServerActivateSeen() {
   spawnTries = 0;
   listenReady = true;
   resumedAfterClientFrame = false;
+  const changing = !!changeWatch;
   if (changeWatch) {
     clearTimeout(changeWatch);
     changeWatch = null;
   }
   log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
   startHostPumps();
-  /* Keep r_norefresh 1 until HUD_Redraw has looped. HostPump drives
-     StartFrame while libmenu still has the listen server paused. */
+  /* First map: keep the world presenting. r_norefresh 1 here used to paint
+     a black canvas for the whole session because HUD_Redraw often never
+     ran. Only blank the plaque during CHANGE_LEVEL. */
   runEngineCmd('r_drawviewmodel 0');
-  runEngineCmd('r_norefresh 1');
+  if (changing) {
+    runEngineCmd('r_norefresh 1');
+  } else {
+    forceWorldPresent();
+  }
   runEngineCmd('sv_validate_changelevel 0');
   runEngineCmd('sv_newunit 1');
   runEngineCmd('pausable 0');
@@ -902,7 +922,7 @@ function onServerActivateSeen() {
   }, 2000);
   setTimeout(() => {
     if (changeWatch) return;
-    log('listen: host_clientloaded (r_norefresh 1)');
+    log('listen: host_clientloaded');
     runEngineCmd('host_clientloaded 1');
     runEngineCmd('host_gameloaded 1');
     if (resumedAfterClientFrame) {
@@ -922,7 +942,9 @@ function onServerActivateSeen() {
     finishListenSpawn();
     runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
-  }, 8000);
+    if (!firstMapKeyGame)
+      dismissMenuAfterHud();
+  }, 2500);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
       runEngineCmd('pausable 0');
@@ -1463,13 +1485,13 @@ async function boot() {
       '+sv_lan',
       '1',
       '+r_drawentities',
-      '0',
+      '1',
       '+r_drawviewmodel',
       '0',
       '+r_drawparticles',
       '0',
       '+r_norefresh',
-      '1',
+      '0',
       '+sv_validate_changelevel',
       '0',
       '+sv_newunit',
