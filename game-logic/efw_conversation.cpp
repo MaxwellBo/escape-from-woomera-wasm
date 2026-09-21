@@ -848,17 +848,11 @@ void EFW_HtmlVguiSync( void )
 
 	if( !pPlayer )
 		return;
-	/* FUN_10044f70 world-space CommandButtons are client HUD_Redraw.
-	   Writing TalkScan widgets here CLRs projected coords. Only emit
-	   ShowMenu picks while talkActive. */
-	if( !st->talkActive )
-		return;
 	memset( btns, 0, sizeof( btns ) );
-	/* FUN_100c6e60 ShowMenu CommandButtons. TalkScan's world widgets
-	   must not CLR the topic list while a conversation is up. */
-	if( st->menuCount <= 0 )
-		return;
+	if( st->talkActive && st->menuCount > 0 )
 	{
+		/* FUN_100c6e60 ShowMenu CommandButtons. TalkScan's world widgets
+		   must not CLR the topic list while a conversation is up. */
 		int x = 320;
 		int y = 220;
 		for( i = 0; i < st->menuCount && i < 6; i++ )
@@ -871,6 +865,22 @@ void EFW_HtmlVguiSync( void )
 			EFW_HtmlVguiAdd( btns, &n, x, y, label, cmd );
 		}
 	}
+	else if( !st->talkActive )
+	{
+		/* FUN_10044f70 world-space Talk/Give/Hide CommandButtons. HUD_Redraw
+		   never projects these in WASM, so TalkScan writes the same cmds. */
+		{
+			static int s_world;
+			if( !s_world )
+			{
+				s_world = 1;
+				EFW_DebugPrint( ">>> FUN_10044f70" );
+			}
+		}
+		for( i = 0; i < st->scanCount && n < EFW_HTML_VGUI_MAX; i++ )
+			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, 320, 200 );
+	}
+
 	sig[0] = '\0';
 	used = 0;
 	for( i = 0; i < n; i++ )

@@ -135,6 +135,12 @@ int main(int argc, char **argv) {
         return 1
     origin = re.search(r'"origin"\s+"([^"]+)"', spawn.group(0))
     print("level1 info_player_start", origin.group(1) if origin else "?")
+    for name in ("Amir", "Gholan", "efw_hiding_place", "efw_kitchen_bin"):
+        block = re.search(
+            rf'\{{[^}}]*"targetname"\s+"{re.escape(name)}"[^}}]*\}}', ents, re.S
+        )
+        origin_m = re.search(r'"origin"\s+"([^"]+)"', block.group(0)) if block else None
+        print(f"level1 {name}", origin_m.group(1) if origin_m else "missing")
     return 1 if failed else 0
 
 

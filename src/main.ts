@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll124`;
+    return `${url}?v=efw-dll125`;
   return url;
 }
 
@@ -555,7 +555,8 @@ function log(text: string) {
     onServerActivateSeen();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
     logChangeLevelProgress(normalized);
-  if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
+  if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live=')
+      || normalized.includes('efw: world present live='))
     resumeAfterFirstClientFrame();
   if (/\bSpawning\b/.test(normalized) && normalized.includes('loopback'))
     finishListenSpawn();
@@ -698,10 +699,23 @@ function dismissMenuAfterHud() {
   }, 250);
 }
 
+function forceWorldPresent() {
+  runEngineCmd('r_norefresh 0');
+  runEngineCmd('r_drawworld 1');
+  runEngineCmd('r_drawentities 1');
+  runEngineCmd('r_fullbright 1');
+  runEngineCmd('r_novis 1');
+  runEngineCmd('gl_clear 1');
+  runEngineCmd('ui_renderworld 1');
+}
+
 function resumeAfterFirstClientFrame() {
   if (changeWatch) return;
   if (resumedAfterClientFrame) return;
   resumedAfterClientFrame = true;
+  /* StartFrame can prove the pawn is live before HUD_Redraw. Turn the
+     world present path on immediately; do not wait for ClientFrame. */
+  forceWorldPresent();
   /* Do not Cmd_ExecuteString or resumeMainLoop from inside HUD_Redraw's
      Con_Printf → JS log. dll74 nested toggleconsole+resume there and
      aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
@@ -1666,9 +1680,9 @@ document.getElementById('efw-letter')?.addEventListener('click', (ev) => {
   dismissLetterbox();
 });
 document.getElementById('btn-talk')?.addEventListener('click', () => {
-  log('> talk (efw_Talk)');
+  log('> talk (efw_Talk Amir)');
   runEngineCmd('pausable 0');
-  runGameCmd('efw_Talk');
+  runGameCmd('efw_Talk Amir');
 });
 document.getElementById('btn-use')?.addEventListener('click', () => {
   log('> use (IN_USE / FUN_100c4af0)');
@@ -1707,11 +1721,40 @@ mapsPanel.addEventListener('pointerdown', (e) => {
   if (e.target instanceof HTMLButtonElement || e.target instanceof HTMLInputElement)
     return;
 });
+const walkKeys = { w: false, a: false, s: false, d: false };
+function walkSlot(key: string): keyof typeof walkKeys | null {
+  if (key === 'w' || key === 'W' || key === 'ArrowUp') return 'w';
+  if (key === 's' || key === 'S' || key === 'ArrowDown') return 's';
+  if (key === 'a' || key === 'A') return 'a';
+  if (key === 'd' || key === 'D') return 'd';
+  return null;
+}
+function syncWalkLatch() {
+  const fwd = (walkKeys.w ? 1 : 0) + (walkKeys.s ? -1 : 0);
+  const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
+  runGameCmd(`efw_move ${fwd} ${side}`);
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  const walk = walkSlot(e.key);
+  if (walk) {
+    if (e.repeat) return;
+    walkKeys[walk] = true;
+    syncWalkLatch();
+    return;
+  }
   if (e.repeat)
     return;
+  if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
+    runGameCmd('efw_turn 12');
+    return;
+  }
+  if (e.key === 'ArrowRight' || e.key === 'z' || e.key === 'Z') {
+    runGameCmd('efw_turn -12');
+    return;
+  }
   if (e.key === 'e' || e.key === 'E' || e.key === 'Escape' || e.key === 'Enter') {
     const story = document.getElementById('efw-story');
     if (story && !story.hidden) {
@@ -1729,6 +1772,14 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'i' || e.key === 'I') {
     document.getElementById('btn-diary')?.click();
   }
+});
+document.addEventListener('keyup', (e) => {
+  if (e.target === consoleInput || e.target instanceof HTMLInputElement)
+    return;
+  const walk = walkSlot(e.key);
+  if (!walk) return;
+  walkKeys[walk] = false;
+  syncWalkLatch();
 });
 
 document.getElementById('btn-about')?.addEventListener('click', () => {

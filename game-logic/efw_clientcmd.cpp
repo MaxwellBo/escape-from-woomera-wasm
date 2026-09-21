@@ -688,14 +688,17 @@ int EFW_ClientCommand( edict_t *pEntity )
 	{
 		CBaseEntity *pEnt = NULL;
 		const char *who = EFW_CmdName( arg0 );
+		EfwDllState *st = EFW_Dll();
 		if( who && who[0] )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt && st->scanCount && st->scan[0].type == 0 && st->scan[0].name[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, st->scan[0].name );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 384.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 384.0f );
-		if( !pEnt )
-			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )

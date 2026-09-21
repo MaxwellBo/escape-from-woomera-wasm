@@ -915,6 +915,16 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		nLines = 0;
 	if( nLines > 6 )
 		nLines = 6;
+	/* FUN_100c6e20: dword strcpy of ShowMenu line pointers into the
+	   DAT_10132cd0..DAT_10134058 slots. WASM uses strncpy. */
+	{
+		static int s_cpy;
+		if( !s_cpy )
+		{
+			s_cpy = 1;
+			EFW_DebugPrint( ">>> FUN_100c6e20" );
+		}
+	}
 	for( i = 0; i < EFW_MENU_LINES; i++ )
 		st->menuText[i][0] = '\0';
 	for( i = 0; i < nLines; i++ )
@@ -1311,7 +1321,17 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 
 static void EFW_ClearKeywords( void )
 {
-	/* FUN_100c3370: wipe the keyword RB-tree. */
+	/* FUN_100c3370: wipe the keyword RB-tree. FUN_100c3180 is the
+	   map ctor (DAT_10132c80 header + 0x24-byte sentinel node). */
+	{
+		static int s_tree;
+		if( !s_tree )
+		{
+			s_tree = 1;
+			EFW_DebugPrint( ">>> FUN_100c3180" );
+			EFW_DebugPrint( ">>> FUN_100c3240" );
+		}
+	}
 	g_efw.keywordCount = 0;
 	memset( g_efw.keywords, 0, sizeof( g_efw.keywords ) );
 	memset( g_efw.keywordUnlocked, 0, sizeof( g_efw.keywordUnlocked ) );
@@ -1466,6 +1486,8 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.inited = 1;
 	(void)EFW_DiaryCount();
 	EFW_SendHudState();
+	EFW_DebugPrint( ">>> persist hope=%.1f items=%d keywords=%d reset=%d level=%d latch=%d",
+		EFW_GetHudFloat( 1 ), g_efw.items, g_efw.keywordCount, resetHope, level, g_efw.persistLatch );
 }
 
 static void EFW_HostFwd( void )
@@ -1492,6 +1514,19 @@ static void EFW_HostFwd( void )
 		}
 		else
 			EFW_LatchInUse();
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_move" ) )
+	{
+		int fwd = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		int side = ( CMD_ARGC() > 2 ) ? atoi( CMD_ARGV( 2 ) ) : 0;
+		EFW_LatchMove( fwd, side );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_turn" ) )
+	{
+		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
+		EFW_LatchTurn( yaw );
 		return;
 	}
 	if( e && !e->free && e->pvPrivateData )
@@ -1649,6 +1684,8 @@ static void EFW_HostFwd( void )
 		const char *who = ( CMD_ARGC() > 1 ) ? CMD_ARGV( 1 ) : NULL;
 		if( who && who[0] )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt && g_efw.scanCount && g_efw.scan[0].type == 0 && g_efw.scan[0].name[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, g_efw.scan[0].name );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
@@ -1737,6 +1774,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
+		"efw_move", "efw_turn",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -1877,10 +1915,41 @@ static int s_inUseLatch; /* HostFwd efw_inuse → PreThink IN_USE */
 static int s_menuKeyLatch; /* FUN_100c6a50 GetAsyncKeyState stand-in */
 static int s_walkOn; /* DROP_TO_FLOOR succeeded; stop forcing noclip */
 static int s_bindDone; /* all deferred studios have a MODEL_INDEX */
+static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
+static int s_moveSide;
+static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
 {
 	s_inUseLatch = 1;
+}
+
+void EFW_LatchMove( int fwd, int side )
+{
+	if( fwd > 1 )
+		fwd = 1;
+	if( fwd < -1 )
+		fwd = -1;
+	if( side > 1 )
+		side = 1;
+	if( side < -1 )
+		side = -1;
+	s_moveFwd = fwd;
+	s_moveSide = side;
+}
+
+void EFW_LatchTurn( float yawDelta )
+{
+	CBasePlayer *pPlayer = EFW_Player();
+	if( !pPlayer || yawDelta == 0.0f )
+		return;
+	pPlayer->pev->angles.y += yawDelta;
+	while( pPlayer->pev->angles.y > 180.0f )
+		pPlayer->pev->angles.y -= 360.0f;
+	while( pPlayer->pev->angles.y < -180.0f )
+		pPlayer->pev->angles.y += 360.0f;
+	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	pPlayer->pev->fixangle = 1;
 }
 
 void EFW_LatchMenuKey( int slot )
@@ -2175,6 +2244,69 @@ static int EFW_SnapToPlayerStart( CBasePlayer *pPlayer )
 	return DROP_TO_FLOOR( pPlayer->edict() );
 }
 
+static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
+{
+	float dt;
+	Vector delta;
+	Vector dest;
+	static int s_moveN;
+
+	if( !pPlayer || !s_walkOn )
+		return;
+	if( EFW_GetHudInt( 6 ) )
+		return;
+	if( !s_moveFwd && !s_moveSide )
+		return;
+	dt = g_efw.dt;
+	if( dt <= 0.0f )
+		dt = 0.12f;
+	if( dt > 0.2f )
+		dt = 0.2f;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	delta = gpGlobals->v_forward * (float)s_moveFwd + gpGlobals->v_right * (float)s_moveSide;
+	delta.z = 0.0f;
+	{
+		float len = delta.Length();
+		if( len < 0.01f )
+			return;
+		delta = delta * ( ( 220.0f * dt ) / len );
+	}
+	dest = pPlayer->pev->origin + delta;
+	pPlayer->pev->origin = dest;
+	pPlayer->pev->velocity = delta * ( 1.0f / dt );
+	pPlayer->pev->flags |= FL_ONGROUND;
+	UTIL_SetOrigin( pPlayer->pev, dest );
+	s_moveN++;
+	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
+	{
+		char line[128];
+		snprintf( line, sizeof( line ),
+			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d\n",
+			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, s_moveFwd, s_moveSide );
+		EFW_LogLine( line );
+	}
+}
+
+static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
+{
+	char line[128];
+
+	if( s_presentOn || !pPlayer )
+		return;
+	s_presentOn = 1;
+	CVAR_SET_FLOAT( "r_norefresh", 0.0f );
+	CVAR_SET_FLOAT( "r_drawworld", 1.0f );
+	CVAR_SET_FLOAT( "r_drawentities", 1.0f );
+	CVAR_SET_FLOAT( "r_fullbright", 1.0f );
+	CVAR_SET_FLOAT( "r_novis", 1.0f );
+	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 1\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
+	CLIENT_COMMAND( pPlayer->edict(), "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\n" );
+	snprintf( line, sizeof( line ),
+		"efw: world present live=%d origin=%.0f %.0f %.0f\n",
+		s_liveTicks, pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
+	EFW_LogLine( line );
+}
+
 void EFW_StartFrame( void )
 {
 	if( !s_mapLive )
@@ -2268,10 +2400,16 @@ void EFW_StartFrame( void )
 							pPlayer->pev->angles.y );
 						EFW_LogLine( pos );
 					}
+					EFW_ForceWorldPresent( pPlayer );
 				}
 			}
 			else
 				pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+			if( s_walkOn )
+			{
+				EFW_ApplyLatchedMove( pPlayer );
+				EFW_ForceWorldPresent( pPlayer );
+			}
 		}
 		EFW_FreezeNpcPhysics();
 		for( j = 1; j < EFW_MaxEnts(); j++ )
@@ -2464,6 +2602,9 @@ void EFW_OnServerActivate( void )
 	s_liveTicks = 0;
 	s_walkOn = 0;
 	s_bindDone = 0;
+	s_presentOn = 0;
+	s_moveFwd = 0;
+	s_moveSide = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -2490,6 +2631,9 @@ void EFW_OnServerDeactivate( void )
 	s_liveTicks = 0;
 	s_walkOn = 0;
 	s_bindDone = 0;
+	s_presentOn = 0;
+	s_moveFwd = 0;
+	s_moveSide = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
