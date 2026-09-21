@@ -12,10 +12,6 @@
 #include "efw_dll.h"
 #include "efw_persist.h"
 
-typedef char EFW_LOADOUT_L0[( EFW_LoadoutBits( 0 ) == ( EFW_ITEM_IDTAG | EFW_ITEM_REDCARD ) ) ? 1 : -1];
-typedef char EFW_LOADOUT_L1[( EFW_LoadoutBits( 1 ) == EFW_ITEM_LEVER ) ? 1 : -1];
-typedef char EFW_LOADOUT_L2[( EFW_LoadoutBits( 2 ) == EFW_ITEM_PLIERS ) ? 1 : -1];
-
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
