@@ -90,6 +90,24 @@ int main(int argc, char **argv) {
             failed += 1
         print(f"parsed {count} scripts, failures={failed}")
 
+    def compile_run(src: Path, extra=None) -> int:
+        with tempfile.TemporaryDirectory() as ctd:
+            bin_path = Path(ctd) / src.stem
+            cmd = ["g++", "-std=c++11", "-O0", "-I", str(LOGIC), "-o", str(bin_path), str(src)]
+            if extra:
+                cmd.extend(extra)
+            subprocess.check_call(cmd)
+            proc = subprocess.run([str(bin_path)], capture_output=True, text=True)
+            out = (proc.stdout or "") + (proc.stderr or "")
+            print(out.strip())
+            if proc.returncode != 0:
+                print("FAIL", src.name, file=sys.stderr)
+                return 1
+            return 0
+
+    failed += compile_run(LOGIC / "efw_persist_test.c")
+    failed += compile_run(LOGIC / "efw_script_test.c", [str(LOGIC / "efw_script.cpp")])
+
     needed = {
         "efw_PliersMarker",
         "efw_kitchen_bin",
@@ -109,6 +127,14 @@ int main(int argc, char **argv) {
         print("level1 missing markers", missing, file=sys.stderr)
         return 1
     print("level1 markers", " ".join(sorted(found & needed)))
+    spawn = re.search(
+        r'\{[^}]*"classname"\s+"info_player_start"[^}]*\}', ents, re.S
+    )
+    if not spawn:
+        print("level1 missing info_player_start", file=sys.stderr)
+        return 1
+    origin = re.search(r'"origin"\s+"([^"]+)"', spawn.group(0))
+    print("level1 info_player_start", origin.group(1) if origin else "?")
     return 1 if failed else 0
 
 

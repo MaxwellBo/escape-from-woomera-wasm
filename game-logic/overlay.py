@@ -74,6 +74,7 @@ def main() -> None:
 
     copies = {
         "efw.h": dlls / "efw.h",
+        "efw_persist.h": dlls / "efw_persist.h",
         "efw_dll.h": dlls / "efw_dll.h",
         "efw_script.h": dlls / "efw_script.h",
         "efw_script.cpp": dlls / "efw_script.cpp",

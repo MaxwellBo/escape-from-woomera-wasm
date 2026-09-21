@@ -72,6 +72,7 @@ struct EfwDllState
 	int items;
 	int mapLevel; /* FUN_100c5b80: 0 level1, 1 level2, 2 level3 */
 	int inited;
+	int persistLatch; /* DAT_1011d14c: FUN_100c6780 skip 6740 on chapter 2/3 */
 	int hopeFailed;
 	int scanCount; /* DAT_10134940 */
 	EfwScanSlot scan[EFW_MAX_SCAN]; /* DAT_101348b0 */

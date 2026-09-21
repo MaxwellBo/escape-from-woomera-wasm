@@ -518,12 +518,20 @@ float CPatrolGuard::Dist2D( CBaseEntity *pOther )
 void CPatrolGuard::WalkToward( const Vector &dest )
 {
 	Vector delta = dest - pev->origin;
+	float len;
+
 	delta.z = 0;
-	if( delta.Length() < 12.0f )
+	len = delta.Length();
+	if( len < 12.0f )
 		return;
 	pev->angles.y = UTIL_VecToYaw( delta );
 	SetActivity( ACT_WALK );
-	WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
+	/* WALK_MOVE without a studio stalls Host_Frame; lerp like IdleThink. */
+	if( len < 1.0f )
+		len = 1.0f;
+	delta = delta * ( 8.0f / len );
+	delta.z = 0;
+	UTIL_SetOrigin( pev, pev->origin + delta );
 }
 
 void EFW_PatrolAlertAll( void )
@@ -595,11 +603,10 @@ void CPatrolGuard::PatrolThink( void )
 	{
 		pev->framerate = 0.0f;
 		pev->movetype = MOVETYPE_NONE;
-		StudioFrameAdvance();
 		return;
 	}
 	pev->framerate = 1.0f;
-	pev->movetype = MOVETYPE_STEP;
+	pev->movetype = MOVETYPE_NONE;
 	see = CanSeePlayer( pPlayer );
 	hear = CanHearPlayer( pPlayer );
 	if( hear )
@@ -700,12 +707,18 @@ void CPatrolGuard::PatrolThink( void )
 			}
 			else
 			{
+				Vector step;
+				float len = delta.Length();
 				pev->angles.y = UTIL_VecToYaw( delta );
-				WALK_MOVE( ENT( pev ), pev->angles.y, 8.0f, WALKMOVE_NORMAL );
+				if( len < 1.0f )
+					len = 1.0f;
+				step = delta * ( 8.0f / len );
+				step.z = 0;
+				UTIL_SetOrigin( pev, pev->origin + step );
 			}
 		}
 	}
-	StudioFrameAdvance();
+	/* FUN_100c54e0 StudioFrameAdvance; skip until SET_MODEL returns, same as IdleThink. */
 }
 
 void CPatrolGuard::Spawn( void )
@@ -792,11 +805,10 @@ void EFW_EnableNpcThink( edict_t *pent )
 	{
 		CPatrolGuard *pGuard = (CPatrolGuard *)pEnt;
 		pGuard->SetThink( &CPatrolGuard::PatrolThink );
-		pent->v.nextthink = gpGlobals->time + 0.5f;
-		pent->v.movetype = MOVETYPE_STEP;
-		pent->v.solid = SOLID_SLIDEBOX;
+		pent->v.nextthink = gpGlobals->time;
+		pent->v.movetype = MOVETYPE_NONE;
+		pent->v.solid = SOLID_NOT;
 		pent->v.flags |= FL_MONSTER;
-		UTIL_SetSize( pGuard->pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );
 		return;
 	}
 }

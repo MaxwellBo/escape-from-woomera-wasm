@@ -99,7 +99,7 @@ void EFW_SetPause( int on )
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
 	{
 		pGuard->pev->framerate = on ? 0.0f : 1.0f;
-		pGuard->pev->movetype = on ? MOVETYPE_NONE : MOVETYPE_STEP;
+		pGuard->pev->movetype = MOVETYPE_NONE;
 		pGuard->pev->nextthink = gpGlobals->time + 0.05f;
 		UTIL_SetOrigin( pGuard->pev, pGuard->pev->origin );
 	}
