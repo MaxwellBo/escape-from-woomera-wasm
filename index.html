@@ -24,6 +24,40 @@
         <section class="stage">
           <div class="canvas-wrap">
             <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="Game view"></canvas>
+            <div id="efw-hope" class="efw-hope" hidden>
+              <span id="efw-hope-label">HOPE  80</span>
+              <div id="efw-hope-ticks" class="efw-hope-ticks" aria-hidden="true"></div>
+            </div>
+            <div id="efw-clock" class="efw-clock" hidden>7.00 am</div>
+            <div id="efw-diary" class="efw-diary" hidden>
+              <span id="efw-diary-label">DIARY  1</span>
+              <div class="efw-diary-nav">
+                <button type="button" data-diary="prev" title="efw_diary_prev">[</button>
+                <button type="button" data-diary="next" title="efw_diary_next">]</button>
+                <button type="button" data-diary="close" title="efw_diary">Close</button>
+              </div>
+            </div>
+            <div id="efw-prevq" class="efw-prevq" hidden>
+              <span>PREVIOUS QUESTION</span>
+              <p id="efw-prevq-text"></p>
+            </div>
+            <div id="efw-vgui" class="efw-vgui" hidden></div>
+            <div id="efw-none" class="efw-none" hidden>No interactive objects</div>
+            <div id="efw-interact" class="efw-interact" hidden>
+              <span id="efw-interact-name"></span>
+              <p>Click left mouse button to interact</p>
+            </div>
+            <div id="efw-inv" class="efw-inv" hidden></div>
+            <div id="efw-letter" class="efw-letter" hidden>
+              <p id="efw-letter-text"></p>
+              <span id="efw-letter-cont">Press left mouse button to continue</span>
+            </div>
+            <div id="efw-story" class="efw-story" hidden>
+              <div class="efw-story-card">
+                <p id="efw-story-text"></p>
+                <button id="efw-story-dismiss" type="button">Continue</button>
+              </div>
+            </div>
             <div id="veil" class="veil">
               <div class="veil-card">
                 <h2 id="veil-title">Preparing…</h2>

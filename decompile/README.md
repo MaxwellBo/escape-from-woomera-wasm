@@ -20,6 +20,9 @@ range, refugee IdleThink, ClientCommand names).
 | `out/*_exports.txt` | PE export table |
 | `recovered/NAMES.md` | VA → recovered symbol |
 | `recovered/ClientCommand_dispatch.c` | Capstone reconstruction of the `efw_*` command chain Ghidra missed |
+| `recovered/CRefugee_Spawn.c` | Capstone of CRefugee::Spawn named model table |
+| `recovered/FUN_100c4af0_LookUse.c` | Capstone of player look-use (Ghidra gap after WashingPowder) |
+| `recovered/FUN_100c6320_StudioHull.c` | Capstone of CRefugee sequence hull |
 | `RECOVERED.md` | narrative map of hope / conversations / markers / HUD |
 
 Full dumps `out/*_ghidra.c` (~3.5 MB server, ~1.8 MB client) are gitignored; regenerate with Ghidra.

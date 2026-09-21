@@ -10,22 +10,51 @@
 | 0x100c1dc0 | `efwConversationFile ctor` | 0x74-byte conversation parser object |
 | 0x100c2660 | `efwConversation::ParseFile` | open one Conversations/*.txt |
 | 0x100c3120 | `efw_Marker` | LINK_ENTITY_TO_CLASS, alloc 0x15c |
-| 0x100c3500 | `efwConversation::AddKeyword` | insert ESCAPE/GREET/GOODBYE flags |
+| 0x100c3430 | `efw_HasKeyword` | return unlocked flag at keyword node +0x1c |
+| 0x100c3500 | `efwConversation::AddKeyword` | insert keyword and store unlocked flag (0 = locked topic) |
+| 0x100bfbf0 | `efw_ServerCommand` | GetPackage gives powder+phone, FailOrNarrate 0x47, hope+10; EndMail unlocks PA |
+| 0x100c30a0 | `CEfwMarker::Spawn` | solid=0, movetype=7, DROP_TO_FLOOR, NODRAW unless showtriggers |
+| 0x100c77c0 | `efw_PALockRAR` | rarLock=1, play slot 0 (Ann_RAR_124), timer=0 |
+| 0x100c77e0 | `efw_PAUnlock` | rarLock=0 |
+| 0x100c6910 | `efw_FlagDiary` | `DAT_10134474[page] = 1` |
+| 0x100c4550 | `CEfwWeapon::GiveUnwanted` | `FUN_100b95a0(npc, classname, 8)` — UNWANTED_ITEM type-1 question, flag 8 Squark; fallback "Thanks, but I don't need it." |
+| 0x100c4af0 | `efw_LookUse` | sphere 96 from EyePosition, acos(dot)<10°, TraceLine 0.97, vtable+0x114 (weapon AddToPlayer / marker Use) |
+| 0x100c4f90 | `weapon_efw_Pliers::UseWithMarker` | kitchen_bin: electrician hope-2 / else 0x3e + PliersInBin |
+| 0x100c50d0 | `weapon_efw_Lever::UseWithMarker` | efw_cage_door open + strip lever |
+| 0x100c5180 | `weapon_efw_Branch::UseWithMarker` | efw_cage_door break → GiveNamedItem Lever |
+| 0x100c5240 | `weapon_efw_MobilePhone::Give` | Gholan+GotHintAboutHiding → GholanAgreedToPloy; else GiveUnwanted |
+| 0x100c5330 | `weapon_efw_WashingPowder::Give` | Mouhtaz → Lever + diary 17; else GiveUnwanted |
+| 0x100c59c0 | `efw_ElectricianSees` | dist < 256 or view cone ~35° |
+| 0x100c7510 | `efw_pause` | hudInt[6], MOVETYPE_NONE freeze |
+| 0x100c7830 | `efw_TalkScan` | sphere 123, up to 3×0x30 slots, EFW_CtPrv |
+| 0x100c7d30 | `efw_SendCntxt` | WRITE_BYTE(count) + count×0x30 raw EFW_Cntxt |
+| 0x100c7da0 | `efw_GateFSM` | kitchen door, 1st/2nd compound entry, approach_bin |
+| 0x100c81d0 | `efw_FailOrNarrate` | hope±15 for 0x3f/0x43; ShowMenu strings 0x3c–0x45; else EFW_Menu |
 | 0x100c4700 | `weapon_efw_Pliers` | w/v/p_Pliers.mdl |
 | 0x100c53c0 | `monster_patrol_guard` | LINK_ENTITY_TO_CLASS |
+| 0x100c5480 | `efw_PatrolAlertAll` | every patrol sets chase state 4 |
+| 0x100c54e0 | `CPatrolGuard::Think` | sight/hear FSM; halt; isolation 0x46 |
 | 0x100c5ea0 | `monster_refugee` | CRefugee, alloc 0x3a8, vtable 0x100f93a4 |
 | 0x100c5f10 | `monster_efw_guard` | same CRefugee vtable |
+| 0x100c6000 | `CRefugee::Precache` | PRECACHE 13 models at PTR 0x1011cf40, then Dingaling.wav |
+| 0x100c6040 | `CRefugee::Spawn` | named model table (Shala/Amir/…/Gholan); unknown → T6/T7; health 80; CLASS 3 |
+| 0x100c6320 | `CRefugee::SetObjectCollisionBox` | GET_MODEL_PTR sequence hull; "Invalid model ptr! FUCK" |
+| 0x100c6310 | `CRefugee::Classify` | return 3 (`CLASS_HUMAN_PASSIVE`) |
+| 0x100c27f0 | `efw_SpawnFenceTag` | maplevel==2: CREATE weapon_efw_IDTag, call UseWithMarker on marker |
+| 0x100c29f0 | `weapon_efw_IDTag::AddToPlayer` | GetTickCount > this+0x12c then FUN_100c46a0 + clear Player'sIDTagOnFence |
+| 0x100c2a20 | `weapon_efw_IDTag::UseWithMarker` | place at abs center, Materialize, SOLID_NOT+NODRAW, keyword=1, Squark |
 | 0x100c6440 | `CRefugee::IdleThink` | queue / mad_scientist_entity / walk-to-player |
 | 0x100c6880 | `efw_DiaryCount` | return DAT_10134870 |
 | 0x100c6890 | `efw_AddDiary` | append diary page; logs 'Diary active item added' |
 | 0x100c6980 | `efw_Player` | return DAT_10134888 (local CBasePlayer*) |
 | 0x100c6ad0 | `efw_ThinkHope` | hope -= dt*(1/12); clamp 0..100; at 0 fire menu 0x4d 'Run out of hope!' |
-| 0x100c6b60 | `efw_SendHudState` | pack hope / diary / conversation into EFWData slots |
+| 0x100c6b60 | `efw_SendHudState` | pack hope / diary / conversation into EFWData slots; calls FUN_100c6a60 |
+| 0x100c69a0 | `efw_PollTalkHotkeys` | GetAsyncKeyState('1'–'6') while talkActive; fire ShowMenu CommandButtons |
+| 0x100c6a50 | `efw_KeyDown` | GetAsyncKeyState(vk) & 1 |
+| 0x100c6a60 | `efw_PollMenuKeys` | if DAT_10134880 (talkActive) then FUN_100c69a0 |
 | 0x100c6c10 | `efw_ThinkConversation` | timeout + 'Conversation hidden, partner too far' |
 | 0x100c6e60 | `efw_ShowMenu` | GoldSrc ShowMenu with up to 7 lines; logs CONVERSATION (n messages) |
-| 0x100c7830 | `efw_TalkScan` | sphere search monster_refugee/barney; send EFW_CtPrv |
 | 0x100c80d0 | `efw_DebugPrint` | vsprintf + OutputDebugStringA |
-| 0x100c81d0 | `efw_FailOrNarrate` | hope-fail / 'Where do you think you are going' / EFW_Menu byte |
 | 0x100c8160 | `efw_FStrEq` | case-sensitive entity-name compare |
 | 0x1001a550 | `ClientCommand` | say/say_team plus EFW cmds; strcmp chain in ClientCommand_dispatch.c |
 

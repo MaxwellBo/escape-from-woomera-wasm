@@ -38,10 +38,16 @@ typedef struct
 	int questionCount;
 } EfwScript;
 
+typedef void (*EfwScript_ErrorFn)( const char *msg, int line );
+typedef void (*EfwScript_FlexFn)( const char *msg ); /* FUN_100c1f20 yy_get_next_buffer */
+
 void EfwScript_Clear( EfwScript *script );
+void EfwScript_SetErrorFn( EfwScript_ErrorFn fn ); /* FUN_100c2620 bison yyerror */
+void EfwScript_SetFlexFn( EfwScript_FlexFn fn ); /* FUN_100c1dc0/2360/1f20..2640 / FUN_100be970 */
 int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int len );
 int EfwScript_FindQuestion( const EfwScript *script, const char *topic );
 int EfwFlags_Has( const char *flags, const char *token );
+void EfwScript_FlexProbe( void ); /* FUN_100c1f20/2220/22b0/2410/20a0/2550..27b0 flex */
 
 #ifdef __cplusplus
 }

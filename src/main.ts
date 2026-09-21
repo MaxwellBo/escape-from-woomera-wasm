@@ -1,6 +1,8 @@
 import './style.css';
 import { Xash3D } from 'xash3d-fwgs';
 import { unzipSync } from 'fflate';
+import ValveUnpackWorker from './valve-unpack.worker.ts?worker';
+import { EfwLoopbackNet } from './loopback-net';
 
 type XashInstance = InstanceType<typeof Xash3D>;
 
@@ -23,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll8`;
+    return `${url}?v=efw-dll123`;
   return url;
 }
 
@@ -44,17 +46,527 @@ const staged = {
   valve: new Map<string, Uint8Array>(),
 };
 let engine: XashInstance | null = null;
+let loopbackNet: EfwLoopbackNet | null = null;
 let logLines = 0;
+
+function applyEfwVgui(text: string): boolean {
+  const layer = document.getElementById('efw-vgui');
+  if (!layer) return false;
+  const idx = text.indexOf('EFWVGUI');
+  if (idx < 0) return false;
+  const msg = text.slice(idx).replace(/\s+$/, '');
+  if (msg === 'EFWVGUI CLR') {
+    layer.innerHTML = '';
+    layer.hidden = true;
+    return true;
+  }
+  if (msg.startsWith('EFWVGUI SCHEME ')) {
+    /* FUN_100352e0: Default Scheme / Arial / 17 / FgColor 255 255 255 255 */
+    const rest = msg.slice('EFWVGUI SCHEME '.length);
+    const parts = rest.split('\t');
+    const font = parts[1] || 'Arial';
+    const size = Number(parts[2] || 17);
+    const rgba = (parts[3] || '255,255,255,255').split(',').map((n) => Number(n));
+    layer.dataset.scheme = parts[0] || 'Default Scheme';
+    layer.dataset.font = font;
+    layer.style.fontFamily = `${font}, Helvetica, sans-serif`;
+    layer.style.fontSize = `${size}px`;
+    layer.style.color = `rgba(${rgba[0] || 255}, ${rgba[1] || 255}, ${rgba[2] || 255}, ${(rgba[3] ?? 255) / 255})`;
+    for (const btn of layer.querySelectorAll('button')) {
+      btn.style.fontFamily = layer.style.fontFamily;
+      btn.style.fontSize = layer.style.fontSize;
+      btn.style.color = layer.style.color;
+    }
+    return true;
+  }
+  if (msg.startsWith('EFWVGUI HOPE ')) {
+    setHopeHud(parseInt(msg.slice('EFWVGUI HOPE '.length), 10) || 0);
+    return true;
+  }
+  if (!msg.startsWith('EFWVGUI ADD ')) return true;
+  const rest = msg.slice('EFWVGUI ADD '.length);
+  const tab = rest.indexOf('\t');
+  const head = tab >= 0 ? rest.slice(0, tab) : rest;
+  const label = tab >= 0 ? rest.slice(tab + 1) : head;
+  const parts = head.split(' ');
+  if (parts.length < 5) return true;
+  const [nx, ny, nw, nh, ...cmdParts] = parts;
+  const cmd = cmdParts.join(' ');
+  /* FUN_100c6d70: six Panel* slots. Replace an existing cmd instead of
+     stacking HUD Con_Printf + MEMFS ingest duplicates. */
+  const buttons = [...layer.querySelectorAll('button')];
+  const existing = buttons.find((b) => b.dataset.cmd === cmd);
+  if (existing) {
+    existing.textContent = label || cmd;
+    existing.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+    existing.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+    existing.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+    existing.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    return true;
+  }
+  if (buttons.length >= 6)
+    return true;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.dataset.cmd = cmd;
+  btn.textContent = label || cmd;
+  btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+  btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+  btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+  btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+  if (layer.dataset.font) {
+    btn.style.fontFamily = layer.style.fontFamily;
+    btn.style.fontSize = layer.style.fontSize;
+    btn.style.color = layer.style.color;
+  }
+  btn.addEventListener('pointerdown', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  btn.addEventListener('click', (ev) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    log(`> ${cmd}`);
+    runEngineCmd('pausable 0');
+    runGameCmd(cmd);
+  });
+  layer.appendChild(btn);
+  layer.hidden = false;
+  /* Original CommandButtons own the cursor; unlock so the HTML stand-in is clickable. */
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  return true;
+}
+
+/* FUN_10047830 VGUI storyboards: HTML Panel stand-in while HUD SPR cannot run. */
+const EFW_STORY: Record<number, { title: string; next?: string }> = {
+  0x3c: { title: 'You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.' },
+  0x3d: { title: "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." },
+  0x3e: { title: 'Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.' },
+  0x3f: { title: "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed.", next: 'efw_changelevel efw_prototype_level2' },
+  0x40: { title: "There's a hole. You could hide here, if you ever needed to." },
+  0x41: { title: "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching." },
+  0x42: { title: 'You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.' },
+  0x43: { title: 'You return to the hiding place, with the pliers safely tucked away underneath your shirt.', next: 'efw_changelevel efw_prototype_level3' },
+  0x44: { title: "You could hide again, but you haven't got the pliers yet." },
+  0x45: { title: 'You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.' },
+  0x46: { title: 'Isolation.', next: 'efw_changelevel efw_prototype_level2' },
+  0x47: { title: 'The package is from a pen-friend, a member of a refugee support group in Melbourne. The letter accompanying it brings you some hope, knowing that there is someone in this country that cares about your fate. Inside the package are some chocolate bars, which you give to some children, and a box of washing powder. Your suspicions aroused by mysterious rattling sound, you feel inside the box and discover a SIM card for a mobile phone.' },
+  0x48: { title: '' },
+  0x49: { title: 'Introduction' },
+  0x4a: { title: 'Introduction' },
+  0x4b: { title: 'Introduction' },
+  0x4c: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
+  0x4d: { title: 'Run out of hope!' },
+  0x4e: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
+  0x4f: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level2' },
+  0x50: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level3' },
+  0x51: { title: 'Isolation.' },
+  0x52: { title: 'Help' },
+};
+let storyNext = '';
+let storyPaused = false;
+
+function storyboardPauses(code: number): boolean {
+  /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu.
+     0x47 FUN_10048790 caption Panel also pauses. 0x48 FUN_10048710 pauses. */
+  return code === 0x3f || code === 0x43 || (code >= 0x46 && code <= 0x52);
+}
+
+function isCaptionMenu(code: number): boolean {
+  /* FUN_10047830 else-branch: not SPR, not 0x48. Server sends 0x47 this way. */
+  return code === 0x47;
+}
+
+function hideLetterbox() {
+  const layer = document.getElementById('efw-letter');
+  if (layer) layer.hidden = true;
+}
+
+function showLetterbox(code: number, caption?: string) {
+  const layer = document.getElementById('efw-letter');
+  const text = document.getElementById('efw-letter-text');
+  const story = document.getElementById('efw-story');
+  const interact = document.getElementById('efw-interact');
+  if (!layer || !text)
+    return;
+  const body = caption || EFW_STORY[code]?.title || '';
+  if (!body)
+    return;
+  text.textContent = body;
+  layer.hidden = false;
+  if (story) story.hidden = true;
+  if (interact) interact.hidden = true;
+  if (storyboardPauses(code) && !storyPaused) {
+    storyPaused = true;
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 1');
+  }
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  log(`efw: letterbox 0x${code.toString(16)}`);
+}
+
+function dismissLetterbox() {
+  hideLetterbox();
+  if (storyPaused) {
+    storyPaused = false;
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 0');
+  }
+}
+
+function dismissEfwStory() {
+  const layer = document.getElementById('efw-story');
+  if (layer)
+    layer.hidden = true;
+  hideLetterbox();
+  const next = storyNext;
+  const paused = storyPaused;
+  storyNext = '';
+  storyPaused = false;
+  /* FUN_100485d0: efw_pause 0, then stored changelevel. */
+  if (paused) {
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_pause 0');
+  }
+  if (next) {
+    log(`> ${next} (storyboard dismiss)`);
+    runEngineCmd('pausable 0');
+    /* FUN_10047830 stores DAT_100bc9b0/c0 as a changelevel. pfnChangeLevel
+       returns while Host stays RUNFRAME, so SV_ExecChangeLevel never ran.
+       loadMap() keeps the rAF runner then falls back to disconnect+map. */
+    const change = /^efw_changelevel\s+(\S+)/.exec(next);
+    if (change) loadMap(change[1], 'storyboard dismiss');
+    else runGameCmd(next);
+  }
+}
+
+function showEfwStory(code: number, fallback?: string) {
+  if (code === 0x48) {
+    /* FUN_10048650: 0xd4 Panel, no storyboard SPR. FUN_10048710 pauses. */
+    if (!storyPaused) {
+      storyPaused = true;
+      runEngineCmd('pausable 0');
+      runGameCmd('efw_pause 1');
+    }
+    log('efw: FUN_10048650 panel 0xd4');
+    return;
+  }
+  if (isCaptionMenu(code)) {
+    showLetterbox(code, fallback);
+    return;
+  }
+  const spec = EFW_STORY[code];
+  const layer = document.getElementById('efw-story');
+  const text = document.getElementById('efw-story-text');
+  if (!layer || !text)
+    return;
+  const title = fallback || spec?.title;
+  if (!title)
+    return;
+  text.textContent = title;
+  storyNext = spec?.next || '';
+  layer.hidden = false;
+  const interact = document.getElementById('efw-interact');
+  if (interact) interact.hidden = true;
+  if (storyboardPauses(code)) {
+    /* FUN_10048590: ClientCmd efw_pause 1 once per Panel show, not every
+       FailOrNarrate log reprint. */
+    if (!storyPaused) {
+      storyPaused = true;
+      runEngineCmd('pausable 0');
+      runGameCmd('efw_pause 1');
+    } else {
+      storyPaused = true;
+    }
+  }
+  if (document.pointerLockElement)
+    document.exitPointerLock();
+  log(`efw: storyboard 0x${code.toString(16)}`);
+}
+
+function applyEfwStory(text: string): boolean {
+  const m = />>> FailOrNarrate 0x([0-9a-fA-F]+)/.exec(text);
+  if (!m)
+    return false;
+  showEfwStory(parseInt(m[1], 16));
+  return false; /* still show the log line */
+}
+
+type WasmFS = {
+  mkdir: (p: string) => void;
+  writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
+  unlink: (p: string) => void;
+  readFile?: (p: string, opts?: { encoding?: string }) => string | Uint8Array;
+};
+let wasmFS: WasmFS | null = null;
+let lastVguiFile = '';
+
+function ingestVguiFile(raw: string) {
+  if (raw === lastVguiFile) return;
+  lastVguiFile = raw;
+  (window as Window & { __efwVguiFile?: string }).__efwVguiFile = raw;
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed) applyEfwVgui(trimmed);
+  }
+}
+
+function pollEfwVgui() {
+  if (!wasmFS?.readFile) return;
+  for (const path of ['/efwvgui.txt', '/woomera/efwvgui.txt', '/rwdir/efwvgui.txt']) {
+    try {
+      const data = wasmFS.readFile(path, { encoding: 'utf8' });
+      ingestVguiFile(typeof data === 'string' ? data : new TextDecoder().decode(data));
+      return;
+    } catch {
+      /* path missing */
+    }
+  }
+}
+
+/* FUN_1001daa0: 10 ticks, filled while ticks >= i (empty when ticks < i). */
+function setHopeHud(n: number): void {
+  const hope = Math.max(0, Math.min(100, Math.round(n)));
+  const ticks = Math.floor(hope / 10);
+  const el = document.getElementById('efw-hope');
+  const label = document.getElementById('efw-hope-label');
+  const row = document.getElementById('efw-hope-ticks');
+  if (el) el.hidden = false;
+  if (label) label.textContent = `HOPE  ${hope}`;
+  if (!row) return;
+  if (row.childElementCount !== 10) {
+    row.innerHTML = '';
+    for (let i = 0; i < 10; i++) row.appendChild(document.createElement('i'));
+  }
+  [...row.children].forEach((tick, i) => tick.classList.toggle('on', !(ticks < i)));
+}
+
+function applyHopeHud(text: string): boolean {
+  const daa = text.match(/>>> FUN_1001daa0 ticks=(\d+) hope=([\d.]+)/);
+  if (daa) {
+    setHopeHud(Number(daa[2]));
+    return false;
+  }
+  const num = text.match(/>>> FUN_1001e880 n=(\d+)/);
+  if (num) {
+    setHopeHud(Number(num[1]));
+    return false;
+  }
+  const m = text.match(/>>> hopehud ([\d.]+)/);
+  if (!m) return false;
+  setHopeHud(Number(m[1]));
+  return false;
+}
+
+function applyHudColor(text: string): boolean {
+  const m = text.match(/>>> FUN_1001e4c0 p=([\d.]+) lvl=(\d+) rgb=(\d+),(\d+),(\d+) a=(\d+)/);
+  if (!m) return false;
+  const layer = document.getElementById('efw-vgui');
+  if (layer) {
+    layer.dataset.hudColor = `${m[3]},${m[4]},${m[5]},${m[6]}`;
+    layer.dataset.hudLevel = m[2];
+  }
+  return false;
+}
+
+function applyClockHud(text: string): boolean {
+  const scheme = text.match(/>>> FUN_100352e0 scheme=(.+) font=(.+) size=(\d+)/);
+  if (scheme) {
+    const layer = document.getElementById('efw-vgui');
+    if (layer) {
+      const font = scheme[2].trim();
+      const size = Number(scheme[3]);
+      layer.dataset.scheme = scheme[1].trim();
+      layer.dataset.font = font;
+      layer.style.fontFamily = `${font}, Helvetica, sans-serif`;
+      layer.style.fontSize = `${size}px`;
+      layer.style.color = 'rgb(255, 255, 255)';
+    }
+  }
+  const m = text.match(/>>> FUN_1001db00 clock=(.+) fade=([\d.]+) logo=(\d+)/);
+  if (!m) return false;
+  const el = document.getElementById('efw-clock');
+  if (!el) return false;
+  const fade = Number(m[2]);
+  el.textContent = m[1].trim();
+  el.hidden = fade <= 0;
+  const rgb = Math.max(0, Math.min(100, Math.round(fade * 100)));
+  el.style.color = `rgb(${rgb}, ${rgb}, ${rgb})`;
+  el.style.opacity = String(fade);
+  return false;
+}
+
+function applyDiaryHud(text: string): boolean {
+  const fade = text.match(/>>> FUN_1001db00 diaryfade=([\d.]+) inv=([\d.]+) veil=([\d.]+) page=(\d+)/);
+  if (fade) {
+    const df = Number(fade[1]);
+    const inf = Number(fade[2]);
+    const page = fade[4];
+    const el = document.getElementById('efw-diary');
+    const label = document.getElementById('efw-diary-label');
+    const inv = document.getElementById('efw-inv');
+    if (el) {
+      el.hidden = df <= 0;
+      el.style.setProperty('--efw-diary-fade', String(df));
+    }
+    if (label) label.textContent = `DIARY  ${page}`;
+    if (inv) {
+      inv.hidden = inf <= 0;
+      inv.style.setProperty('--efw-fade', String(inf));
+      inv.classList.toggle('full', inf >= 1);
+    }
+    return false;
+  }
+  const m = text.match(/>>> (?:diaryhud|efw_diary) open=(\d+) page=(\d+)/);
+  if (!m) return false;
+  const open = m[1] !== '0';
+  const page = m[2];
+  const el = document.getElementById('efw-diary');
+  const label = document.getElementById('efw-diary-label');
+  if (el && open) el.hidden = false;
+  if (label) label.textContent = `DIARY  ${page}`;
+  return false;
+}
+
+function applyContextHud(text: string): boolean {
+  const none = document.getElementById('efw-none');
+  if (text.includes('>>> FUN_10046370')) {
+    const interact = document.getElementById('efw-interact');
+    if (interact) interact.hidden = true;
+    if (none) none.hidden = true;
+    return false;
+  }
+  if (text.includes('>>> FUN_100463c0')) {
+    if (none) none.hidden = true;
+    return false;
+  }
+  if (text.includes('>>> FUN_10046590 none')) {
+    if (none) none.hidden = false;
+    return false;
+  }
+  return false;
+}
+
+function applyInteractHud(text: string): boolean {
+  const m = text.match(/>>> FUN_10046590 interact=(.*)$/);
+  if (!m) return false;
+  const name = m[1].trim();
+  const el = document.getElementById('efw-interact');
+  const span = document.getElementById('efw-interact-name');
+  if (!el) return false;
+  if (!name) {
+    el.hidden = true;
+    return false;
+  }
+  el.hidden = false;
+  if (span) span.textContent = name === '-' ? '' : name;
+  return false;
+}
+
+function applyLetterHud(text: string): boolean {
+  const open = text.match(/>>> FUN_10048790 n=(\d+) code=0x([0-9a-fA-F]+)(?: (.*))?$/);
+  if (open) {
+    const code = parseInt(open[2], 16);
+    const caption = open[3] || EFW_STORY[code]?.title;
+    showLetterbox(code, caption);
+    return false;
+  }
+  if (text.includes('>>> FUN_10043bb0') || text.includes('>>> FUN_1001d750')) {
+    const cont = document.getElementById('efw-letter-cont');
+    if (cont && text.includes('>>> FUN_10043bb0'))
+      cont.hidden = false;
+    return false;
+  }
+  return false;
+}
+
+function applyInvHud(text: string): boolean {
+  const fadeOnly = text.match(/>>> FUN_10043dd0 fade=([\d.]+)(?: n=(\d+)(?: (.*))?)?$/);
+  const el = document.getElementById('efw-inv');
+  if (!el) return false;
+  if (fadeOnly) {
+    const fade = Number(fadeOnly[1]);
+    el.hidden = fade <= 0;
+    el.style.setProperty('--efw-fade', String(fade));
+    el.classList.toggle('full', fade >= 1);
+    if (fade >= 1 && fadeOnly[2]) {
+      const n = Number(fadeOnly[2]);
+      const names = (fadeOnly[3] || '').split(',').map((s) => s.trim()).filter(Boolean);
+      el.innerHTML = '';
+      names.forEach((name) => {
+        const i = document.createElement('i');
+        i.textContent = name;
+        el.appendChild(i);
+      });
+      if (n <= 0) el.innerHTML = '';
+    }
+    if (fade < 1) el.classList.remove('full');
+    return false;
+  }
+  const m = text.match(/>>> FUN_10043dd0 n=(\d+)(?: (.*))?$/);
+  if (!m) return false;
+  const n = Number(m[1]);
+  const names = (m[2] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  el.innerHTML = '';
+  if (n <= 0) {
+    el.hidden = true;
+    return false;
+  }
+  names.forEach((name) => {
+    const i = document.createElement('i');
+    i.textContent = name;
+    el.appendChild(i);
+  });
+  el.hidden = false;
+  el.classList.add('full');
+  el.style.setProperty('--efw-fade', '1');
+  return false;
+}
+
+function applyPrevQuestion(text: string): boolean {
+  const m = text.match(/>>> prevq (.+)$/);
+  const el = document.getElementById('efw-prevq');
+  const p = document.getElementById('efw-prevq-text');
+  if (text.includes('Conversation hidden, partner too far') || text.includes('<conversation inactive>')) {
+    if (el) el.hidden = true;
+    return false;
+  }
+  if (!m) return false;
+  if (el) el.hidden = false;
+  if (p) p.textContent = m[1];
+  return false;
+}
 
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
+  applyHopeHud(normalized);
+  applyHudColor(normalized);
+  applyClockHud(normalized);
+  applyDiaryHud(normalized);
+  applyContextHud(normalized);
+  applyInteractHud(normalized);
+  applyInvHud(normalized);
+  applyLetterHud(normalized);
+  applyPrevQuestion(normalized);
+  if (normalized.includes('efw: ServerActivate ents='))
+    onServerActivateSeen();
+  if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
+    logChangeLevelProgress(normalized);
+  if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live='))
+    resumeAfterFirstClientFrame();
+  if (/\bSpawning\b/.test(normalized) && normalized.includes('loopback'))
+    finishListenSpawn();
+  if (applyEfwStory(normalized)) return;
+  if (applyEfwVgui(normalized)) return;
   logLines++;
   logCount.textContent = String(logLines);
   logEl.textContent += normalized + '\n';
-  if (logLines > 500) {
+  if (logLines > 20000) {
     const lines = logEl.textContent.split('\n');
-    logEl.textContent = lines.slice(lines.length - 500).join('\n');
+    logEl.textContent = lines.slice(lines.length - 20000).join('\n');
   }
   logEl.scrollTop = logEl.scrollHeight;
 }
@@ -95,11 +607,12 @@ function pressGameKey(key: string, keyCode: number) {
   fire('keydown');
   setTimeout(() => fire('keyup'), 120);
 }
+(window as Window & { pressGameKey?: typeof pressGameKey }).pressGameKey = pressGameKey;
 
 function chooseTalkSlot(slot: number) {
-  log(`> cmd menuselect ${slot}`);
+  log(`> menuselect ${slot}`);
   runEngineCmd('pausable 0');
-  runEngineCmd(`cmd menuselect ${slot}`);
+  runEngineCmd(`menuselect ${slot}`);
 }
 
 function runEngineCmd(cmd: string) {
@@ -112,15 +625,303 @@ function runEngineCmd(cmd: string) {
   }
 }
 
-/** Host console, ClientCommand, and listen-server `cmd` forwarding. */
+let resumedAfterClientFrame = false;
+let lastResumeMs = 0;
+/* Con_ToggleConsole_f: closing the console while cls.state==ca_active
+   calls UI_SetActiveMenu(false). Closing it earlier reopens libmenu.
+   Hold key_console only for SCR_BeginLoadingPlaque, then release after
+   HUD_Redraw (proof of ca_active). */
+let consoleForPlaque = false;
+/* First-map libmenu pause is why engine StartFrame never advances without
+   HostPump. Software present hung on UI_SetActiveMenu(false). WebGL2
+   (gles3compat) is the new present path that can survive key_game. */
+let firstMapKeyGame = false;
+function resumeEngineLoop() {
+  const now = Date.now();
+  /* resume() increments currentlyRunningMainloop and aborts the in-flight
+     Host_Frame. Do not call it from the 120ms pump or CHANGE_LEVEL never
+     finishes loading the next map. */
+  if (now - lastResumeMs < 1500)
+    return;
+  lastResumeMs = now;
+  const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
+  try {
+    mod?.resumeMainLoop?.();
+  } catch {
+    /* ignore */
+  }
+}
+
+function releaseConsoleToGame() {
+  if (!consoleForPlaque)
+    return;
+  consoleForPlaque = false;
+  /* ca_active is required: otherwise Con_ToggleConsole_f reopens the menu. */
+  runEngineCmd('toggleconsole');
+  log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
+}
+
+function dismissMenuAfterHud() {
+  if (consoleForPlaque) {
+    releaseConsoleToGame();
+    startHostPumps();
+    return;
+  }
+  if (firstMapKeyGame)
+    return;
+  firstMapKeyGame = true;
+  /* HUD_Redraw skip proves ca_active. Open then close console so
+     Con_ToggleConsole_f calls UI_SetActiveMenu(false) → key_game.
+     Deferred: never nest Cmd_ExecuteString inside HUD_Redraw. */
+  log('listen: gles3compat first-map double toggleconsole → key_game');
+  runEngineCmd('toggleconsole');
+  setTimeout(() => {
+    runEngineCmd('toggleconsole');
+    runEngineCmd('setpause 0');
+    runEngineCmd('unpause');
+    runEngineCmd('pausable 0');
+    /* SV_Spawn_f already ran (PreThink + game_playerspawn). Bare `spawn`
+       is an unknown console command; `cmd spawn` with no spawncount calls
+       SV_New_f and restarts signon. SV_Begin_f is the missing step. */
+    runEngineCmd('cmd begin');
+    runEngineCmd('cmd sendents');
+    runEngineCmd('fullupdate');
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
+    runEngineCmd('r_drawentities 1');
+    runEngineCmd('r_fullbright 1');
+    runEngineCmd('r_novis 1');
+    runEngineCmd('gl_clear 1');
+    runEngineCmd('ui_renderworld 1');
+    startHostPumps();
+    log('listen: key_game (gles3compat present, world draw on, cmd begin)');
+  }, 250);
+}
+
+function resumeAfterFirstClientFrame() {
+  if (changeWatch) return;
+  if (resumedAfterClientFrame) return;
+  resumedAfterClientFrame = true;
+  /* Do not Cmd_ExecuteString or resumeMainLoop from inside HUD_Redraw's
+     Con_Printf → JS log. dll74 nested toggleconsole+resume there and
+     aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
+  setTimeout(() => {
+    if (changeWatch) return;
+    dismissMenuAfterHud();
+  }, 80);
+}
+
+let startedMap = '';
+let listenReady = false;
+let pumpTimer: ReturnType<typeof setInterval> | null = null;
+let pausableTimer: ReturnType<typeof setInterval> | null = null;
+let changeWatch: ReturnType<typeof setTimeout> | null = null;
+
+function startHostPumps() {
+  if (pumpTimer) {
+    clearInterval(pumpTimer);
+    pumpTimer = null;
+  }
+  let pumps = 0;
+  /* Keep pulsing StartFrame after key_game. Libmenu used to pause the
+     listen server; a 80-tick cap left hope/TalkScan frozen once HostPump
+     stopped even though WebGL2 was still presenting. */
+  pumpTimer = setInterval(() => {
+    runEngineCmd('efw_pump');
+    pumps++;
+    if (pumps === 1 || (pumps % 80) === 0)
+      log(`listen: hostpump n=${pumps}`);
+  }, 120);
+}
+
+function logChangeLevelProgress(line: string) {
+  if (line.includes('CHANGE_LEVEL returned'))
+    log('listen: pfnChangeLevel returned — waiting for SV_ExecChangeLevel (no resumeMainLoop)');
+}
+
+function loadMap(name: string, reason: string) {
+  if (startedMap === name) {
+    log(`skip duplicate map ${name} (${reason})`);
+    return;
+  }
+  const prev = startedMap;
+  startedMap = name;
+  log(`> map ${name} (${reason})`);
+  /* FUN_100c6d70 slot dtor: drop HTML CommandButtons so level1 Talk
+     widgets do not sit on the next chapter's splash. */
+  {
+    const layer = document.getElementById('efw-vgui');
+    if (layer) {
+      layer.innerHTML = '';
+      layer.hidden = true;
+    }
+    const story = document.getElementById('efw-story');
+    if (story) story.hidden = true;
+    hideLetterbox();
+  }
+  /* Extra `map` is a no-op while Host is in RUNFRAME. CHANGE_LEVEL (the
+     PE ClientCommand pfnChangeLevel) queues Host STATE_CHANGELEVEL. */
+  if (!prev) {
+    runEngineCmd(`map ${name}`);
+    return;
+  }
+  listenReady = false;
+  lastActivateMs = 0;
+  resumedAfterClientFrame = false;
+  consoleForPlaque = false;
+  firstMapKeyGame = false;
+  if (pumpTimer) {
+    clearInterval(pumpTimer);
+    pumpTimer = null;
+  }
+  /* resumeMainLoop() increments currentlyRunningMainloop and kills the
+     rAF runner. dll65/66 kicked resume 80–2500ms after pfnChangeLevel
+     and Host stayed RUNFRAME (StartFrame live=30) then went silent.
+     COM_Frame only runs SV_ExecChangeLevel on the *next* rAF after
+     Host_RunFrame promotes STATE_CHANGELEVEL — leave that runner alone. */
+  runEngineCmd('pausable 0');
+  runEngineCmd('cancelselect');
+  runEngineCmd('r_norefresh 1');
+  runEngineCmd('sv_validate_changelevel 0');
+  runEngineCmd('sv_newunit 1');
+  runEngineCmd('sv_validate_changelevel');
+  setTimeout(() => {
+    if (listenReady)
+      return;
+    log(`listen: pfnChangeLevel ${name}`);
+    runEngineCmd('pausable 0');
+    runEngineCmd('sv_validate_changelevel 0');
+    /* Plaque SCR_UpdateScreen hangs the software renderer. key_console
+       makes SCR_BeginLoadingPlaque return before that present.
+       Do not toggleconsole again until HUD_Redraw: closing the console
+       while !ca_active calls UI_SetActiveMenu(true) and brings libmenu back. */
+    runEngineCmd('toggleconsole');
+    consoleForPlaque = true;
+    log('listen: key_console for plaque (skip software present hang)');
+    runEngineCmd(`efw_changelevel ${name}`);
+    /* Do not resumeMainLoop here. A live rAF is what runs SV_ExecChangeLevel
+       on the next COM_Frame; kicking resume aborts that runner (dll65/74). */
+  }, 200);
+  if (changeWatch)
+    clearTimeout(changeWatch);
+  changeWatch = setTimeout(() => {
+    if (listenReady)
+      return;
+    log(`listen: CHANGE_LEVEL stalled, disconnect+map ${name}`);
+    startedMap = '';
+    runEngineCmd('disconnect');
+    lastResumeMs = 0;
+    resumeEngineLoop();
+    setTimeout(() => {
+      runEngineCmd('disconnect');
+      setTimeout(() => loadMap(name, 'after disconnect'), 400);
+    }, 400);
+  }, 18000);
+}
+
+let lastActivateMs = 0;
+let menuDismissed = false;
+let spawnTries = 0;
+function finishListenSpawn() {
+  if (spawnTries >= 8)
+    return;
+  spawnTries++;
+  /* Nested Cmd_ExecuteString from Con_Printf (status) aborts Host_Frame.
+     SV_Begin_f requires cs_spawning; GoldSrc protocol sends sendents. */
+  const n = spawnTries;
+  setTimeout(() => {
+    runEngineCmd('cmd begin');
+    runEngineCmd('cmd sendents');
+    runEngineCmd('fullupdate');
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
+    runEngineCmd('r_drawentities 1');
+    runEngineCmd('r_novis 1');
+    log(`listen: cmd begin/sendents try=${n}`);
+  }, 0);
+}
+function onServerActivateSeen() {
+  const now = Date.now();
+  if (now - lastActivateMs < 800)
+    return;
+  lastActivateMs = now;
+  spawnTries = 0;
+  listenReady = true;
+  resumedAfterClientFrame = false;
+  if (changeWatch) {
+    clearTimeout(changeWatch);
+    changeWatch = null;
+  }
+  log(`listen: ServerActivate — ${loopbackNet?.summary() ?? 'no loopback net'}`);
+  startHostPumps();
+  /* Keep r_norefresh 1 until HUD_Redraw has looped. HostPump drives
+     StartFrame while libmenu still has the listen server paused. */
+  runEngineCmd('r_drawviewmodel 0');
+  runEngineCmd('r_norefresh 1');
+  runEngineCmd('sv_validate_changelevel 0');
+  runEngineCmd('sv_newunit 1');
+  runEngineCmd('pausable 0');
+  runEngineCmd('cancelselect');
+  runEngineCmd('scr_loading 0');
+  runEngineCmd('ui_renderworld 1');
+  setTimeout(() => {
+    runEngineCmd('developer 0');
+    runEngineCmd('con_notifytime 0');
+    runEngineCmd('pausable 0');
+    runEngineCmd('cancelselect');
+    runEngineCmd('ui_renderworld 1');
+    /* togglemenu is CL_Escape_f: no-op when key_dest is the menu, otherwise
+       it OPENS the menu. Resume Game is hidden unless CL_IsActive() at
+       VidInit. Dismiss via Con_ToggleConsole_f only after HUD_Redraw
+       (ca_active). Do not toggleconsole here — ServerActivate runs while
+       the client is still connecting and would reopen libmenu. */
+    if (!menuDismissed) {
+      menuDismissed = true;
+      log('listen: waiting HUD_Redraw before menu dismiss');
+    } else {
+      log('listen: CHANGE_LEVEL activate — hold console until HUD_Redraw');
+    }
+  }, 250);
+  setTimeout(() => {
+    log(`listen: net ${loopbackNet?.summary() ?? 'none'}`);
+    runEngineCmd('status');
+  }, 2000);
+  setTimeout(() => {
+    if (changeWatch) return;
+    log('listen: host_clientloaded (r_norefresh 1)');
+    runEngineCmd('host_clientloaded 1');
+    runEngineCmd('host_gameloaded 1');
+    if (resumedAfterClientFrame) {
+      log('listen: skip 4s resume (HUD already looping)');
+      return;
+    }
+    lastResumeMs = 0;
+    resumeEngineLoop();
+  }, 4000);
+  setTimeout(() => {
+    if (changeWatch) return;
+    runEngineCmd('r_norefresh 0');
+    runEngineCmd('r_drawworld 1');
+    runEngineCmd('r_drawentities 1');
+    runEngineCmd('ui_renderworld 1');
+    runEngineCmd('scr_loading 0');
+    finishListenSpawn();
+    runEngineCmd('status');
+    log('listen: r_norefresh 0 r_drawworld 1 (world present)');
+  }, 8000);
+  if (!pausableTimer) {
+    pausableTimer = setInterval(() => {
+      runEngineCmd('pausable 0');
+    }, 4000);
+  }
+}
+
+/** Host console plus EFW AddServerCommand (EFW_HostFwd). Do not prefix
+ *  `cmd` — that queues a usercmd and never runs while ClientFrame is stuck. */
 function runGameCmd(cmd: string) {
   const trimmed = cmd.trim();
   if (!trimmed) return;
-  /* Send listen-server ClientCommand once. Host+cmd together XOR-toggled diary. */
-  if (!/^cmd\s/i.test(trimmed) && /^(efw_|menuselect\b)/i.test(trimmed))
-    runEngineCmd(`cmd ${trimmed}`);
-  else
-    runEngineCmd(trimmed);
+  runEngineCmd(trimmed);
 }
 
 function formatErr(err: unknown): string {
@@ -143,8 +944,17 @@ function formatErr(err: unknown): string {
   return String(err);
 }
 
+function yieldFrame(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
 /** Split a GoldSrc PACK into loose files so we never FS.writeFile a 50MB blob. */
-function explodePak(pak: Uint8Array, dest: Map<string, Uint8Array>, prefix: string) {
+async function explodePakYielding(
+  pak: Uint8Array,
+  dest: Map<string, Uint8Array>,
+  prefix: string,
+  onProgress?: (done: number, total: number) => void,
+) {
   const magic = String.fromCharCode(pak[0] ?? 0, pak[1] ?? 0, pak[2] ?? 0, pak[3] ?? 0);
   if (magic !== 'PACK') {
     dest.set(`${prefix}pak0.pak`, pak);
@@ -153,19 +963,69 @@ function explodePak(pak: Uint8Array, dest: Map<string, Uint8Array>, prefix: stri
   const view = new DataView(pak.buffer, pak.byteOffset, pak.byteLength);
   const off = view.getUint32(4, true);
   const length = view.getUint32(8, true);
+  const total = Math.floor(length / 64);
+  const decoder = new TextDecoder('latin1');
+  let n = 0;
   for (let i = 0; i < length; i += 64) {
-    let name = '';
-    for (let j = 0; j < 56; j++) {
-      const c = pak[off + i + j];
-      if (!c) break;
-      name += String.fromCharCode(c);
+    const raw = pak.subarray(off + i, off + i + 56);
+    let nlen = raw.indexOf(0);
+    if (nlen < 0) nlen = 56;
+    const name = decoder.decode(raw.subarray(0, nlen)).replace(/\\/g, '/');
+    if (name) {
+      const eoff = view.getUint32(off + i + 56, true);
+      const esize = view.getUint32(off + i + 60, true);
+      dest.set(`${prefix}${name}`, pak.subarray(eoff, eoff + esize));
     }
-    name = name.replace(/\\/g, '/');
-    if (!name) continue;
-    const eoff = view.getUint32(off + i + 56, true);
-    const esize = view.getUint32(off + i + 60, true);
-    dest.set(`${prefix}${name}`, pak.subarray(eoff, eoff + esize));
+    n++;
+    if (n % 64 === 0) {
+      onProgress?.(n, total);
+      await yieldFrame();
+    }
   }
+  onProgress?.(total, total);
+}
+
+function unzipZipOnMain(buf: Uint8Array): Record<string, Uint8Array> {
+  return unzipSync(buf);
+}
+
+function unzipZipInWorker(buf: Uint8Array): Promise<Record<string, Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    let worker: Worker;
+    try {
+      worker = new ValveUnpackWorker();
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const timer = setTimeout(() => {
+      worker.terminate();
+      reject(new Error('valve unzip worker timed out'));
+    }, 180000);
+    worker.onmessage = (ev: MessageEvent<{ names?: string[]; buffers?: ArrayBuffer[]; error?: string }>) => {
+      clearTimeout(timer);
+      worker.terminate();
+      if (ev.data?.error) {
+        reject(new Error(ev.data.error));
+        return;
+      }
+      const names = ev.data?.names || [];
+      const buffers = ev.data?.buffers || [];
+      const entries: Record<string, Uint8Array> = {};
+      for (let i = 0; i < names.length; i++) {
+        const raw = buffers[i];
+        if (raw) entries[names[i]] = new Uint8Array(raw);
+      }
+      resolve(entries);
+    };
+    worker.onerror = (err) => {
+      clearTimeout(timer);
+      worker.terminate();
+      reject(err.error || new Error(err.message || 'valve unzip worker failed'));
+    };
+    const copy = buf.slice();
+    worker.postMessage(copy.buffer, [copy.buffer]);
+  });
 }
 
 // ---- staged-file helpers -------------------------------------------------
@@ -213,9 +1073,18 @@ async function stageValveZip() {
   const res = await fetch(VALVE_ZIP_URL);
   if (!res.ok) throw new Error(`valve zip fetch failed: HTTP ${res.status}`);
   const buf = new Uint8Array(await res.arrayBuffer());
-  setVeil('Unpacking Half-Life data…', 'Inflating pak0, wads, sprites, sounds.', 0.58);
-  await new Promise((r) => setTimeout(r, 30));
-  const entries = unzipSync(buf);
+  setVeil('Unpacking Half-Life data…', 'Inflating pak0, wads, sprites, sounds (worker).', 0.58);
+  await yieldFrame();
+  let entries: Record<string, Uint8Array>;
+  try {
+    entries = await unzipZipInWorker(buf);
+    log(`valve unzip worker: ${Object.keys(entries).length} zip entries`);
+  } catch (err) {
+    log(`valve unzip worker failed (${formatErr(err)}) — main thread fallback`);
+    setVeil('Unpacking Half-Life data…', 'Inflating on the main thread (slower).', 0.58);
+    await yieldFrame();
+    entries = unzipZipOnMain(buf);
+  }
   staged.valve.clear();
   let bytes = 0;
   let skipped = 0;
@@ -227,9 +1096,12 @@ async function stageValveZip() {
       skipped++;
       continue;
     }
-    const file = data as Uint8Array;
+    const file = data;
     if (lower.endsWith('.pak')) {
-      explodePak(file, staged.valve, 'valve/');
+      await explodePakYielding(file, staged.valve, 'valve/', (done, total) => {
+        setVeil('Unpacking Half-Life data…', `Exploding pak0 ${done}/${total}`, 0.58);
+        valveStatus.textContent = `exploding pak0 ${done}/${total}`;
+      });
       bytes += file.length;
       continue;
     }
@@ -313,7 +1185,7 @@ function mkdirTree(FS: { mkdir: (p: string) => void }, path: string) {
   }
 }
 
-function writeTree(
+async function writeTree(
   FS: {
     mkdir: (p: string) => void;
     writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
@@ -323,7 +1195,8 @@ function writeTree(
   onProgress?: (done: number, total: number) => void,
 ) {
   const entries = [...files.entries()];
-  entries.forEach(([path, data], i) => {
+  for (let i = 0; i < entries.length; i++) {
+    const [path, data] = entries[i];
     const dest = path.startsWith('/') ? path : `/${path.replace(/^\//, '')}`;
     const slash = dest.lastIndexOf('/');
     if (slash > 0) mkdirTree(FS, dest.slice(0, slash));
@@ -333,12 +1206,14 @@ function writeTree(
       /* not present */
     }
     try {
-      FS.writeFile(dest, data.slice());
+      const copy = data.slice();
+      FS.writeFile(dest, copy, { canOwn: true });
     } catch (err) {
       throw new Error(`write ${dest} (${data.length} bytes): ${formatErr(err)}`);
     }
-    if (onProgress && i % 50 === 0) onProgress(i, entries.length);
-  });
+    if (onProgress && i % 32 === 0) onProgress(i, entries.length);
+    if (i % 32 === 0) await yieldFrame();
+  }
   onProgress?.(entries.length, entries.length);
 }
 
@@ -555,39 +1430,50 @@ async function boot() {
     if (shimOk) sizeGameCanvas();
     log(`boot: creating Xash3D (${view.width}x${view.height}) shim=${shimOk}`);
     logViewMetrics('pre-init');
+    const bootArgs = [
+      '-windowed',
+      '-nointro',
+      '-console',
+      '-dev',
+      '1',
+      '-game',
+      GAME_DIR,
+      '+maxplayers',
+      '1',
+      '+mp_allowmonsters',
+      '1',
+      '+deathmatch',
+      '0',
+      '+pausable',
+      '0',
+      '+sv_lan',
+      '1',
+      '+r_drawentities',
+      '0',
+      '+r_drawviewmodel',
+      '0',
+      '+r_drawparticles',
+      '0',
+      '+r_norefresh',
+      '1',
+      '+sv_validate_changelevel',
+      '0',
+      '+sv_newunit',
+      '1',
+      '+ui_renderworld',
+      '1',
+      '+r_fullbright',
+      '1',
+      '+cl_himodels',
+      '0',
+    ];
+    if (shimOk) {
+      bootArgs.splice(1, 0, '-width', String(view.width), '-height', String(view.height));
+    }
     engine = new Xash3D({
       canvas,
-      arguments: shimOk
-        ? [
-            '-windowed',
-            '-width',
-            String(view.width),
-            '-height',
-            String(view.height),
-            '-game',
-            GAME_DIR,
-            '+mp_allowmonsters',
-            '1',
-            '+deathmatch',
-            '0',
-            '+pausable',
-            '0',
-            '+map',
-            'efw_prototype_level1',
-          ]
-        : [
-            '-windowed',
-            '-game',
-            GAME_DIR,
-            '+mp_allowmonsters',
-            '1',
-            '+deathmatch',
-            '0',
-            '+pausable',
-            '0',
-            '+map',
-            'efw_prototype_level1',
-          ],
+      renderer: 'gles3compat',
+      arguments: bootArgs,
       filesMap: {
         'xash.wasm': publicAsset('engine/xash.wasm'),
         'filesystem_stdio.wasm': publicAsset('engine/filesystem_stdio.wasm'),
@@ -604,28 +1490,61 @@ async function boot() {
         elementPointerLock: true,
       },
     });
-    log('boot: init()');
+    loopbackNet = new EfwLoopbackNet();
+    loopbackNet.onLog = log;
+    engine.net = loopbackNet;
+    (window as Window & { __efwNet?: EfwLoopbackNet }).__efwNet = loopbackNet;
+    (window as Window & { __efwRun?: typeof runEngineCmd }).__efwRun = runEngineCmd;
+    (window as Window & { __efwGame?: typeof runGameCmd }).__efwGame = runGameCmd;
+    log('boot: init() with in-process loopback net');
     await engine.init();
     log('boot: init ok');
+    {
+      const mod = (engine.em as { Module?: {
+        pauseMainLoop?: () => void;
+        resumeMainLoop?: () => void;
+      } } | undefined)?.Module;
+      if (mod?.pauseMainLoop) {
+        const origPause = mod.pauseMainLoop.bind(mod);
+        mod.pauseMainLoop = () => {
+          log('listen: MainLoop.pause');
+          origPause();
+        };
+      }
+    }
 
-    const FS = (engine.em as unknown as { FS?: unknown })?.FS as
-      | {
-          mkdir: (p: string) => void;
-          writeFile: (p: string, d: Uint8Array, opts?: { canOwn?: boolean }) => void;
-          unlink: (p: string) => void;
-        }
-      | undefined;
+    const FS = (engine.em as unknown as { FS?: WasmFS })?.FS;
     if (!FS) throw new Error('WASM filesystem unavailable after init');
+    wasmFS = FS;
     log(`boot: writing ${staged.valve.size} valve files + ${staged.woomera.size} woomera files`);
 
     setVeil('Installing game files…', 'Writing woomera/ + valve/ into WASM memory.', 0.8);
-    await new Promise((r) => setTimeout(r, 30));
-    writeTree(FS, staged.valve, (done, total) =>
+    await yieldFrame();
+    await writeTree(FS, staged.valve, (done, total) =>
       setVeil('Installing game files…', `valve/ ${done}/${total}`, 0.8 + 0.1 * (done / Math.max(1, total))),
     );
     log('boot: valve files written');
-    writeTree(FS, staged.woomera);
+    await writeTree(FS, staged.woomera);
     log('boot: woomera files written');
+    mkdirTree(FS, `/${GAME_DIR}/overviews`);
+    {
+      const maps = ['efw_prototype_level1', 'efw_prototype_level2', 'efw_prototype_level3'];
+      const txt = new TextEncoder().encode('ZOOM 1.0\nORIGIN 0 0 0\nROTATED 0\nHEIGHT 0\n');
+      const tga = new Uint8Array(21);
+      tga[2] = 2;
+      tga[12] = 1;
+      tga[14] = 1;
+      tga[16] = 24;
+      for (const map of maps) {
+        try {
+          FS.writeFile(`/${GAME_DIR}/overviews/${map}.txt`, txt);
+          FS.writeFile(`/${GAME_DIR}/overviews/${map}.tga`, tga);
+        } catch {
+          /* ignore */
+        }
+      }
+      log('boot: stub overviews written');
+    }
     mkdirTree(FS, `/${GAME_DIR}/cl_dlls`);
     mkdirTree(FS, `/${GAME_DIR}/dlls`);
     mkdirTree(FS, '/valve');
@@ -678,23 +1597,22 @@ async function boot() {
     markDone('step-launch');
     launchStatus.textContent = 'running — click the game view to capture mouse and keyboard';
     engineStatus.textContent = `running (${canvas.width}×${canvas.height})`;
-    log('engine main loop started with +map efw_prototype_level1');
+    log('engine main loop started; +map is in Host_Init argv');
     canvas.focus();
+    startedMap = '';
+    listenReady = false;
+    menuDismissed = false;
+    consoleForPlaque = false;
+    firstMapKeyGame = false;
     setTimeout(() => {
-      runEngineCmd('pausable 0');
-    }, 4000);
-    setInterval(() => {
-      runEngineCmd('pausable 0');
-    }, 2000);
-    const resumeLoop = () => {
-      const mod = (engine?.em as { Module?: { resumeMainLoop?: () => void } } | undefined)?.Module;
-      try {
-        mod?.resumeMainLoop?.();
-      } catch {
-        /* ignore */
-      }
-    };
-    setInterval(resumeLoop, 100);
+      const bootMap = new URLSearchParams(window.location.search).get('map') || 'efw_prototype_level1';
+      loadMap(bootMap, 'deferred after Host_Init');
+    }, 1500);
+    setInterval(pollEfwVgui, 250);
+    pollEfwVgui();
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && listenReady) resumeEngineLoop();
+    });
   } catch (err) {
     const msg = formatErr(err);
     launchStatus.textContent = `failed: ${msg}`;
@@ -719,8 +1637,7 @@ consoleInput.addEventListener('keyup', (e) => e.stopPropagation());
 mapsPanel.querySelectorAll('button[data-map]').forEach((btn) => {
   btn.addEventListener('click', () => {
     const map = (btn as HTMLButtonElement).dataset.map;
-    log(`> map ${map}`);
-    runEngineCmd(`map ${map}`);
+    if (map) loadMap(map, 'maps panel');
     void captureInput();
   });
 });
@@ -730,29 +1647,49 @@ consoleForm.addEventListener('submit', (e) => {
   const cmd = consoleInput.value.trim();
   if (!cmd) return;
   log(`> ${cmd}`);
-  // Game-DLL ClientCommand names are not host commands. Prefix with cmd
-  // so the listen server forwards them to EFW_ClientCommand.
-  const forwarded =
-    /^(efw_|menuselect\b)/i.test(cmd) && !/^cmd\s/i.test(cmd) ? `cmd ${cmd}` : cmd;
-  runEngineCmd(forwarded);
-  if (forwarded !== cmd) runEngineCmd(cmd);
+  runEngineCmd(cmd);
   consoleInput.value = '';
 });
 
+document.getElementById('efw-story-dismiss')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  dismissEfwStory();
+});
+document.getElementById('efw-story')?.addEventListener('click', (ev) => {
+  if (ev.target === document.getElementById('efw-story'))
+    dismissEfwStory();
+});
+document.getElementById('efw-letter')?.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  ev.stopPropagation();
+  dismissLetterbox();
+});
 document.getElementById('btn-talk')?.addEventListener('click', () => {
-  log('> talk (E / efw_Talk)');
+  log('> talk (efw_Talk)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Talk');
 });
 document.getElementById('btn-use')?.addEventListener('click', () => {
-  log('> use (efw_spider)');
+  log('> use (IN_USE / FUN_100c4af0)');
   runEngineCmd('pausable 0');
-  runGameCmd('efw_spider');
+  runGameCmd('efw_inuse');
+  runGameCmd('use');
 });
 document.getElementById('btn-give')?.addEventListener('click', () => {
   log('> give (efw_Give)');
   runEngineCmd('pausable 0');
   runGameCmd('efw_Give');
+});
+document.getElementById('efw-diary')?.addEventListener('click', (ev) => {
+  const btn = (ev.target as HTMLElement).closest('button[data-diary]') as HTMLButtonElement | null;
+  if (!btn) return;
+  ev.preventDefault();
+  const which = btn.dataset.diary;
+  const cmd = which === 'prev' ? 'efw_diary_prev' : which === 'next' ? 'efw_diary_next' : 'efw_diary';
+  log(`> ${cmd}`);
+  runEngineCmd('pausable 0');
+  runGameCmd(cmd);
 });
 document.getElementById('btn-diary')?.addEventListener('click', () => {
   log('> diary (I / efw_diary)');
@@ -775,8 +1712,20 @@ document.addEventListener('keydown', (e) => {
     return;
   if (e.repeat)
     return;
+  if (e.key === 'e' || e.key === 'E' || e.key === 'Escape' || e.key === 'Enter') {
+    const story = document.getElementById('efw-story');
+    if (story && !story.hidden) {
+      dismissEfwStory();
+      return;
+    }
+  }
   if (e.key >= '1' && e.key <= '9') {
     chooseTalkSlot(Number(e.key));
+  } else if (e.key === 'e' || e.key === 'E') {
+    log('> E (IN_USE)');
+    runEngineCmd('pausable 0');
+    runGameCmd('efw_inuse');
+    runGameCmd('use');
   } else if (e.key === 'i' || e.key === 'I') {
     document.getElementById('btn-diary')?.click();
   }

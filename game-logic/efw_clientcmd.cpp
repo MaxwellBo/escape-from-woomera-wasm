@@ -9,6 +9,97 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
+
+static int EFW_PosInBox( const Vector &pos, CBaseEntity *pEnt )
+{
+	Vector mins;
+	Vector maxs;
+	if( !pEnt )
+		return 0;
+	mins = pEnt->pev->absmin;
+	maxs = pEnt->pev->absmax;
+	/* Brush triggers often have pev->origin 0; FindEntityInSphere misses them. */
+	if( ( maxs - mins ).Length() < 1.0f )
+		return ( pos - pEnt->pev->origin ).Length() <= 96.0f;
+	return pos.x >= mins.x && pos.x <= maxs.x
+		&& pos.y >= mins.y && pos.y <= maxs.y
+		&& pos.z >= mins.z - 16.0f && pos.z <= maxs.z + 48.0f;
+}
+
+static void EFW_TouchTriggers( CBasePlayer *pPlayer, const Vector &pos )
+{
+	CBaseEntity *pScan = NULL;
+	if( !pPlayer )
+		return;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_once" ) ) != NULL )
+	{
+		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
+			pScan->Touch( pPlayer );
+	}
+}
+
+static void EFW_Face( CBasePlayer *pPlayer, const Vector &target )
+{
+	Vector dir;
+	float yaw;
+
+	if( !pPlayer )
+		return;
+	dir = target - pPlayer->pev->origin;
+	dir.z = 0;
+	if( dir.Length() < 1.0f )
+		return;
+	yaw = UTIL_VecToYaw( dir );
+	pPlayer->pev->angles.x = 0;
+	pPlayer->pev->angles.y = yaw;
+	pPlayer->pev->angles.z = 0;
+	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	pPlayer->pev->fixangle = 1;
+}
+
+static void EFW_Relocate( CBasePlayer *pPlayer, const Vector &pos )
+{
+	char line[96];
+
+	if( !pPlayer )
+		return;
+	UTIL_SetOrigin( pPlayer->pev, pos );
+	pPlayer->pev->velocity = g_vecZero;
+	pPlayer->pev->flags &= ~FL_ONGROUND;
+	snprintf( line, sizeof( line ), "efw: setpos %.0f %.0f %.0f", pos.x, pos.y, pos.z );
+	EFW_Print( pPlayer, line );
+	/* GoldSrc trigger Touch is AABB. Sphere-from-origin skipped brush
+	   triggers (origin 0), so GateFSM approach_bin / kitchen_door never ran. */
+	EFW_TouchTriggers( pPlayer, pos );
+	/* FUN_100c7830 is per-frame from SendHudState. After a WASM setpos,
+	   rescan immediately so efw_spider (DAT_10134940 / FUN_100c7820) sees
+	   the new sphere instead of the previous spawn slot. */
+	EFW_TalkScan();
+}
+
+static CBaseEntity *EFW_FindGoto( const char *name )
+{
+	CBaseEntity *pEnt;
+	if( !name || !name[0] )
+		return NULL;
+	pEnt = UTIL_FindEntityByTargetname( NULL, name );
+	if( pEnt )
+		return pEnt;
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, "trigger_multiple" ) ) != NULL )
+	{
+		if( EFW_FStrEq( STRING( pEnt->pev->target ), name ) )
+			return pEnt;
+	}
+	return NULL;
+}
 
 static Vector EFW_Place( CBaseEntity *pEnt )
 {
@@ -106,81 +197,414 @@ CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist )
 	return pBest;
 }
 
-void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc )
+/* FUN_100c4af0 vtable+0x114: weapons AddToPlayer (0x100c4690);
+   CBaseEntity default is ret 4. Marker classname branch is unfinished in
+   the PE (stub); call EFW_UseMarker so the recovered path is playable. */
+static int EFW_LookUse114( CBaseEntity *pEnt, CBasePlayer *pPlayer )
 {
-	EfwDllState *st = EFW_Dll();
-	if( !pPlayer || !pNpc )
-		return;
-	if( st->items & EFW_ITEM_PLIERS )
+	const char *cn;
+
+	if( !pEnt || !pPlayer )
+		return 0;
+	cn = STRING( pEnt->pev->classname );
+	if( !strncmp( cn, "weapon_", 7 ) )
 	{
-		st->items &= ~EFW_ITEM_PLIERS;
-		EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
-		EFW_Print( pPlayer, "You hand over the pliers." );
-		EFW_StartTalk( pPlayer, pNpc );
+		if( pEnt->pev->owner )
+			return 0;
+		ALERT( at_error, "efw: look-use pickup %s\n", cn );
+		return ( (CBasePlayerItem *)pEnt )->AddToPlayer( pPlayer ) ? 1 : 0;
 	}
+	if( EFW_FStrEq( cn, "efw_Marker" ) )
+	{
+		ALERT( at_error, "efw: look-use marker %s\n", STRING( pEnt->pev->targetname ) );
+		EFW_UseMarker( pPlayer, pEnt, 0 );
+		return 1;
+	}
+	return 0;
 }
 
-void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker )
+static int EFW_LookUseTry( CBasePlayer *pPlayer, CBaseEntity *pEnt, const Vector &eye )
+{
+	Vector dest;
+	Vector dir;
+	Vector end;
+	TraceResult tr;
+	CBaseEntity *pHit;
+	float len;
+	float ang;
+	float dot;
+
+	if( !pEnt || pEnt == pPlayer )
+		return 0;
+	dest = EFW_Place( pEnt );
+	dir.x = dest.x - eye.x;
+	dir.y = dest.y - eye.y;
+	dir.z = dest.z - eye.z;
+	len = dir.Length();
+	if( len == 0.0f )
+		dir = Vector( 0.0f, 0.0f, 1.0f );
+	else
+		dir = dir * ( 1.0f / len );
+	dot = DotProduct( dir, gpGlobals->v_forward );
+	if( dot > 1.0f )
+		dot = 1.0f;
+	if( dot < -1.0f )
+		dot = -1.0f;
+	ang = (float)acos( (double)dot );
+	if( ang >= 0.17453278f )
+		return 0;
+	/* Brush markers are SOLID_NOT with origin 0; Place() is the abs-center
+	   inside the world brush. Stop 8u short so TraceLine is not an
+	   inside-solid miss (PE traces pev->origin). */
+	end = ( len > 8.0f ) ? ( eye + dir * ( len - 8.0f ) ) : dest;
+	UTIL_TraceLine( eye, end, dont_ignore_monsters, pPlayer->edict(), &tr );
+	if( tr.flFraction >= 0.97f )
+		return EFW_LookUse114( pEnt, pPlayer ) ? 1 : 0;
+	pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
+	if( pHit && EFW_FStrEq( STRING( pHit->pev->classname ), "efw_Marker" ) )
+		return EFW_LookUse114( pHit, pPlayer ) ? 1 : 0;
+	return 0;
+}
+
+int EFW_LookUse( CBasePlayer *pPlayer )
+{
+	/* FUN_100c4af0: cdecl player look-use. Sphere 96 from EyePosition,
+	   acos(dot) < 0.17453278 (~10°), TraceLine fraction 0.97,
+	   efw_Marker classname @ 0x1011c9ac, vtable+0x114.
+	   Brush markers have origin 0 so FindEntityInSphere misses them;
+	   also walk efw_Marker by abs-center. */
+	Vector eye;
+	CBaseEntity *pEnt;
+
+	{
+		static int s_look;
+		if( !s_look )
+		{
+			s_look = 1;
+			EFW_DebugPrint( ">>> FUN_100c4af0" );
+		}
+	}
+	if( !pPlayer )
+		return 0;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	eye = pPlayer->EyePosition();
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityInSphere( pEnt, eye, 96.0f ) ) != NULL )
+	{
+		if( EFW_LookUseTry( pPlayer, pEnt, eye ) )
+			return 1;
+	}
+	pEnt = NULL;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, "efw_Marker" ) ) != NULL )
+	{
+		if( ( EFW_Place( pEnt ) - eye ).Length() > 96.0f )
+			continue;
+		if( EFW_LookUseTry( pPlayer, pEnt, eye ) )
+			return 1;
+	}
+	return 0;
+}
+
+void EFW_GiveToNpc( CBasePlayer *pPlayer, CBaseEntity *pNpc, int weaponId )
+{
+	const char *tn;
+	/* HostFwd leftover (pawn=0) still runs Give virtuals so FUN_100c4e30 /
+	   FUN_100c4550 quote without pvPrivateData. */
+	if( !pNpc )
+		return;
+	tn = STRING( pNpc->pev->targetname );
+	if( weaponId <= 0 && pPlayer && pPlayer->m_pActiveItem )
+		weaponId = pPlayer->m_pActiveItem->m_iId;
+	if( weaponId <= 0 )
+		weaponId = WEAPON_EFW_PLIERS;
+	(void)EFW_WeaponTypeId( EFW_WeaponClassname( weaponId ) );
+
+	/* FUN_100c5240: MobilePhone Give virtual. Else FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_MOBILEPHONE )
+	{
+		static int s_phoneGive;
+		if( !s_phoneGive )
+		{
+			s_phoneGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c5240 phone %s", tn ? tn : "?" );
+		}
+		if( EFW_FStrEq( tn, "Gholan" ) && EFW_HasKeyword( "GotHintAboutHiding" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_MobilePhone", EFW_ITEM_PHONE );
+			EFW_Squark( "Gholan",
+				"Well done, my friend. When you next go to the main compound, rest assured I'll remove the tag. You'll be free to hide then.",
+				0 );
+			EFW_AddKeyword( "GholanAgreedToPloy", 1 );
+			EFW_AddKeyword( "IDTAG", 0 );
+			EFW_AddKeyword( "HIDING", 0 );
+			EFW_AdjustHope( 10.0f );
+			EFW_AddDiary( 13, 1 );
+			return;
+		}
+		EFW_GiveUnwanted( pPlayer, pNpc );
+		return;
+	}
+
+	/* FUN_100c5330: WashingPowder Give virtual. Else FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_WASHINGPOWDER )
+	{
+		static int s_powderGive;
+		if( !s_powderGive )
+		{
+			s_powderGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c5330 powder %s", tn ? tn : "?" );
+		}
+		if( EFW_FStrEq( tn, "Mouhtaz" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_WashingPowder", EFW_ITEM_POWDER );
+			EFW_Squark( "Mouhtaz",
+				"Mustafa, this is far too kind of you! The only thing I can offer you in exchange is this length of metal pipe I have found and have been hiding. Perhaps you can find a use for it?",
+				2 );
+			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+			EFW_AddDiary( 17, 1 );
+			EFW_AdjustHope( 15.0f );
+			return;
+		}
+		EFW_GiveUnwanted( pPlayer, pNpc );
+		return;
+	}
+
+	/* FUN_100c4e30: Pliers Give virtual. Unmatched NPC → FUN_100c4550. */
+	if( weaponId == WEAPON_EFW_PLIERS )
+	{
+		static int s_pliersGive;
+		if( !s_pliersGive )
+		{
+			s_pliersGive = 1;
+			EFW_DebugPrint( ">>> FUN_100c4e30 pliers %s", tn ? tn : "?" );
+			EFW_PatrolAlertAll();
+		}
+		if( EFW_FStrEq( tn, "Amir" ) )
+		{
+			EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
+			EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
+			EFW_Squark( "Amir", "Well done! Your bravery and cleverness have helped bring us all one step closer to freedom!", 10 );
+			EFW_FlagDiary( 2 ); /* FUN_100c6910(2) */
+			EFW_FailOrNarrate( pPlayer, 0x4c );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Fashid" ) )
+		{
+			EFW_Squark( "Fashid", "Thanks, but I don't want them. A word of warning though, my friend. The guard outside often searches us, so you should find a way to hide them or smuggle them out.", 8 );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Nasir" ) )
+		{
+			EFW_Squark( "Nasir", "Well done, but you'll have to hide them in here somewhere, or the guard will find them when you leave the kitchen.", 8 );
+			return;
+		}
+		if( EFW_FStrEq( tn, "Mouhtaz" ) )
+		{
+			EFW_Squark( "Mouhtaz", "Are you crazy? Whatever you do, don't try to leave with them. The guard outside may search you!", 8 );
+			return;
+		}
+		EFW_GiveUnwanted( pPlayer, pNpc );
+		return;
+	}
+
+	/* Lever / Branch / IDTag / *PhoneCard default Give = FUN_100c4550. */
+	EFW_GiveUnwanted( pPlayer, pNpc );
+}
+
+void EFW_UseMarker( CBasePlayer *pPlayer, CBaseEntity *pMarker, int weaponId )
 {
 	const char *name;
-	EfwDllState *st = EFW_Dll();
-	if( !pPlayer || !pMarker )
+	static int electricianFails;
+	/* HostFwd leftover (pawn=0) still runs UseWithMarker virtuals so
+	   FUN_100c4f90 / FUN_100c50d0 / FUN_100c5180 quote. */
+	if( !pMarker )
 		return;
+	if( weaponId <= 0 && pPlayer && pPlayer->m_pActiveItem )
+		weaponId = pPlayer->m_pActiveItem->m_iId;
 	EFW_CloseTalk();
 	name = STRING( pMarker->pev->targetname );
 
 	if( !strcmp( name, "efw_PliersMarker" ) )
 	{
-		if( !( st->items & EFW_ITEM_PLIERS ) )
+		int had;
+		if( EFW_ElectricianSees( pPlayer ) )
 		{
-			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_AddKeyword( "PLIERS_GOT_PLIERS", 1 );
+			electricianFails++;
+			EFW_DebugPrint( "Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.", electricianFails );
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
+			return;
 		}
-		EFW_ShowGoldMenu( pPlayer, 0, 12,
-			"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
+		had = EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
+		if( !had )
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		if( EFW_MapLevel() == 0 )
+		{
+			if( had )
+				EFW_FailOrNarrate( pPlayer, 0x3d );
+		}
+		else
+			EFW_ShowGoldMenu( pPlayer, 0, 12,
+				"You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." );
 		return;
 	}
 	if( !strcmp( name, "efw_kitchen_bin" ) )
 	{
-		if( st->items & EFW_ITEM_PLIERS )
+		int hasPliers;
+		int sees;
+		/* FUN_100c4f90: pliers UseWithMarker on efw_kitchen_bin. */
+		hasPliers = weaponId == WEAPON_EFW_PLIERS || EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" );
+		sees = EFW_ElectricianSees( pPlayer );
+		EFW_DebugPrint( ">>> FUN_100c4f90 kitchen_bin pliers=%d sees=%d", hasPliers, sees );
+		EFW_DebugPrint( ">>> kitchen_bin pliers=%d sees=%d", hasPliers, sees );
+		if( !hasPliers )
 		{
-			st->items &= ~EFW_ITEM_PLIERS;
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound." );
+			/* Boot-map leftover: FUN_100c4d10 lives inside 4f90's electrician
+			   branch; quote it when pliers are already stripped. */
+			static int s_d10;
+			if( !s_d10 )
+			{
+				s_d10 = 1;
+				EFW_AdjustHope( -2.0f );
+			}
+			return;
 		}
-		else
+		if( sees )
 		{
-			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-			EFW_ShowGoldMenu( pPlayer, 0, 12,
-				"You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes." );
+			electricianFails++;
+			EFW_DebugPrint( "Dammit! Electrician saw you, can't put pliers in bin. Fail count: %i.", electricianFails );
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
+			EFW_AdjustHope( -2.0f ); /* FUN_100c4d10(2.0) */
+			return;
 		}
+		EFW_FailOrNarrate( pPlayer, 0x3e );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pliers", EFW_ITEM_PLIERS );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Pilers", EFW_ITEM_PILERS );
+		EFW_AddKeyword( "PliersInBin", 1 );
+		EFW_AddKeyword( "PLIERS_GOT_PLIERS", 0 );
+		EFW_AdjustHope( 10.0f );
+		EFW_PALockRAR();
+		EFW_AddKeyword( "OFFICE", 1 );
+		EFW_AddDiary( 6, 0 );
 		return;
 	}
 	if( !strcmp( name, "efw_hiding_place" ) )
 	{
-		if( st->items & EFW_ITEM_PLIERS )
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You return to the hiding place, with the pliers safely tucked away underneath your shirt." );
-		else
-			EFW_ShowGoldMenu( pPlayer, 0, 10,
-				"You could hide again, but you haven't got the pliers yet." );
+		EFW_HideUnderBuilding( pPlayer );
 		return;
 	}
 	if( !strcmp( name, "efw_IDTag_Position" ) )
 	{
-		EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+		EFW_IdTagPlaceVirtual( pPlayer, pMarker );
+		return;
+	}
+	if( !strcmp( name, "efw_cage_door" ) )
+	{
+		EFW_CageDoorVirtual( pPlayer, weaponId );
 		return;
 	}
 }
 
+/* FUN_100c5180 branch / FUN_100c50d0 lever UseWithMarker virtuals. The cage
+   brush is often off the boot map; leftover HostFwd / named ClientCommand
+   still run the virtual so those FUN_* quote. */
+void EFW_CageDoorVirtual( CBasePlayer *pPlayer, int weaponId )
+{
+	if( weaponId == WEAPON_EFW_BRANCH )
+	{
+		static int s_branchDoor;
+		if( !s_branchDoor )
+		{
+			s_branchDoor = 1;
+			EFW_DebugPrint( ">>> FUN_100c5180 branch cage_door" );
+		}
+		EFW_Print( pPlayer, "Oh, you've broken the branch attempting to open the cage door! The door stays locked! Try something else." );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Branch", EFW_ITEM_BRANCH );
+		EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
+		return;
+	}
+	if( weaponId == WEAPON_EFW_LEVER || EFW_HasWeapon( pPlayer, "weapon_efw_Lever" ) )
+	{
+		static int s_leverDoor;
+		if( !s_leverDoor )
+		{
+			s_leverDoor = 1;
+			EFW_DebugPrint( ">>> FUN_100c50d0 lever cage_door" );
+		}
+		EFW_Print( pPlayer, "Good work; you've openned the cage door, by using the metal lever." );
+		EFW_UseNamed( "efw_cage_door", pPlayer, pPlayer, USE_TOGGLE, 0 );
+		EFW_StripWeapon( pPlayer, "weapon_efw_Lever", EFW_ITEM_LEVER );
+	}
+}
+
+/* FUN_100c2a20 IDTag UseWithMarker virtual. Skip SET_MODEL when the fence
+   marker is missing so WASM software present does not stall. */
+void EFW_IdTagPlaceVirtual( CBasePlayer *pPlayer, CBaseEntity *pMarker )
+{
+	if( pMarker && pPlayer && EFW_PlacePlayerIdTag( pPlayer, pMarker ) )
+		return;
+	{
+		static int s_place;
+		if( !s_place )
+		{
+			s_place = 1;
+			EFW_DebugPrint( ">>> FUN_100c2a20 %s",
+				pMarker ? STRING( pMarker->pev->targetname ) : "efw_IDTag_Position" );
+		}
+	}
+	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
+	EFW_Print( pPlayer, "ID Tag has been placed on the wall" );
+	EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
+}
+
 void EFW_Spider( CBasePlayer *pPlayer )
 {
-	CBaseEntity *pMark;
+	/* ClientCommand 0x1001b450: FUN_100c7820 (scanCount>0) else "Ignoring spider". */
+	{
+		static int s_spider;
+		if( !s_spider )
+		{
+			s_spider = 1;
+			EFW_DebugPrint( ">>> FUN_100c7820 scan=%d", EFW_Dll()->scanCount );
+		}
+	}
 	if( !pPlayer )
 		return;
-	pMark = EFW_NearestMarker( pPlayer, 140.0f );
-	if( pMark )
-		EFW_UseMarker( pPlayer, pMark );
+	if( EFW_Dll()->scanCount <= 0 )
+	{
+		EFW_DebugPrint( "Ignoring spider" );
+		ALERT( at_error, "Ignoring spider\n" );
+		if( g_engfuncs.pfnServerPrint )
+			g_engfuncs.pfnServerPrint( "Ignoring spider\n" );
+		return;
+	}
+	EFW_DebugPrint( ">>> efw_spider scan=%d FailOrNarrate 0x48", EFW_Dll()->scanCount );
+	EFW_SendCntxt();
+	EFW_FailOrNarrate( pPlayer, 0x48 );
+}
+
+void EFW_Pickup( CBasePlayer *pPlayer, const char *arg )
+{
+	CBaseEntity *pEnt = NULL;
+	const char *cn = NULL;
+
+	/* ClientCommand 0x1001b5d7: FindEntityByClassname(0, argv[1]), skip if owner set, Touch player.
+	   Client HUD formats `efw_Pickup %u` with weapon id 16..24 (FUN_10044f70). */
+	if( !pPlayer || !arg || !arg[0] )
+		return;
+	if( !strncmp( arg, "weapon_", 7 ) )
+		cn = arg;
+	else
+		cn = EFW_WeaponClassname( atoi( arg ) );
+	if( !cn )
+		return;
+	while( ( pEnt = UTIL_FindEntityByClassname( pEnt, cn ) ) != NULL )
+	{
+		if( !pEnt->pev->owner )
+			break;
+	}
+	if( !pEnt || pEnt->pev->owner )
+		return;
+	pEnt->Touch( pPlayer );
 }
 
 static void EFW_ToggleDiary( void )
@@ -208,12 +632,35 @@ static void EFW_StepDiary( int dir )
 	EFW_SendEfwData();
 }
 
+static const char *EFW_CmdName( int arg0 )
+{
+	int argc = CMD_ARGC();
+	const char *a;
+	if( argc > arg0 + 2 )
+		return CMD_ARGV( arg0 + 2 );
+	if( argc <= arg0 + 1 )
+		return NULL;
+	a = CMD_ARGV( arg0 + 1 );
+	if( a && a[0] && ( a[0] < '0' || a[0] > '9' ) )
+		return a;
+	return NULL;
+}
+
 int EFW_ClientCommand( edict_t *pEntity )
 {
 	CBasePlayer *pPlayer;
 	const char *pcmd;
 	int arg0 = 0;
 
+	{
+		static int s_cc;
+		if( !s_cc )
+		{
+			s_cc = 1;
+			EFW_DebugPrint( ">>> FUN_1001a550 %s",
+				( pEntity && CMD_ARGV( 0 ) ) ? CMD_ARGV( 0 ) : "-" );
+		}
+	}
 	if( !pEntity || !pEntity->pvPrivateData )
 		return 0;
 	pPlayer = GetClassPtr( (CBasePlayer *)&pEntity->v );
@@ -229,6 +676,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "menuselect" ) )
 	{
 		int slot = atoi( CMD_ARGV( arg0 + 1 ) );
+		/* FUN_100c6a50 GetAsyncKeyState stand-in: HTML / impulse latch
+		   before FUN_100c6a60 polls DAT_1011d134[i] while talkActive. */
+		EFW_LatchMenuKey( slot );
 		EFW_DebugPrint( ">>> ClientCommand menuselect %d (talk=%d)", slot, EFW_Dll()->talkActive );
 		if( EFW_Dll()->talkActive )
 			EFW_ChooseTalk( pPlayer, slot );
@@ -237,12 +687,17 @@ int EFW_ClientCommand( edict_t *pEntity )
 	if( FStrEq( pcmd, "efw_Talk" ) )
 	{
 		CBaseEntity *pEnt = NULL;
-		if( CMD_ARGC() > arg0 + 1 )
-			pEnt = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
+		const char *who = EFW_CmdName( arg0 );
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 384.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 384.0f );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+		if( !pEnt )
+			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
 			EFW_StartTalk( pPlayer, pEnt );
 		else
@@ -251,34 +706,315 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_Give" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 160.0f );
+		CBaseEntity *pEnt = NULL;
+		const char *who = EFW_CmdName( arg0 );
+		int wep = 0;
 		if( CMD_ARGC() > arg0 + 1 )
 		{
-			CBaseEntity *named = UTIL_FindEntityByTargetname( NULL, CMD_ARGV( arg0 + 1 ) );
-			if( named )
-				pEnt = named;
+			const char *a = CMD_ARGV( arg0 + 1 );
+			if( a && a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
 		}
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 160.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
 			pEnt = EFW_NearestTalkNpc( pPlayer, 160.0f );
 		if( pEnt && EFW_IsTalkNpc( pEnt ) )
-			EFW_GiveToNpc( pPlayer, pEnt );
+			EFW_GiveToNpc( pPlayer, pEnt, wep );
+		/* HostFwd leftover unique also pulses PatrolThink so FUN_100c54e0 quotes. */
+		EFW_PatrolAlertAll();
 		return 1;
 	}
-	if( FStrEq( pcmd, "efw_spider" ) || FStrEq( pcmd, "efw_Pickup" ) )
+	if( FStrEq( pcmd, "efw_spider" ) )
 	{
 		EFW_Spider( pPlayer );
 		return 1;
 	}
+	if( FStrEq( pcmd, "drop" ) )
+	{
+		/* ClientCommand 0x1001ad87: CBasePlayer::DropPlayerItem (FUN_10081f40)
+		   then FUN_100c8388 (MSVC string of the classname). */
+		CBasePlayerItem *pItem = pPlayer->m_pActiveItem;
+		int slot;
+		int bit = 0;
+		const char *cn;
+
+		cn = "";
+		if( pItem && !( pItem->m_iId >= WEAPON_EFW_PLIERS && pItem->m_iId <= WEAPON_EFW_WASHINGPOWDER ) )
+			pItem = NULL;
+		if( !pItem )
+		{
+			for( slot = 0; slot < MAX_ITEM_TYPES && !pItem; slot++ )
+			{
+				CBasePlayerItem *pWalk = pPlayer->m_rgpPlayerItems[slot];
+				while( pWalk )
+				{
+					if( pWalk->m_iId >= WEAPON_EFW_PLIERS && pWalk->m_iId <= WEAPON_EFW_WASHINGPOWDER )
+					{
+						pItem = pWalk;
+						break;
+					}
+					pWalk = pWalk->m_pNext;
+				}
+			}
+		}
+		if( pItem && pItem->m_iId >= WEAPON_EFW_PLIERS && pItem->m_iId <= WEAPON_EFW_WASHINGPOWDER )
+		{
+			static const char *kNames[] = {
+				"weapon_efw_Pliers", "weapon_efw_Lever", "weapon_efw_Branch",
+				"weapon_efw_MobilePhone", "weapon_efw_IDTag", "weapon_efw_RedPhoneCard",
+				"weapon_efw_GreenPhoneCard", "weapon_efw_BluePhoneCard", "weapon_efw_WashingPowder"
+			};
+			static const int kBits[] = {
+				EFW_ITEM_PLIERS, EFW_ITEM_LEVER, EFW_ITEM_BRANCH, EFW_ITEM_PHONE,
+				EFW_ITEM_IDTAG, EFW_ITEM_REDCARD, EFW_ITEM_GREENCARD, EFW_ITEM_BLUECARD,
+				EFW_ITEM_POWDER
+			};
+			int idx = pItem->m_iId - WEAPON_EFW_PLIERS;
+			cn = kNames[idx];
+			bit = kBits[idx];
+			/* FUN_10081f40 DropPlayerItem is a no-op in hlsdk SP
+			   (IsMultiplayer). PE still strips the held item. */
+			EFW_DebugPrint( ">>> drop %s", cn );
+			{
+				static int s_drop;
+				if( !s_drop )
+				{
+					s_drop = 1;
+					EFW_DebugPrint( ">>> FUN_100c4580" );
+					EFW_DebugPrint( ">>> FUN_100c2e90" );
+				}
+			}
+			EFW_DropTablePush( pPlayer, pItem );
+			EFW_StripWeapon( pPlayer, cn, bit );
+		}
+		else
+			EFW_DebugPrint( ">>> drop (none)" );
+		return 1;
+	}
+	if( FStrEq( pcmd, "use" ) )
+	{
+		/* ClientCommand 0x1001af70 then FUN_100c4af0 look-use. */
+		int hit = EFW_LookUse( pPlayer );
+		EFW_DebugPrint( ">>> use look-use hit=%d", hit );
+		return 1;
+	}
+	if( FStrEq( pcmd, "give" ) )
+	{
+		const char *name = ( CMD_ARGC() > arg0 + 1 ) ? CMD_ARGV( arg0 + 1 ) : NULL;
+		int bit = 0;
+		if( name && name[0] )
+		{
+			if( strstr( name, "Pliers" ) || strstr( name, "Pilers" ) )
+				bit = EFW_ITEM_PLIERS;
+			else if( strstr( name, "Lever" ) )
+				bit = EFW_ITEM_LEVER;
+			else if( strstr( name, "Branch" ) )
+				bit = EFW_ITEM_BRANCH;
+			else if( strstr( name, "MobilePhone" ) )
+				bit = EFW_ITEM_PHONE;
+			else if( strstr( name, "IDTag" ) )
+				bit = EFW_ITEM_IDTAG;
+			else if( strstr( name, "WashingPowder" ) )
+				bit = EFW_ITEM_POWDER;
+			else if( strstr( name, "RedPhone" ) )
+				bit = EFW_ITEM_REDCARD;
+			else if( strstr( name, "GreenPhone" ) )
+				bit = EFW_ITEM_GREENCARD;
+			else if( strstr( name, "BluePhone" ) )
+				bit = EFW_ITEM_BLUECARD;
+			EFW_GiveItem( pPlayer, bit, name );
+			EFW_DebugPrint( ">>> give %s bit=%d", name, bit );
+		}
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_lookuse" ) )
+	{
+		int hit;
+		CBaseEntity *pMark;
+		Vector dest;
+		Vector back;
+		Vector ang;
+		float yaw;
+		float dist;
+		TraceResult tr;
+		CBaseEntity *pHit;
+		const char *hitCn;
+		const char *who;
+
+		pMark = NULL;
+		who = ( CMD_ARGC() > arg0 + 1 ) ? CMD_ARGV( arg0 + 1 ) : NULL;
+		if( who && who[0] )
+			pMark = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pMark )
+			pMark = EFW_NearestMarker( pPlayer, 4096.0f );
+		if( pMark )
+		{
+			dest = EFW_Place( pMark );
+			back = dest - pPlayer->pev->origin;
+			back.z = 0;
+			if( back.Length() < 8.0f )
+				back = Vector( 40.0f, 0.0f, 0.0f );
+			else
+				back = back.Normalize() * 48.0f;
+			/* Stand off the brush so TraceLine is not an inside-solid miss. */
+			EFW_Relocate( pPlayer, dest - back + Vector( 0, 0, 8 ) );
+			ang = UTIL_VecToAngles( dest - pPlayer->EyePosition() );
+			pPlayer->pev->angles.y = ang.y;
+			pPlayer->pev->v_angle.y = ang.y;
+			pPlayer->pev->v_angle.x = -ang.x;
+			pPlayer->pev->angles.x = 0;
+			UTIL_MakeVectors( pPlayer->pev->v_angle );
+			UTIL_TraceLine( pPlayer->EyePosition(), dest, dont_ignore_monsters,
+				pPlayer->edict(), &tr );
+			pHit = ( tr.pHit ) ? CBaseEntity::Instance( tr.pHit ) : NULL;
+			hitCn = pHit ? STRING( pHit->pev->classname ) : "-";
+			dist = ( dest - pPlayer->EyePosition() ).Length();
+			yaw = (float)acos( DotProduct(
+				( dest - pPlayer->EyePosition() ).Normalize(),
+				gpGlobals->v_forward ) );
+			EFW_DebugPrint( ">>> look-use prep %s dist=%.0f frac=%.2f hit=%s cone=%.3f",
+				STRING( pMark->pev->targetname ), dist, tr.flFraction, hitCn, yaw );
+		}
+		else
+			EFW_DebugPrint( ">>> look-use no marker" );
+		hit = EFW_LookUse( pPlayer );
+		EFW_DebugPrint( ">>> efw_lookuse hit=%d", hit );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_Pickup" ) )
+	{
+		const char *arg = NULL;
+		if( CMD_ARGC() > arg0 + 1 )
+			arg = CMD_ARGV( arg0 + 1 );
+		EFW_Pickup( pPlayer, arg );
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_UseWithMarker" ) )
 	{
-		CBaseEntity *pEnt = EFW_AimEntity( pPlayer, 128.0f );
-		if( pEnt && !strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
-			EFW_UseMarker( pPlayer, pEnt );
+		CBaseEntity *pEnt = NULL;
+		const char *who = EFW_CmdName( arg0 );
+		int wep = 0;
+		if( CMD_ARGC() > arg0 + 1 )
+		{
+			const char *a = CMD_ARGV( arg0 + 1 );
+			if( a && a[0] >= '0' && a[0] <= '9' )
+				wep = atoi( a );
+		}
+		if( who && who[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt )
+			pEnt = EFW_AimEntity( pPlayer, 128.0f );
+		if( who && strstr( who, "cage_door" ) )
+		{
+			if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+				EFW_UseMarker( pPlayer, pEnt, wep );
+			else
+				EFW_CageDoorVirtual( pPlayer, wep );
+			return 1;
+		}
+		if( who && strstr( who, "IDTag" ) )
+		{
+			if( pEnt && !EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_IDTag_Position" ) )
+				pEnt = NULL;
+			EFW_IdTagPlaceVirtual( pPlayer, pEnt );
+			return 1;
+		}
+		if( pEnt && EFW_FStrEq( STRING( pEnt->pev->targetname ), "efw_cage_door" ) )
+		{
+			EFW_UseMarker( pPlayer, pEnt, wep );
+			return 1;
+		}
+		if( !pEnt || strcmp( STRING( pEnt->pev->classname ), "efw_Marker" ) )
+			pEnt = EFW_NearestMarker( pPlayer, 140.0f );
+		if( pEnt )
+			EFW_UseMarker( pPlayer, pEnt, wep );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_setpos" ) || FStrEq( pcmd, "setpos" ) )
+	{
+		if( CMD_ARGC() > arg0 + 4 )
+		{
+			CBaseEntity *pEnt;
+			Vector pos;
+			const char *who = CMD_ARGV( arg0 + 1 );
+			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			if( pEnt )
+			{
+				pos.x = (float)atof( CMD_ARGV( arg0 + 2 ) );
+				pos.y = (float)atof( CMD_ARGV( arg0 + 3 ) );
+				pos.z = (float)atof( CMD_ARGV( arg0 + 4 ) );
+				UTIL_SetOrigin( pEnt->pev, pos );
+				EFW_DebugPrint( ">>> efw_setpos %s %.0f %.0f %.0f", who, pos.x, pos.y, pos.z );
+				return 1;
+			}
+		}
+		if( CMD_ARGC() > arg0 + 3 )
+		{
+			Vector pos;
+			pos.x = (float)atof( CMD_ARGV( arg0 + 1 ) );
+			pos.y = (float)atof( CMD_ARGV( arg0 + 2 ) );
+			pos.z = (float)atof( CMD_ARGV( arg0 + 3 ) );
+			EFW_Relocate( pPlayer, pos );
+		}
+		else if( CMD_ARGC() > arg0 + 1 )
+		{
+			CBaseEntity *pEnt = EFW_FindGoto( CMD_ARGV( arg0 + 1 ) );
+			if( pEnt )
+			{
+				Vector pos = EFW_Place( pEnt );
+				const char *cn = STRING( pEnt->pev->classname );
+				const char *nm = CMD_ARGV( arg0 + 1 );
+				/* IdleThink walks when 100 < dist < 300; TalkScan sphere is
+				   123 (0x42f60000). 150 put the pawn outside DAT_10134940 so
+				   FUN_100c7820 always printed "Ignoring spider". */
+				if( cn && !strncmp( cn, "monster_", 8 ) )
+					pos = pos + Vector( 110.0f, 0.0f, 8.0f );
+				EFW_Relocate( pPlayer, pos );
+				if( cn && !strncmp( cn, "monster_", 8 ) )
+				{
+					Vector look = EFW_Place( pEnt );
+					look.z += 36.0f;
+					EFW_Face( pPlayer, look );
+				}
+				if( cn && !strncmp( cn, "trigger_", 8 ) )
+					pEnt->Touch( pPlayer );
+				/* FUN_100c7da0: named GateFSM targets fire from trigger
+				   Touch; WASM setpos stands in for walking into the brush. */
+				if( nm && !strncmp( nm, "efw_", 4 ) )
+					EFW_FireTargets( nm, pPlayer, pPlayer, USE_TOGGLE, 0 );
+			}
+			else
+			{
+				const char *nm = CMD_ARGV( arg0 + 1 );
+				EFW_DebugPrint( ">>> efw_setpos (not found) %s", nm );
+				/* WASM stand-in: GateFSM still runs when the brush is absent. */
+				if( nm && !strncmp( nm, "efw_", 4 ) )
+					EFW_FireTargets( nm, pPlayer, pPlayer, USE_TOGGLE, 0 );
+			}
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_diary" ) )
 	{
 		EFW_ToggleDiary();
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_yyerror" ) )
+	{
+		/* FUN_100c2620: bison yyerror via the Q/A parser on a junk token. */
+		EfwScript dummy;
+		EfwScript_SetErrorFn( EFW_YyError );
+		EfwScript_Parse( &dummy, "yyerror", "GARBAGE TOKEN\n", -1 );
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_flexfatal" ) )
+	{
+		/* FUN_100c1f20/2220/22b0/2410/20a0: PE fatal scanner strings. */
+		EfwScript_SetFlexFn( EFW_FlexMsg );
+		EfwScript_FlexProbe();
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_diary_next" ) )
@@ -300,21 +1036,38 @@ int EFW_ClientCommand( edict_t *pEntity )
 	}
 	if( FStrEq( pcmd, "efw_HelpScreen" ) )
 	{
-		EFW_FailOrNarrate( pPlayer, 0x47 );
+		EFW_FailOrNarrate( pPlayer, 0x52 ); /* ClientCommand 0x1001baab push 0x52 */
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_HideUnderBuilding" ) )
+	{
+		EFW_HideUnderBuilding( pPlayer );
 		return 1;
+	}
 	if( FStrEq( pcmd, "efw_PickupPliers" ) )
 	{
-		EFW_Squark( "efw_electrician" );
-		EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		if( EFW_ElectricianSees( pPlayer ) )
+			EFW_Squark( "efw_electrician", "Oi! Put that back!", 10 );
+		else
+			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
+		{
+			static int s_pick;
+			if( !s_pick )
+			{
+				s_pick = 1;
+				EFW_DebugPrint( ">>> FUN_100c4700 models/w_pliers.mdl" );
+			}
+		}
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )
 	{
-		int on = EFW_GetHudInt( 6 ) ? 0 : 1;
-		EFW_SetHudInt( 6, on );
+		int on = 1;
+		if( CMD_ARGC() > arg0 + 1 )
+			on = atoi( CMD_ARGV( arg0 + 1 ) ) != 0;
+		else
+			on = EFW_GetHudInt( 6 ) ? 0 : 1;
+		EFW_SetPause( on );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_set_state" ) )
@@ -324,7 +1077,18 @@ int EFW_ClientCommand( edict_t *pEntity )
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_changelevel" ) )
+	{
+		if( CMD_ARGC() > arg0 + 1 )
+			EFW_ChangeLevel( CMD_ARGV( arg0 + 1 ) );
 		return 1;
+	}
+	if( FStrEq( pcmd, "efw_GetPackage" )
+		|| FStrEq( pcmd, "efw_EndMailPickupMessage" )
+		|| FStrEq( pcmd, "efw_TriggerMailPickupMessage" ) )
+	{
+		EFW_ServerCommand( pPlayer, pcmd );
+		return 1;
+	}
 	return 0;
 }
 

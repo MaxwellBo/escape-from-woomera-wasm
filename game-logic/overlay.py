@@ -50,9 +50,15 @@ def main() -> None:
             "dlls/gamerules.cpp",
             "dlls/multiplay_gamerules.cpp",
             "dlls/barney.cpp",
+            "dlls/cbase.cpp",
+            "dlls/subs.cpp",
+            "dlls/world.cpp",
+            "dlls/weapons.cpp",
+            "dlls/util.cpp",
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
             "cl_dll/input.cpp",
+            "cl_dll/cdll_int.cpp",
         ]
         subprocess.run(["git", "-C", str(sdk), "checkout", "--", *tracked], check=False)
     for leftover in (
@@ -76,6 +82,7 @@ def main() -> None:
         "efw_clientcmd.cpp": dlls / "efw_clientcmd.cpp",
         "efw_entities.cpp": dlls / "efw_entities.cpp",
         "efw_weapons.cpp": dlls / "efw_weapons.cpp",
+        "efw_world.cpp": dlls / "efw_world.cpp",
         "hud_efw.cpp": cldll / "hud_efw.cpp",
     }
     for src_name, dest in copies.items():
@@ -92,7 +99,8 @@ def main() -> None:
         "\tefw_conversation.cpp\n"
         "\tefw_clientcmd.cpp\n"
         "\tefw_entities.cpp\n"
-        "\tefw_weapons.cpp\n",
+        "\tefw_weapons.cpp\n"
+        "\tefw_world.cpp\n",
     )
 
     cmake_cl = cldll / "CMakeLists.txt"
@@ -128,6 +136,43 @@ def main() -> None:
         "\tentvars_t *pev = &pEntity->v;\n"
         f"\tif( EFW_ClientCommand( pEntity ) ) {MARKER}\n"
         "\t\treturn;\n",
+    )
+    once(
+        client_cpp,
+        "void ServerDeactivate( void )\n"
+        "{\n"
+        "	//ALERT( at_console, \"ServerDeactivate()\\n\" );\n",
+        "void ServerDeactivate( void )\n"
+        "{\n"
+        f"	EFW_OnServerDeactivate(); {MARKER}\n"
+        "	//ALERT( at_console, \"ServerDeactivate()\\n\" );\n",
+    )
+    once(
+        client_cpp,
+        "void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )\n"
+        "{\n"
+        "	int		i;\n"
+        "	CBaseEntity	*pClass;\n"
+        "\n"
+        "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
+        "void ServerActivate( edict_t *pEdictList, int edictCount, int clientMax )\n"
+        "{\n"
+        "	int		i;\n"
+        "	CBaseEntity	*pClass;\n"
+        "\n"
+        f"	EFW_OnServerActivate(); {MARKER}\n"
+        "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
+    )
+    once(
+        client_cpp,
+        "void StartFrame( void )\n"
+        "{\n"
+        "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",
+        "void StartFrame( void )\n"
+        "{\n"
+        f"	EFW_StartFrame(); {MARKER}\n"
+        f"	EFW_RunQueuedChangeLevel(); {MARKER}\n"
+        "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",
     )
 
     player_cpp = dlls / "player.cpp"
@@ -219,6 +264,142 @@ def main() -> None:
         "}\n",
     )
 
+    subs = dlls / "subs.cpp"
+    once(
+        subs,
+        '#include "doors.h"\n',
+        '#include "doors.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        subs,
+        "void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )\n"
+        "{\n"
+        "	edict_t *pentTarget = NULL;\n"
+        "	if( !targetName )\n"
+        "		return;\n",
+        "void FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value )\n"
+        "{\n"
+        "	edict_t *pentTarget = NULL;\n"
+        "	if( !targetName )\n"
+        "		return;\n"
+        f"	if( EFW_FireTargets( targetName, pActivator, pCaller, (int)useType, value ) ) {MARKER}\n"
+        "		return;\n",
+    )
+
+    cbase_cpp = dlls / "cbase.cpp"
+    once(
+        cbase_cpp,
+        '#include\t"game.h"\n',
+        '#include\t"game.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        cbase_cpp,
+        "\t\tpEntity->Spawn();\n"
+        "\n"
+        "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
+        f"\t\tEFW_OnDispatchSpawn( pent ); {MARKER}\n"
+        f"\t\tif( EFW_ShouldSpawn( pent ) )\n"
+        "\t\t\tpEntity->Spawn();\n"
+        "\n"
+        "\t\t// Try to get the pointer again, in case the spawn function deleted the entity.\n",
+    )
+    once(
+        cbase_cpp,
+        "\treturn 0;\n"
+        "}\n"
+        "\n"
+        "void DispatchKeyValue( edict_t *pentKeyvalue, KeyValueData *pkvd )\n",
+        f"\tif( EFW_RejectSpawn( pent ) ) {MARKER}\n"
+        "\t\treturn -1;\n"
+        "\treturn 0;\n"
+        "}\n"
+        "\n"
+        "void DispatchKeyValue( edict_t *pentKeyvalue, KeyValueData *pkvd )\n",
+    )
+
+    world_cpp = dlls / "world.cpp"
+    once(
+        world_cpp,
+        '#include "teamplay_gamerules.h"\n',
+        '#include "teamplay_gamerules.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        world_cpp,
+        "void CWorld::Precache( void )\n"
+        "{\n"
+        "	g_pLastSpawn = NULL;\n",
+        "void CWorld::Precache( void )\n"
+        "{\n"
+        f"	if( !EFW_BeginWorldPrecache() ) {MARKER}\n"
+        "		return;\n"
+        "	g_pLastSpawn = NULL;\n",
+    )
+    once(
+        world_cpp,
+        "		CVAR_SET_FLOAT( \"mp_defaultteam\", 0.0f );\n"
+        "	}\n"
+        "}\n",
+        "		CVAR_SET_FLOAT( \"mp_defaultteam\", 0.0f );\n"
+        "	}\n"
+        f"	EFW_EndWorldPrecache(); {MARKER}\n"
+        "}\n",
+    )
+
+    weapons_cpp = dlls / "weapons.cpp"
+    once(
+        weapons_cpp,
+        '#include "gamerules.h"\n',
+        '#include "gamerules.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        weapons_cpp,
+        "void UTIL_PrecacheOtherWeapon( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+        "void UTIL_PrecacheOtherWeapon( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        f"	if( !EFW_PrecacheOnce( szClassname ) ) {MARKER}\n"
+        "		return;\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+    )
+    once(
+        weapons_cpp,
+        "	g_sModelIndexFireball = PRECACHE_MODEL( \"sprites/zerogxplode.spr\" );// fireball\n",
+        f"	EFW_WPrecache(); {MARKER}\n"
+        "	g_sModelIndexFireball = PRECACHE_MODEL( \"sprites/zerogxplode.spr\" );// fireball\n",
+    )
+
+    util_cpp = dlls / "util.cpp"
+    once(
+        util_cpp,
+        '#include "byteswap.h"\n',
+        '#include "byteswap.h"\n'
+        f'#include "efw.h" {MARKER}\n',
+    )
+    once(
+        util_cpp,
+        "void UTIL_PrecacheOther( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+        "void UTIL_PrecacheOther( const char *szClassname )\n"
+        "{\n"
+        "	edict_t	*pent;\n"
+        "\n"
+        f"	if( !EFW_PrecacheOnce( szClassname ) ) {MARKER}\n"
+        "		return;\n"
+        "	pent = CREATE_NAMED_ENTITY( MAKE_STRING( szClassname ) );\n",
+    )
+
     barney = dlls / "barney.cpp"
     once(
         barney,
@@ -230,7 +411,10 @@ def main() -> None:
         barney,
         '\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
         "\tUTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );\n",
-        '\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
+        '\tif( !EFW_DeferStudio() )\n'
+        '\t\tSET_MODEL( ENT( pev ), "models/barney.mdl" );\n'
+        '\telse\n'
+        '\t\tpev->model = MAKE_STRING( "models/barney.mdl" );\n'
         f"\tEFW_OverrideNpcModel( this ); {MARKER}\n"
         "\tUTIL_SetSize( pev, VEC_HUMAN_HULL_MIN, VEC_HUMAN_HULL_MAX );\n",
     )
@@ -275,6 +459,45 @@ def main() -> None:
         "\tm_Flash.Init();\n",
         "\tm_Flash.Init();\n"
         f"\tm_Efw.Init(); {MARKER}\n",
+    )
+
+    cdll_int = cldll / "cdll_int.cpp"
+    once(
+        cdll_int,
+        "int DLLEXPORT HUD_Redraw( float time, int intermission )\n"
+        "{\n"
+        "	gHUD.Redraw( time, intermission );\n"
+        "\n"
+        "	return 1;\n"
+        "}\n",
+        "int DLLEXPORT HUD_Redraw( float time, int intermission )\n"
+        "{\n"
+        "	static int s_efwRedraw;\n"
+        "	s_efwRedraw++;\n"
+        "	if( s_efwRedraw <= 32 || ( s_efwRedraw % 120 ) == 1 )\n"
+        "		gEngfuncs.Con_Printf( \"efw: HUD_Redraw n=%d\\n\", s_efwRedraw );\n"
+        "	/* TeamFortressViewport paint overflows after skip expires.\n"
+        "	   EFW widgets plus the HTML overlay are the VGUI stand-in. */\n"
+        "	gHUD.m_Efw.Draw( time );\n"
+        "	if( s_efwRedraw <= 8 || ( s_efwRedraw % 120 ) == 1 )\n"
+        "		gEngfuncs.Con_Printf( \"efw: HUD_Redraw skip n=%d\\n\", s_efwRedraw );\n"
+        "	return 1;\n"
+        "}\n",
+    )
+    once(
+        cdll_int,
+        "void DLLEXPORT HUD_Frame( double time )\n"
+        "{\n"
+        "	GetClientVoiceMgr()->Frame(time);\n"
+        "}\n",
+        "void DLLEXPORT HUD_Frame( double time )\n"
+        "{\n"
+        "	static int s_efwFrame;\n"
+        "	s_efwFrame++;\n"
+        "	if( s_efwFrame <= 32 )\n"
+        "		return;\n"
+        "	GetClientVoiceMgr()->Frame(time);\n"
+        "}\n",
     )
 
     input_cpp = cldll / "input.cpp"
