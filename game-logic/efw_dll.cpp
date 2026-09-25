@@ -10,6 +10,7 @@
 #include "weapons.h"
 #include "client.h"
 #include "efw_dll.h"
+#include "efw_persist.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -914,6 +915,16 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		nLines = 0;
 	if( nLines > 6 )
 		nLines = 6;
+	/* FUN_100c6e20: dword strcpy of ShowMenu line pointers into the
+	   DAT_10132cd0..DAT_10134058 slots. WASM uses strncpy. */
+	{
+		static int s_cpy;
+		if( !s_cpy )
+		{
+			s_cpy = 1;
+			EFW_DebugPrint( ">>> FUN_100c6e20" );
+		}
+	}
 	for( i = 0; i < EFW_MENU_LINES; i++ )
 		st->menuText[i][0] = '\0';
 	for( i = 0; i < nLines; i++ )
@@ -1308,29 +1319,95 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 		EFW_ServerCommand( pPlayer, arg );
 }
 
+static void EFW_ClearKeywords( void )
+{
+	/* FUN_100c3370: wipe the keyword RB-tree. FUN_100c3180 is the
+	   map ctor (DAT_10132c80 header + 0x24-byte sentinel node). */
+	{
+		static int s_tree;
+		if( !s_tree )
+		{
+			s_tree = 1;
+			EFW_DebugPrint( ">>> FUN_100c3180" );
+			EFW_DebugPrint( ">>> FUN_100c3240" );
+		}
+	}
+	g_efw.keywordCount = 0;
+	memset( g_efw.keywords, 0, sizeof( g_efw.keywords ) );
+	memset( g_efw.keywordUnlocked, 0, sizeof( g_efw.keywordUnlocked ) );
+}
+
+static void EFW_RestoreInventory( CBasePlayer *pPlayer )
+{
+	static const struct
+	{
+		int bit;
+		const char *name;
+	} kItems[] = {
+		{ EFW_ITEM_PLIERS, "weapon_efw_Pliers" },
+		{ EFW_ITEM_LEVER, "weapon_efw_Lever" },
+		{ EFW_ITEM_BRANCH, "weapon_efw_Branch" },
+		{ EFW_ITEM_PHONE, "weapon_efw_MobilePhone" },
+		{ EFW_ITEM_IDTAG, "weapon_efw_IDTag" },
+		{ EFW_ITEM_REDCARD, "weapon_efw_RedPhoneCard" },
+		{ EFW_ITEM_GREENCARD, "weapon_efw_GreenPhoneCard" },
+		{ EFW_ITEM_BLUECARD, "weapon_efw_BluePhoneCard" },
+		{ EFW_ITEM_POWDER, "weapon_efw_WashingPowder" }
+	};
+	unsigned i;
+	int saved;
+
+	if( !pPlayer )
+		return;
+	saved = g_efw.items;
+	for( i = 0; i < sizeof( kItems ) / sizeof( kItems[0] ); i++ )
+	{
+		if( saved & kItems[i].bit )
+			EFW_GiveItem( pPlayer, kItems[i].bit, kItems[i].name );
+	}
+}
+
 void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 {
 	int level;
-	memset( &g_efw, 0, sizeof( g_efw ) );
+	int resetHope;
+	int keptItems;
+	int keptKeywords;
+
+	level = EFW_MapLevel();
+	/* FUN_100c6780: level1 sets DAT_1011d14c, then 6740 clears it. */
+	if( level == 0 )
+		g_efw.persistLatch = 1;
+	resetHope = EFW_ShouldResetHope( level, g_efw.persistLatch, g_efw.inited );
+	keptItems = g_efw.items;
+	keptKeywords = g_efw.keywordCount;
 	EFW_SetPlayer( pPlayer );
 	{
-		static int s_init;
-		if( !s_init )
-		{
-			s_init = 1;
-			EFW_DebugPrint( ">>> FUN_100c6740 hud0=100 hud1=80" );
-			EFW_DebugPrint( ">>> FUN_100c6780" );
-		}
+		EFW_DebugPrint( ">>> FUN_100c6780 persist=%d reset=%d level=%d items=%d keywords=%d",
+			g_efw.persistLatch, resetHope, level, keptItems, keptKeywords );
 	}
-	EFW_SetHudFloat( 0, 100.0f ); /* FUN_100c8180(0, 0x42c80000) */
-	EFW_SetHudFloat( 1, 80.0f );  /* FUN_100c8180(1, 0x42a00000) */
-	/* FUN_100c6740 tail: FUN_100c2bf0 zeros the drop-item table. */
-	EFW_DropTableReset();
-	(void)EFW_DropTableFind( NULL );
-	(void)EFW_DropTableHas( pPlayer, WEAPON_EFW_PLIERS );
+	if( resetHope )
+	{
+		/* FUN_100c6740: hope 100/80, drop table, keyword tree. */
+		EFW_DebugPrint( ">>> FUN_100c6740 hud0=100 hud1=80" );
+		EFW_SetHudFloat( 0, 100.0f ); /* FUN_100c8180(0, 0x42c80000) */
+		EFW_SetHudFloat( 1, 80.0f );  /* FUN_100c8180(1, 0x42a00000) */
+		EFW_DropTableReset();
+		(void)EFW_DropTableFind( NULL );
+		(void)EFW_DropTableHas( pPlayer, WEAPON_EFW_PLIERS );
+		EFW_ClearKeywords();
+		EFW_DebugPrint( ">>> FUN_100c3370" );
+		g_efw.hopeFailed = 0;
+		g_efw.persistLatch = 0;
+	}
+	/* Do not memset g_efw: keywords, items, hope, and seen persist across
+	   changelevel the same way DAT_1011d14c skips 6740 on chapter 2/3. */
 	g_efw.lastTime = gpGlobals->time;
+	g_efw.hopeClock = gpGlobals->time;
+	g_efw.dt = 0.0f;
 	g_efw.hideDist = EFW_HIDE_DIST;
 	g_efw.diaryPending = -1;
+	g_efw.mapLevel = level;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
 	EFW_LoadAllConversations();
 	{
@@ -1355,9 +1432,12 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	/* FUN_100c3430: conversation engine checks seeded ESCAPE after LoadAll. */
 	(void)EFW_HasKeyword( "ESCAPE" );
 	(void)EFW_HasKeyword( "GREET" );
+	/* FUN_100c6780 zeros DAT_10134870 then re-seeds diary pages. */
+	g_efw.diaryCount = 0;
+	memset( g_efw.diaryPages, 0, sizeof( g_efw.diaryPages ) );
+	g_efw.diaryFlags[0] = 0;
 	EFW_AddDiary( 0, 2 );
 	EFW_AddDiary( 1, 2 );
-	level = EFW_MapLevel();
 	if( level == 1 || level == 2 )
 	{
 		int p;
@@ -1375,7 +1455,12 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 			EFW_DebugPrint( ">>> FUN_100c6920 page=%d", EFW_GetHudInt( 0 ) );
 		}
 	}
-	/* FUN_100c3020 starting loadout by maplevel. */
+	/* FUN_100c7810 zeros TalkScan count DAT_10134940 on every map start. */
+	EFW_DebugPrint( ">>> FUN_100c7810" );
+	g_efw.scanCount = 0;
+	memset( g_efw.scan, 0, sizeof( g_efw.scan ) );
+	/* New pawn after changelevel: re-give persisted bits, then FUN_100c3020. */
+	EFW_RestoreInventory( pPlayer );
 	{
 		static int s_loadout;
 		if( !s_loadout )
@@ -1386,23 +1471,23 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	}
 	if( pPlayer )
 	{
-		if( level == 0 )
-		{
+		int loadout = EFW_LoadoutBits( level );
+		if( loadout & EFW_ITEM_IDTAG )
 			EFW_GiveItem( pPlayer, EFW_ITEM_IDTAG, "weapon_efw_IDTag" );
+		if( loadout & EFW_ITEM_REDCARD )
 			EFW_GiveItem( pPlayer, EFW_ITEM_REDCARD, "weapon_efw_RedPhoneCard" );
-		}
-		else if( level == 1 )
+		if( loadout & EFW_ITEM_LEVER )
 			EFW_GiveItem( pPlayer, EFW_ITEM_LEVER, "weapon_efw_Lever" );
-		else if( level == 2 )
-		{
+		if( loadout & EFW_ITEM_PLIERS )
 			EFW_GiveItem( pPlayer, EFW_ITEM_PLIERS, "weapon_efw_Pliers" );
-		}
 	}
 	/* FUN_100c27f0 always MapLevel-checks; only materializes on level 2. */
 	EFW_SpawnFenceTag();
 	g_efw.inited = 1;
 	(void)EFW_DiaryCount();
 	EFW_SendHudState();
+	EFW_DebugPrint( ">>> persist hope=%.1f items=%d keywords=%d reset=%d level=%d latch=%d",
+		EFW_GetHudFloat( 1 ), g_efw.items, g_efw.keywordCount, resetHope, level, g_efw.persistLatch );
 }
 
 static void EFW_HostFwd( void )
@@ -1429,6 +1514,19 @@ static void EFW_HostFwd( void )
 		}
 		else
 			EFW_LatchInUse();
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_move" ) )
+	{
+		int fwd = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		int side = ( CMD_ARGC() > 2 ) ? atoi( CMD_ARGV( 2 ) ) : 0;
+		EFW_LatchMove( fwd, side );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_turn" ) )
+	{
+		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
+		EFW_LatchTurn( yaw );
 		return;
 	}
 	if( e && !e->free && e->pvPrivateData )
@@ -1586,6 +1684,8 @@ static void EFW_HostFwd( void )
 		const char *who = ( CMD_ARGC() > 1 ) ? CMD_ARGV( 1 ) : NULL;
 		if( who && who[0] )
 			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+		if( !pEnt && g_efw.scanCount && g_efw.scan[0].type == 0 && g_efw.scan[0].name[0] )
+			pEnt = UTIL_FindEntityByTargetname( NULL, g_efw.scan[0].name );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
@@ -1674,6 +1774,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
+		"efw_move", "efw_turn",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -1813,10 +1914,42 @@ static int s_liveTicks;
 static int s_inUseLatch; /* HostFwd efw_inuse → PreThink IN_USE */
 static int s_menuKeyLatch; /* FUN_100c6a50 GetAsyncKeyState stand-in */
 static int s_walkOn; /* DROP_TO_FLOOR succeeded; stop forcing noclip */
+static int s_bindDone; /* all deferred studios have a MODEL_INDEX */
+static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
+static int s_moveSide;
+static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
 {
 	s_inUseLatch = 1;
+}
+
+void EFW_LatchMove( int fwd, int side )
+{
+	if( fwd > 1 )
+		fwd = 1;
+	if( fwd < -1 )
+		fwd = -1;
+	if( side > 1 )
+		side = 1;
+	if( side < -1 )
+		side = -1;
+	s_moveFwd = fwd;
+	s_moveSide = side;
+}
+
+void EFW_LatchTurn( float yawDelta )
+{
+	CBasePlayer *pPlayer = EFW_Player();
+	if( !pPlayer || yawDelta == 0.0f )
+		return;
+	pPlayer->pev->angles.y += yawDelta;
+	while( pPlayer->pev->angles.y > 180.0f )
+		pPlayer->pev->angles.y -= 360.0f;
+	while( pPlayer->pev->angles.y < -180.0f )
+		pPlayer->pev->angles.y += 360.0f;
+	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	pPlayer->pev->fixangle = 1;
 }
 
 void EFW_LatchMenuKey( int slot )
@@ -1965,8 +2098,31 @@ static int EFW_ModelLooksDetainee( const char *model )
 	return strstr( lower, "detainee" ) != NULL;
 }
 
-/* SET_MODEL of detainee studios stalls WASM. Bind MODEL_INDEX + IdleThink
-   one entity per StartFrame after the pawn is live. */
+static int EFW_ModelLooksStudioNpc( const char *model )
+{
+	char lower[80];
+	int n = 0;
+	int c;
+
+	if( !model )
+		return 0;
+	for( c = 0; model[c] && n < (int)sizeof( lower ) - 1; c++ )
+	{
+		char ch = model[c];
+		if( ch >= 'A' && ch <= 'Z' )
+			ch = (char)( ch + 32 );
+		lower[n++] = ch;
+	}
+	lower[n] = 0;
+	return strstr( lower, "detainee" ) != NULL
+		|| strstr( lower, "security" ) != NULL
+		|| strstr( lower, "tradesman" ) != NULL
+		|| strstr( lower, "barney" ) != NULL
+		|| strstr( lower, "scientist" ) != NULL;
+}
+
+/* SET_MODEL of detainee/security studios stalls WASM. Bind MODEL_INDEX +
+   IdleThink/PatrolThink one entity per StartFrame after the pawn is live. */
 static int EFW_BindOneDetainee( void )
 {
 	int i;
@@ -1975,10 +2131,14 @@ static int EFW_BindOneDetainee( void )
 	{
 		edict_t *pent;
 		const char *model;
+		const char *cn;
 		int idx;
+		int isMonster;
 
 		pent = INDEXENT( i );
 		if( !pent || pent->free )
+			continue;
+		if( pent->v.flags & FL_CLIENT )
 			continue;
 		if( pent->v.modelindex > 0 )
 			continue;
@@ -1989,7 +2149,9 @@ static int EFW_BindOneDetainee( void )
 			continue;
 		if( !strstr( model, ".mdl" ) )
 			continue;
-		if( !EFW_ModelLooksDetainee( model ) )
+		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+		isMonster = cn[0] && !strncmp( cn, "monster_", 8 );
+		if( !isMonster && !EFW_ModelLooksStudioNpc( model ) && !EFW_ModelLooksDetainee( model ) )
 			continue;
 		idx = MODEL_INDEX( (char *)model );
 		if( idx <= 0 )
@@ -2001,7 +2163,7 @@ static int EFW_BindOneDetainee( void )
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
-				i, pent->v.classname ? STRING( pent->v.classname ) : "?", idx );
+				i, cn[0] ? cn : "?", idx );
 			EFW_LogLine( line );
 		}
 		EFW_EnableNpcThink( pent );
@@ -2041,9 +2203,108 @@ static void EFW_PulseRefugeeThinks( void )
 	if( n && ( s_liveTicks <= 12 || ( s_liveTicks % 40 ) == 0 ) )
 	{
 		char line[80];
-		snprintf( line, sizeof( line ), "efw: pulse IdleThink n=%d live=%d\n", n, s_liveTicks );
+		snprintf( line, sizeof( line ), "efw: pulse NpcThink n=%d live=%d\n", n, s_liveTicks );
 		EFW_LogLine( line );
 	}
+}
+
+static int EFW_SnapToPlayerStart( CBasePlayer *pPlayer )
+{
+	CBaseEntity *pStart;
+	Vector origin;
+	Vector angles;
+
+	if( !pPlayer )
+		return 0;
+	pStart = UTIL_FindEntityByClassname( NULL, "info_player_start" );
+	if( pStart )
+	{
+		origin = pStart->pev->origin;
+		angles = pStart->pev->angles;
+	}
+	else
+	{
+		/* Barracks info_player_start on efw_prototype_level1. */
+		origin = Vector( 1792, -2136, 64 );
+		angles = Vector( 0, 90, 0 );
+	}
+	pPlayer->pev->origin = origin;
+	pPlayer->pev->angles = angles;
+	pPlayer->pev->v_angle = angles;
+	pPlayer->pev->fixangle = 1;
+	pPlayer->pev->velocity = g_vecZero;
+	UTIL_SetOrigin( pPlayer->pev, origin );
+	{
+		char line[128];
+		snprintf( line, sizeof( line ),
+			"efw: snap info_player_start origin=%.0f %.0f %.0f yaw=%.0f\n",
+			origin.x, origin.y, origin.z, angles.y );
+		EFW_LogLine( line );
+	}
+	return DROP_TO_FLOOR( pPlayer->edict() );
+}
+
+static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
+{
+	float dt;
+	Vector delta;
+	Vector dest;
+	static int s_moveN;
+
+	if( !pPlayer || !s_walkOn )
+		return;
+	if( EFW_GetHudInt( 6 ) )
+		return;
+	if( !s_moveFwd && !s_moveSide )
+		return;
+	dt = g_efw.dt;
+	if( dt <= 0.0f )
+		dt = 0.12f;
+	if( dt > 0.2f )
+		dt = 0.2f;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	delta = gpGlobals->v_forward * (float)s_moveFwd + gpGlobals->v_right * (float)s_moveSide;
+	delta.z = 0.0f;
+	{
+		float len = delta.Length();
+		if( len < 0.01f )
+			return;
+		delta = delta * ( ( 220.0f * dt ) / len );
+	}
+	dest = pPlayer->pev->origin + delta;
+	pPlayer->pev->origin = dest;
+	pPlayer->pev->velocity = delta * ( 1.0f / dt );
+	pPlayer->pev->flags |= FL_ONGROUND;
+	UTIL_SetOrigin( pPlayer->pev, dest );
+	s_moveN++;
+	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
+	{
+		char line[128];
+		snprintf( line, sizeof( line ),
+			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d\n",
+			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, s_moveFwd, s_moveSide );
+		EFW_LogLine( line );
+	}
+}
+
+static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
+{
+	char line[128];
+
+	if( s_presentOn || !pPlayer )
+		return;
+	s_presentOn = 1;
+	CVAR_SET_FLOAT( "r_norefresh", 0.0f );
+	CVAR_SET_FLOAT( "r_drawworld", 1.0f );
+	CVAR_SET_FLOAT( "r_drawentities", 1.0f );
+	CVAR_SET_FLOAT( "r_fullbright", 1.0f );
+	CVAR_SET_FLOAT( "r_novis", 1.0f );
+	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 1\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
+	CLIENT_COMMAND( pPlayer->edict(), "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\n" );
+	snprintf( line, sizeof( line ),
+		"efw: world present live=%d origin=%.0f %.0f %.0f\n",
+		s_liveTicks, pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
+	EFW_LogLine( line );
 }
 
 void EFW_StartFrame( void )
@@ -2091,14 +2352,15 @@ void EFW_StartFrame( void )
 		s_hudPulse++;
 		EFW_SendHudState();
 		EFW_PollMenuKeys();
-		EFW_BindOneDetainee();
+		if( !s_bindDone && !EFW_BindOneDetainee() )
+			s_bindDone = 1;
 		EFW_PulseRefugeeThinks();
 		EFW_PulseWorld( pLive );
 	}
 	/* After HUD_Redraw has proven ca_active, DROP_TO_FLOOR then WALK.
 	   dll119 kept noclip forever because dropping it at live>=45 without a
-	   hull put the pawn in the void. SET_MODEL of barney/Security.mdl
-	   still wiped WebGL2 present, so remaining unbound studios stay frozen. */
+	   hull put the pawn in the void. Remaining studios bind via MODEL_INDEX
+	   one per frame (SET_MODEL of Security.mdl still wipes WebGL2). */
 	{
 		int j;
 		CBasePlayer *pPlayer = EFW_Player();
@@ -2110,35 +2372,44 @@ void EFW_StartFrame( void )
 				pPlayer->pev->movetype = MOVETYPE_WALK;
 			else if( s_liveTicks >= 16 )
 			{
+				int dropped;
 				pPlayer->pev->solid = SOLID_SLIDEBOX;
 				UTIL_SetSize( pPlayer->pev, VEC_HULL_MIN, VEC_HULL_MAX );
-				if( DROP_TO_FLOOR( pPlayer->edict() ) )
+				dropped = DROP_TO_FLOOR( pPlayer->edict() );
+				if( !dropped && s_liveTicks < 24 )
+					pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+				else
 				{
+					if( !dropped )
+						dropped = EFW_SnapToPlayerStart( pPlayer );
 					s_walkOn = 1;
 					pPlayer->pev->movetype = MOVETYPE_WALK;
 					pPlayer->pev->flags |= FL_ONGROUND;
 					pPlayer->pev->velocity = g_vecZero;
 					/* info_player_start angles "0 90 0" — look +Y into the barracks. */
-					pPlayer->pev->angles = Vector( 0, 90, 0 );
+					if( pPlayer->pev->angles.y == 0.0f && pPlayer->pev->angles.x == 0.0f )
+						pPlayer->pev->angles = Vector( 0, 90, 0 );
 					pPlayer->pev->v_angle = pPlayer->pev->angles;
 					pPlayer->pev->fixangle = 1;
 					{
-						char pos[96];
+						char pos[128];
 						snprintf( pos, sizeof( pos ),
-							"efw: DROP_TO_FLOOR ok — MOVETYPE_WALK origin=%.0f %.0f %.0f yaw=90\n",
-							pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
+							"efw: DROP_TO_FLOOR %s — MOVETYPE_WALK origin=%.0f %.0f %.0f yaw=%.0f\n",
+							dropped ? "ok" : "snap",
+							pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z,
+							pPlayer->pev->angles.y );
 						EFW_LogLine( pos );
 					}
-				}
-				else
-				{
-					pPlayer->pev->movetype = MOVETYPE_NOCLIP;
-					if( s_liveTicks == 16 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
-						EFW_LogLine( "efw: DROP_TO_FLOOR miss — keep noclip (NOHANG)\n" );
+					EFW_ForceWorldPresent( pPlayer );
 				}
 			}
 			else
 				pPlayer->pev->movetype = MOVETYPE_NOCLIP;
+			if( s_walkOn )
+			{
+				EFW_ApplyLatchedMove( pPlayer );
+				EFW_ForceWorldPresent( pPlayer );
+			}
 		}
 		EFW_FreezeNpcPhysics();
 		for( j = 1; j < EFW_MaxEnts(); j++ )
@@ -2157,18 +2428,17 @@ void EFW_StartFrame( void )
 				|| e->v.movetype == MOVETYPE_TOSS || e->v.movetype == MOVETYPE_WALK )
 				e->v.movetype = MOVETYPE_NONE;
 		}
-		if( s_liveTicks == 45 )
-			EFW_LogLine( "efw: skip remaining studio SET_MODEL (keep barracks present)\n" );
 		if( s_liveTicks <= 8 || s_liveTicks == 45 || ( s_liveTicks % 120 ) == 1 )
 		{
 			char line[128];
 			if( pPlayer )
 				snprintf( line, sizeof( line ),
-					"efw: StartFrame done live=%d walk=%d origin=%.0f %.0f %.0f\n",
-					s_liveTicks, s_walkOn,
+					"efw: StartFrame done live=%d walk=%d bind=%d origin=%.0f %.0f %.0f\n",
+					s_liveTicks, s_walkOn, s_bindDone,
 					pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z );
 			else
-				snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d\n", s_liveTicks, s_walkOn );
+				snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d bind=%d\n",
+					s_liveTicks, s_walkOn, s_bindDone );
 			EFW_LogLine( line );
 		}
 	}
@@ -2331,6 +2601,10 @@ void EFW_OnServerActivate( void )
 	s_studioDelay = 0;
 	s_liveTicks = 0;
 	s_walkOn = 0;
+	s_bindDone = 0;
+	s_presentOn = 0;
+	s_moveFwd = 0;
+	s_moveSide = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -2356,6 +2630,10 @@ void EFW_OnServerDeactivate( void )
 	s_studioDelay = 0;
 	s_liveTicks = 0;
 	s_walkOn = 0;
+	s_bindDone = 0;
+	s_presentOn = 0;
+	s_moveFwd = 0;
+	s_moveSide = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );

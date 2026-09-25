@@ -22,8 +22,10 @@
 
       <main class="layout">
         <section class="stage">
-          <div class="canvas-wrap">
+          <div class="viewport-frame">
+            <div class="canvas-wrap">
             <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="Game view"></canvas>
+            <div id="efw-hint" class="efw-hint">WASD move · Q/Z turn · E use · click the view for mouse</div>
             <div id="efw-hope" class="efw-hope" hidden>
               <span id="efw-hope-label">HOPE  80</span>
               <div id="efw-hope-ticks" class="efw-hope-ticks" aria-hidden="true"></div>
@@ -65,6 +67,7 @@
                 <div class="bar"><div id="veil-fill"></div></div>
               </div>
             </div>
+          </div>
           </div>
 
           <div class="controls">
@@ -138,9 +141,11 @@
               into hlsdk-portable WASM: hope starts at 80 and drains at
               <code>dt/12</code>, conversations from <code>Conversations/*.txt</code>
               hide past 200 units / 20s, diary, and map markers.
-              Press <strong>E</strong> or Talk to speak, <strong>Use</strong> on
-              workbenches and bins, <strong>Give</strong> to hand over an item,
-              number keys or 1–4 to pick a topic, <strong>I</strong> for the diary.
+              Click the game view, then <strong>WASD</strong> to walk,
+              <strong>Q/Z</strong> or arrows to turn, <strong>E</strong> or Talk
+              to speak, <strong>Use</strong> on workbenches and bins,
+              <strong>Give</strong> to hand over an item, number keys or 1–4 to
+              pick a topic, <strong>I</strong> for the diary.
             </p>
           </section>
           <section class="panel muted">

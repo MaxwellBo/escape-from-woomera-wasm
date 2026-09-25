@@ -72,6 +72,7 @@ struct EfwDllState
 	int items;
 	int mapLevel; /* FUN_100c5b80: 0 level1, 1 level2, 2 level3 */
 	int inited;
+	int persistLatch; /* DAT_1011d14c: FUN_100c6780 skip 6740 on chapter 2/3 */
 	int hopeFailed;
 	int scanCount; /* DAT_10134940 */
 	EfwScanSlot scan[EFW_MAX_SCAN]; /* DAT_101348b0 */
@@ -124,6 +125,8 @@ void EFW_TalkScan( void ); /* 0x100c7830 */
 void EFW_HtmlVguiSync( void ); /* FUN_10044f70 stand-in: TalkScan → /efwvgui.txt */
 void EFW_PollMenuKeys( void ); /* FUN_100c6a60 → FUN_100c69a0 GetAsyncKeyState */
 void EFW_LatchInUse( void ); /* HostFwd +use when usercmds do not flush */
+void EFW_LatchMove( int fwd, int side ); /* HostFwd WASD when usercmds do not flush */
+void EFW_LatchTurn( float yawDelta ); /* HostFwd Q/arrow look when usercmds do not flush */
 void EFW_LatchMenuKey( int slot ); /* FUN_100c6a50 */
 void EFW_SendCntxt( void ); /* 0x100c7d30 */
 void EFW_Squark( const char *targetname, const char *text = 0, int flags = 0 ); /* 0x100ba040 */
