@@ -1118,12 +1118,26 @@ void CPatrolGuard::PatrolThink( void )
 			float speed;
 			int moved;
 			delta.z = 0;
-			if( delta.Length() < 32.0f )
+			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
+			if( delta.Length() <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
 			{
-				if( !FStringNull( m_pGoalEnt->pev->target ) )
-					m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+				{
+					static int s_corner;
+					if( s_corner < 4 )
+					{
+						s_corner++;
+						EFW_DebugPrint( "corner advance %s dist=%.1f",
+							( tn && tn[0] ) ? tn : "?", delta.Length() );
+					}
+				}
+				m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+				if( m_pGoalEnt )
+				{
+					delta = m_pGoalEnt->pev->origin - pev->origin;
+					delta.z = 0;
+				}
 			}
-			else
+			if( m_pGoalEnt && delta.Length() > 8.0f )
 			{
 				if( m_Activity != ACT_WALK )
 					SetActivity( ACT_WALK );
@@ -1241,10 +1255,19 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		{
 			Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
 			delta.z = 0;
-			if( delta.Length() < 32.0f )
+			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
+			if( delta.Length() <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
 			{
-				if( !FStringNull( pMon->m_pGoalEnt->pev->target ) )
-					pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
+				{
+					static int s_corner;
+					if( s_corner < 4 )
+					{
+						s_corner++;
+						EFW_DebugPrint( "corner advance %s dist=%.1f",
+							tn, delta.Length() );
+					}
+				}
+				pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
 			}
 		}
 	}
@@ -1252,7 +1275,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 	{
 		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
 		delta.z = 0;
-		if( delta.Length() >= 32.0f && pMon->m_Activity != ACT_WALK )
+		if( delta.Length() > 8.0f && pMon->m_Activity != ACT_WALK )
 			pMon->SetActivity( ACT_WALK );
 	}
 	else if( pMon->m_Activity == ACT_RESET || pMon->m_Activity == ACT_WALK )
@@ -1276,7 +1299,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		float speed;
 		int moved;
 		delta.z = 0;
-		if( delta.Length() >= 32.0f )
+		if( delta.Length() > 8.0f )
 		{
 			speed = EFW_NpcGroundSpeed( pMon );
 			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed );
