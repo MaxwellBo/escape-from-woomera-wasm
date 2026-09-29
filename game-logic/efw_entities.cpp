@@ -177,9 +177,10 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
-/* Set while a step trace or SetOrigin is on the stack. IdleThink returns
-   immediately so a hull trace cannot re-enter the walk. */
+/* Set while the hull trace is on the stack. A second flag covers SetOrigin,
+   which can re-enter think; IdleThink must still finish or the flag sticks. */
 static int s_npcStep;
+static int s_npcLink;
 
 /* FUN_1005d500 / MoveExecute step. WALK_MOVE stalls Host_Frame on these
    studios. Trace the PE hull (-16..16, 0..72) and ignore other monsters so
@@ -198,7 +199,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	float step;
 	float savedMins;
 
-	if( !pev || s_npcStep )
+	if( !pev || s_npcStep || s_npcLink )
 		return 0;
 	delta = goal - pev->origin;
 	delta.z = 0.0f;
@@ -253,8 +254,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		return 0;
 	}
 	pev->angles.y = UTIL_VecToYaw( wish );
-	UTIL_SetOrigin( pev, landed );
 	s_npcStep = 0;
+	s_npcLink = 1;
+	UTIL_SetOrigin( pev, landed );
+	s_npcLink = 0;
 	return 1;
 }
 
@@ -280,8 +283,6 @@ void CRefugee::IdleThink( void )
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
 	pev->nextthink = gpGlobals->time;
-	if( s_npcStep )
-		return;
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
