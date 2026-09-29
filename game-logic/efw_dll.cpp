@@ -2109,7 +2109,8 @@ static void EFW_FreezeNpcPhysics( void )
 		if( pent->v.modelindex > 0
 			&& ( !strcmp( cn, "monster_refugee" )
 				|| !strcmp( cn, "monster_patrol_guard" )
-				|| !strcmp( cn, "monster_efw_guard" ) ) )
+				|| !strcmp( cn, "monster_efw_guard" )
+				|| !strcmp( cn, "monster_barney" ) ) )
 			continue;
 		pent->v.nextthink = 0;
 		pent->v.movetype = MOVETYPE_NONE;
@@ -2255,12 +2256,19 @@ static void EFW_PulseRefugeeThinks( void )
 			continue;
 		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
 		if( strcmp( cn, "monster_refugee" ) && strcmp( cn, "monster_patrol_guard" )
-			&& strcmp( cn, "monster_efw_guard" ) )
+			&& strcmp( cn, "monster_efw_guard" ) && strcmp( cn, "monster_barney" ) )
 			continue;
 		pEnt = CBaseEntity::Instance( pent );
 		if( !pEnt )
 			continue;
-		pEnt->Think();
+		if( !strcmp( cn, "monster_barney" ) )
+		{
+			CBaseMonster *pMon = pEnt->MyMonsterPointer();
+			if( pMon )
+				EFW_OfficerThink( pMon );
+		}
+		else
+			pEnt->Think();
 		n++;
 	}
 	if( n && ( s_liveTicks <= 12 || ( s_liveTicks % 40 ) == 0 ) )

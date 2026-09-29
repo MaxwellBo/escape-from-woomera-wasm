@@ -163,6 +163,7 @@ void EFW_WPrecache( void ); /* FUN_100b2f80 after HL weapons */
 void EFW_OnServerActivate( void );
 void EFW_OnServerDeactivate( void );
 void EFW_EnableNpcThink( edict_t *pent );
+void EFW_OfficerThink( CBaseMonster *pMon ); /* monster_barney: MonsterThink anim + path step, no WALK_MOVE */
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */

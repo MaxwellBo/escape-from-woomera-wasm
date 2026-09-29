@@ -1124,6 +1124,98 @@ void CPatrolGuard::Spawn( void )
 	}
 }
 
+/* monster_barney in the PE is this mod's officer/electrician, not a stock
+   security guard. Spawn's MonsterInit stores MonsterInitThink, which jumps
+   to StartMonster. StartMonster's DROP_TO_FLOOR and WALK_MOVE stall once
+   the studio is bound, so this is the safe tail: STEP, MonsterThink's
+   animation, and the path_corner walk StartMonster would schedule. */
+void EFW_OfficerThink( CBaseMonster *pMon )
+{
+	entvars_t *pev;
+	const char *tn;
+
+	if( !pMon )
+		return;
+	pev = pMon->pev;
+	if( !pev->modelindex || s_npcStep )
+		return;
+	tn = STRING( pev->targetname );
+	if( EFW_GetHudInt( 6 ) )
+	{
+		pev->framerate = 0.0f;
+		pev->movetype = MOVETYPE_NONE;
+		return;
+	}
+	pev->framerate = 1.0f;
+	pev->movetype = MOVETYPE_STEP;
+	{
+		static int s_mv;
+		if( !s_mv )
+		{
+			s_mv = 1;
+			EFW_DebugPrint( "officer movetype STEP" );
+		}
+	}
+	if( !FStringNull( pev->target ) )
+	{
+		if( !pMon->m_pGoalEnt )
+			pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
+		if( pMon->m_pGoalEnt )
+		{
+			Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+			delta.z = 0;
+			if( delta.Length() < 32.0f )
+			{
+				if( !FStringNull( pMon->m_pGoalEnt->pev->target ) )
+					pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
+			}
+		}
+	}
+	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
+	{
+		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+		delta.z = 0;
+		if( delta.Length() >= 32.0f && pMon->m_Activity != ACT_WALK )
+			pMon->SetActivity( ACT_WALK );
+	}
+	else if( pMon->m_Activity == ACT_RESET || pMon->m_Activity == ACT_WALK )
+	{
+		if( pMon->m_Activity != ACT_IDLE )
+			pMon->SetActivity( ACT_IDLE );
+	}
+	EFW_AdvanceNpcAnim( pMon, tn );
+	{
+		static int s_anim;
+		if( s_anim < 8 && EFW_FStrEq( tn, "efw_electrician" ) )
+		{
+			s_anim++;
+			EFW_DebugPrint( "officer anim %s seq=%d frame=%.2f act=%d mt=%d",
+				tn, pev->sequence, pev->frame, (int)pMon->m_Activity, pev->movetype );
+		}
+	}
+	if( pMon->m_pGoalEnt && pMon->m_Activity == ACT_WALK )
+	{
+		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+		float speed;
+		int moved;
+		delta.z = 0;
+		if( delta.Length() >= 32.0f )
+		{
+			speed = EFW_NpcGroundSpeed( pMon );
+			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed );
+			{
+				static int s_step;
+				if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
+				{
+					s_step++;
+					EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
+						tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
+				}
+			}
+		}
+	}
+}
+
 void EFW_EnableNpcThink( edict_t *pent )
 {
 	CBaseEntity *pEnt;
@@ -1155,6 +1247,15 @@ void EFW_EnableNpcThink( edict_t *pent )
 		pent->v.nextthink = gpGlobals->time;
 		/* Bind already set SOLID_BBOX. Leave it. PatrolThink sets
 		   MOVETYPE_STEP once the model index exists. */
+		pent->v.flags |= FL_MONSTER;
+		return;
+	}
+	if( !strcmp( cn, "monster_barney" ) )
+	{
+		/* Stock CallMonsterThink runs StartMonster's route through WALK_MOVE.
+		   The pulse calls EFW_OfficerThink instead. */
+		pEnt->SetThink( NULL );
+		pent->v.nextthink = 0;
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}
