@@ -97,7 +97,6 @@ public:
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT IdleThink( void );
-	int m_iWalkState; /* this+0x284: 3 = walking toward player */
 };
 
 LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
@@ -304,18 +303,36 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "IdleThink %s mi=%d dist=%.0f tick=%d",
 				( tn && tn[0] ) ? tn : "?", pev->modelindex, dist, s_walkTick );
 		}
+		/* Spawn's vtable+0x1a8(1) is CTalkMonster::SetActivity(ACT_IDLE).
+		   The studio is bound after Spawn, so the first think does it. */
+		if( m_Activity == ACT_RESET )
+		{
+			EFW_DebugPrint( "SetActivity IDLE %s before seq=%d",
+				( tn && tn[0] ) ? tn : "?", pev->sequence );
+			SetActivity( ACT_IDLE );
+			EFW_DebugPrint( "SetActivity IDLE %s after seq=%d act=%d",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity );
+		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
-			/* iuser1 survives even if the CRefugee tail field does not. */
-			m_iWalkState = 3;
-			pev->iuser1 = 3;
-			m_hEnemy = pPlayer;
-			EFW_DebugPrint( "now walking %s state=%d user=%d dist=%.0f",
-				( tn && tn[0] ) ? tn : "?", m_iWalkState, pev->iuser1, dist );
+			/* vtable+0x1a8(3), FUN_1005d290, then FUN_1005d500(this, ACT_WALK, 0)
+			   which is MoveToTarget. FRefreshRoute's local move calls WALK_MOVE
+			   and stalls the WASM frame, so the route is not built. The hull
+			   step below is that move. */
+			EFW_DebugPrint( "SetActivity WALK %s before seq=%d dist=%.0f",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, dist );
+			SetActivity( ACT_WALK );
+			m_movementGoal = MOVEGOAL_NONE;
+			m_movementActivity = ACT_IDLE;
+			Forget( bits_MEMORY_MOVE_FAILED );
+			m_movementGoal = MOVEGOAL_TARGETENT;
+			m_movementActivity = ACT_WALK;
+			m_hTargetEnt = pPlayer;
+			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
 		}
-		/* FUN_100c6440 walk state 3 is FUN_1005d500. Trace toward the
-		   player instead of WALK_MOVE, which stalls the WASM frame. */
-		if( ( m_iWalkState == 3 || pev->iuser1 == 3 ) && dist > 100.0f )
+		/* this+0x284 is m_movementActivity. Follow until the 100u idle test. */
+		if( m_movementActivity == ACT_WALK && dist > 100.0f && m_movementGoal == MOVEGOAL_TARGETENT )
 		{
 			int moved;
 			{
@@ -324,7 +341,7 @@ void CRefugee::IdleThink( void )
 				{
 					s_gateLog++;
 					EFW_DebugPrint( "IdleThink gate %s user=%d dist=%.0f",
-						( tn && tn[0] ) ? tn : "?", pev->iuser1, dist );
+						( tn && tn[0] ) ? tn : "?", (int)m_movementActivity, dist );
 				}
 			}
 			moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
@@ -340,15 +357,19 @@ void CRefugee::IdleThink( void )
 				}
 			}
 			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
-			{
-				m_iWalkState = 0;
-				pev->iuser1 = 0;
-			}
+				m_movementGoal = MOVEGOAL_NONE;
 		}
-		else if( dist <= 100.0f )
+		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
-			m_iWalkState = 0;
-			pev->iuser1 = 0;
+			/* vtable+0x1a8(1). Original calls it every close think; the
+			   activity sticks, so one successful call matches the pose. */
+			if( m_Activity != ACT_IDLE )
+			{
+				SetActivity( ACT_IDLE );
+				EFW_DebugPrint( "SetActivity IDLE close %s seq=%d",
+					( tn && tn[0] ) ? tn : "?", pev->sequence );
+			}
+			m_movementGoal = MOVEGOAL_NONE;
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
 		pev->movetype = MOVETYPE_STEP;
@@ -484,7 +505,8 @@ void CRefugee::Spawn( void )
 	ALERT( at_error, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ),
 		pev->origin.x, pev->origin.y, pev->origin.z, NUMBER_OF_ENTITIES() );
-	m_iWalkState = 0;
+	m_movementActivity = ACT_RESET;
+	m_movementGoal = MOVEGOAL_NONE;
 	SetUse( &CRefugee::TalkUse );
 	if( EFW_DeferStudio() )
 	{
