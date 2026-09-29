@@ -253,30 +253,34 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		s_npcStep = 0;
 		return 0;
 	}
-	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed),
-	   not an instant snap. A stuck sv.time leaves frametime at 0, which
-	   would freeze the turn, so the step dt stands in. */
+	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed).
+	   monsteryawspeedfix measures gpGlobals->time, which does not move
+	   between these thinks, so seed the last yaw time one step back. */
 	{
 		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
 		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
 		if( pMon )
 		{
-			float savedFt = gpGlobals->frametime;
 			int yawSpeed = (int)pev->yaw_speed;
-			if( gpGlobals->frametime < 0.001f )
-				gpGlobals->frametime = dt;
+			float before;
 			if( yawSpeed < 1 )
 				yawSpeed = 90;
+			pMon->m_flLastYawTime = gpGlobals->time - dt;
+			if( pMon->m_flLastYawTime == 0.0f )
+				pMon->m_flLastYawTime = -dt;
+			before = pev->angles.y;
 			pMon->MakeIdealYaw( goal );
 			pMon->ChangeYaw( yawSpeed );
-			gpGlobals->frametime = savedFt;
 			{
+				static entvars_t *s_yawWho;
 				static int s_yawLog;
-				if( s_yawLog < 6 )
+				if( !s_yawWho )
+					s_yawWho = pev;
+				if( pev == s_yawWho && s_yawLog < 6 )
 				{
 					s_yawLog++;
-					EFW_DebugPrint( "npc yaw ideal=%.0f ang=%.0f spd=%d",
-						pev->ideal_yaw, pev->angles.y, yawSpeed );
+					EFW_DebugPrint( "npc yaw ideal=%.0f before=%.0f ang=%.0f spd=%d",
+						pev->ideal_yaw, before, pev->angles.y, yawSpeed );
 				}
 			}
 		}
