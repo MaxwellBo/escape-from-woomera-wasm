@@ -164,7 +164,17 @@ void CRefugee::SetObjectCollisionBox( void )
 
 void CRefugee::SetYawSpeed( void )
 {
-	pev->yaw_speed = 90;
+	/* 0x1000cde0, shared with patrol and barney. Idle and walk are 70,
+	   run is 90, and every other activity falls through to 70. */
+	switch( m_Activity )
+	{
+	case ACT_RUN:
+		pev->yaw_speed = 90;
+		break;
+	default:
+		pev->yaw_speed = 70;
+		break;
+	}
 }
 
 void CRefugee::HandleAnimEvent( MonsterEvent_t *pEvent )
@@ -377,8 +387,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		{
 			int yawSpeed = (int)pev->yaw_speed;
 			float before;
+			/* 0x1000cde0 default is 70 when SetActivity has not run. */
 			if( yawSpeed < 1 )
-				yawSpeed = 90;
+				yawSpeed = 70;
 			before = pev->angles.y;
 			pMon->MakeIdealYaw( goal );
 			EFW_PeChangeYaw( pMon, yawSpeed );
@@ -764,12 +775,13 @@ void CRefugee::IdleThink( void )
 			   on the frame SetActivity just chose. The host-interval
 			   advance would keep playing it; framerate 0 is that zero step.
 			   The next IdleThink entry restores framerate. Move() would
-			   then ChangeYaw; that call is yawSpeed * frametime * 10. */
+			   then ChangeYaw; that call is yawSpeed * frametime * 10.
+			   SetActivity(ACT_IDLE) just stored yaw_speed 70. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
 			yawSpeed = (int)pev->yaw_speed;
 			if( yawSpeed < 1 )
-				yawSpeed = 90;
+				yawSpeed = 70;
 			beforeYaw = pev->angles.y;
 			MakeIdealYaw( pPlayer->pev->origin );
 			EFW_PeChangeYaw( this, yawSpeed );
@@ -778,8 +790,8 @@ void CRefugee::IdleThink( void )
 				if( s_close < 6 && EFW_FStrEq( tn, "Amir" ) )
 				{
 					s_close++;
-					EFW_DebugPrint( "close idle %s frame=%.1f yaw %.0f -> %.0f dist=%.0f",
-						tn, pev->frame, beforeYaw, pev->angles.y, dist );
+					EFW_DebugPrint( "close idle %s frame=%.1f yaw %.0f -> %.0f dist=%.0f spd=%d",
+						tn, pev->frame, beforeYaw, pev->angles.y, dist, yawSpeed );
 				}
 			}
 		}
@@ -994,7 +1006,16 @@ int CPatrolGuard::Classify( void )
 
 void CPatrolGuard::SetYawSpeed( void )
 {
-	pev->yaw_speed = 120;
+	/* Same 0x1000cde0 as refugees: idle/walk 70, run 90. */
+	switch( m_Activity )
+	{
+	case ACT_RUN:
+		pev->yaw_speed = 90;
+		break;
+	default:
+		pev->yaw_speed = 70;
+		break;
+	}
 }
 
 void CPatrolGuard::HandleAnimEvent( MonsterEvent_t *pEvent )
