@@ -210,45 +210,39 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	wish = delta * ( step / len );
 	start = pev->origin;
 	end = start + wish;
-	TRACE_MONSTER_HULL( ENT( pev ), start, end, dont_ignore_monsters, ENT( pev ), &tr );
-	if( tr.fStartSolid )
+	/* Feet-origin hulls (mins.z == 0) sit in the floor, so the trace is
+	   startsolid and the refugee never leaves the brush. Keep their z. */
 	{
-		TraceResult over;
-		Vector up( 0, 0, 18 );
-		TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
-		if( over.fStartSolid || over.flFraction < 1.0f )
-			return 0;
-		start = over.vecEndPos;
-		end = start + wish;
+		float saved = pev->mins.z;
+		int stepped = 0;
+		if( saved < 1.0f )
+			pev->mins.z = 1.0f;
 		TRACE_MONSTER_HULL( ENT( pev ), start, end, dont_ignore_monsters, ENT( pev ), &tr );
 		if( tr.fStartSolid )
-			return 0;
-	}
-	landed = tr.vecEndPos;
-	if( tr.flFraction < 1.0f )
-	{
-		TraceResult over;
-		TraceResult across;
-		Vector up( 0, 0, 18 );
-		TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
-		if( !over.fStartSolid && over.flFraction >= 1.0f )
 		{
-			TRACE_MONSTER_HULL( ENT( pev ), over.vecEndPos, over.vecEndPos + wish, dont_ignore_monsters, ENT( pev ), &across );
-			if( !across.fStartSolid && across.flFraction > tr.flFraction )
+			pev->mins.z = saved;
+			return 0;
+		}
+		landed = tr.vecEndPos;
+		if( tr.flFraction < 1.0f )
+		{
+			TraceResult over;
+			TraceResult across;
+			Vector up( 0, 0, 18 );
+			TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
+			if( !over.fStartSolid && over.flFraction >= 1.0f )
 			{
-				TraceResult drop;
-				TRACE_MONSTER_HULL( ENT( pev ), across.vecEndPos, across.vecEndPos - up, dont_ignore_monsters, ENT( pev ), &drop );
-				landed = drop.fStartSolid ? across.vecEndPos : drop.vecEndPos;
+				TRACE_MONSTER_HULL( ENT( pev ), over.vecEndPos, over.vecEndPos + wish, dont_ignore_monsters, ENT( pev ), &across );
+				if( !across.fStartSolid && across.flFraction > tr.flFraction )
+				{
+					landed = across.vecEndPos;
+					stepped = 1;
+				}
 			}
 		}
-	}
-	else
-	{
-		TraceResult drop;
-		Vector down( 0, 0, 18 );
-		TRACE_MONSTER_HULL( ENT( pev ), landed, landed - down, dont_ignore_monsters, ENT( pev ), &drop );
-		if( !drop.fStartSolid && drop.flFraction < 1.0f && drop.flFraction > 0.0f )
-			landed = drop.vecEndPos;
+		pev->mins.z = saved;
+		if( !stepped )
+			landed.z = start.z;
 	}
 	if( ( landed - pev->origin ).Length() < 0.5f )
 		return 0;
