@@ -5,6 +5,7 @@
 #include "cbase.h"
 #include "monsters.h"
 #include "activity.h"
+#include "animation.h"
 #include "player.h"
 #include "efw_dll.h"
 #include "studio.h"
@@ -260,10 +261,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 
 void CRefugee::IdleThink( void )
 {
-	CBasePlayer *pPlayer;
-	const char *tn;
+	CBasePlayer *pPlayer = NULL;
+	const char *tn = "";
 	Vector delta;
-	float dist;
+	float dist = 0.0f;
 	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
 	static int s_idleLog;
 
@@ -331,34 +332,6 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
 		}
-		/* this+0x284 is m_movementActivity. Follow until the 100u idle test. */
-		if( m_movementActivity == ACT_WALK && dist > 100.0f && m_movementGoal == MOVEGOAL_TARGETENT )
-		{
-			int moved;
-			{
-				static int s_gateLog;
-				if( s_gateLog < 8 )
-				{
-					s_gateLog++;
-					EFW_DebugPrint( "IdleThink gate %s user=%d dist=%.0f",
-						( tn && tn[0] ) ? tn : "?", (int)m_movementActivity, dist );
-				}
-			}
-			moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
-			{
-				static int s_stepLog;
-				if( s_stepLog < 8 )
-				{
-					s_stepLog++;
-					EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
-						( tn && tn[0] ) ? tn : "?", moved,
-						pev->origin.x, pev->origin.y, pev->origin.z,
-						( pPlayer->pev->origin - pev->origin ).Length() );
-				}
-			}
-			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
-				m_movementGoal = MOVEGOAL_NONE;
-		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
 			/* vtable+0x1a8(1). Original calls it every close think; the
@@ -382,10 +355,95 @@ void CRefugee::IdleThink( void )
 			}
 		}
 	}
-	/* FUN_1005d160. Does not touch the studio header, so a missing SET_MODEL
-	   cannot stall the frame. */
+	/* FUN_1005d160 is CBaseMonster::MonsterThink: StudioFrameAdvance, the
+	   idle fidget, DispatchAnimEvents, then Move. Move's WALK_MOVE stalls,
+	   so the hull step stands in for it and runs after the anim. SetOrigin
+	   does not return into this frame. */
 	if( pev->modelindex && !s_npcStep )
-		StudioFrameAdvance( 0.0f );
+	{
+		float flInterval;
+		float clock;
+
+		clock = gpGlobals->time - pev->animtime;
+		if( clock > 0.001f && clock < 0.25f )
+			flInterval = 0.0f;
+		else
+		{
+			flInterval = gpGlobals->frametime;
+			if( flInterval < 0.001f || flInterval > 0.1f )
+				flInterval = 1.0f / 60.0f;
+		}
+		flInterval = StudioFrameAdvance( flInterval );
+		if( m_MonsterState != MONSTERSTATE_SCRIPT && m_MonsterState != MONSTERSTATE_DEAD
+			&& m_Activity == ACT_IDLE && m_fSequenceFinished )
+		{
+			int iSequence;
+
+			if( m_fSequenceLoops )
+				iSequence = LookupActivity( m_Activity );
+			else
+				iSequence = LookupActivityHeaviest( m_Activity );
+			if( iSequence != ACTIVITY_NOT_AVAILABLE )
+			{
+				pev->sequence = iSequence;
+				ResetSequenceInfo();
+				{
+					static int s_fidget;
+					if( s_fidget < 4 )
+					{
+						s_fidget++;
+						EFW_DebugPrint( "idle fidget %s seq=%d",
+							( tn && tn[0] ) ? tn : "?", pev->sequence );
+					}
+				}
+			}
+		}
+		DispatchAnimEvents( flInterval );
+		{
+			static int s_frame;
+			if( s_frame < 6 && m_Activity == ACT_WALK )
+			{
+				s_frame++;
+				EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f gs=%.0f",
+					( tn && tn[0] ) ? tn : "?", pev->sequence, pev->frame, m_flGroundSpeed );
+			}
+		}
+	}
+	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
+	if( pPlayer && !EFW_FStrEq( tn, "queue" )
+		&& m_movementActivity == ACT_WALK && dist > 100.0f
+		&& m_movementGoal == MOVEGOAL_TARGETENT )
+	{
+		float speed;
+		int moved;
+
+		speed = m_flGroundSpeed * pev->framerate;
+		if( speed < 1.0f )
+			speed = 64.0f;
+		{
+			static int s_gateLog;
+			if( s_gateLog < 8 )
+			{
+				s_gateLog++;
+				EFW_DebugPrint( "IdleThink gate %s user=%d dist=%.0f spd=%.0f",
+					( tn && tn[0] ) ? tn : "?", (int)m_movementActivity, dist, speed );
+			}
+		}
+		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed );
+		{
+			static int s_stepLog;
+			if( s_stepLog < 8 )
+			{
+				s_stepLog++;
+				EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", moved,
+					pev->origin.x, pev->origin.y, pev->origin.z,
+					( pPlayer->pev->origin - pev->origin ).Length() );
+			}
+		}
+		if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
+			m_movementGoal = MOVEGOAL_NONE;
+	}
 }
 
 void CRefugee::Precache( void )
