@@ -307,11 +307,17 @@ void CRefugee::IdleThink( void )
 		if( m_iWalkState == 3 && dist > 100.0f )
 		{
 			int moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
-			if( ( s_walkTick % 30 ) == 0 )
-				EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
-					( tn && tn[0] ) ? tn : "?", moved,
-					pev->origin.x, pev->origin.y, pev->origin.z,
-					( pPlayer->pev->origin - pev->origin ).Length() );
+			{
+				static int s_stepLog;
+				if( s_stepLog < 16 )
+				{
+					s_stepLog++;
+					EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
+						( tn && tn[0] ) ? tn : "?", moved,
+						pev->origin.x, pev->origin.y, pev->origin.z,
+						( pPlayer->pev->origin - pev->origin ).Length() );
+				}
+			}
 			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
 				m_iWalkState = 0;
 		}
