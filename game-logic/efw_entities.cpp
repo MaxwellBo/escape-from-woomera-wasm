@@ -955,14 +955,6 @@ void CRefugee::IdleThink( void )
 	if( s_idleLog < 1 )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
-	if( EFW_FStrEq( tn, "Shala" ) )
-	{
-		static int s_shalaHold;
-		s_shalaHold++;
-		if( s_shalaHold == 40 )
-			EFW_DebugPrint( "shala hold z=%.0f at %.0f %.0f",
-				pev->origin.z, pev->origin.x, pev->origin.y );
-	}
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
 	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
 	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
