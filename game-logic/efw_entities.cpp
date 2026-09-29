@@ -212,6 +212,114 @@ static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
 	return 1;
 }
 
+/* 1 = floor within 4, 0 = air, -1 = hull still in solid.
+   mins.z is lifted to 1 so feet resting on the floor are not startsolid. */
+static int EFW_ProbeSupport( entvars_t *pev )
+{
+	TraceResult tr;
+	Vector down;
+	float saved;
+
+	saved = pev->mins.z;
+	if( saved < 1.0f )
+		pev->mins.z = 1.0f;
+	down = pev->origin;
+	down.z -= 4.0f;
+	memset( &tr, 0, sizeof( tr ) );
+	TRACE_MONSTER_HULL( ENT( pev ), pev->origin, down, ignore_monsters, ENT( pev ), &tr );
+	pev->mins.z = saved;
+	if( tr.fStartSolid || tr.fAllSolid )
+		return -1;
+	if( tr.flFraction < 1.0f )
+		return 1;
+	return 0;
+}
+
+/* SV_Physics_Step applies sv_gravity (800) before the think. MOVE_TO_ORIGIN
+   then refuses to walk unless FL_ONGROUND is set. frametime is stuck, so
+   the engine never integrates that fall. Host-interval gravity lands the
+   hull; the step below stays put until the floor is under it. */
+static void EFW_NpcFall( entvars_t *pev )
+{
+	int support;
+	float dt;
+	float grav;
+	float z0;
+	Vector end;
+	TraceResult tr;
+
+	if( !pev || !pev->modelindex || s_npcStep )
+		return;
+	if( pev->movetype == MOVETYPE_NONE )
+		return;
+	if( pev->flags & ( FL_FLY | FL_SWIM ) )
+		return;
+	s_npcStep = 1;
+	support = EFW_ProbeSupport( pev );
+	if( support == 1 )
+	{
+		s_npcStep = 0;
+		pev->flags |= FL_ONGROUND;
+		pev->velocity.z = 0.0f;
+		return;
+	}
+	if( support < 0 )
+	{
+		s_npcStep = 0;
+		pev->flags &= ~FL_ONGROUND;
+		return;
+	}
+	pev->flags &= ~FL_ONGROUND;
+	dt = EFW_HostInterval();
+	grav = 800.0f;
+	if( pev->gravity > 0.0f )
+		grav *= pev->gravity;
+	pev->velocity.z -= grav * dt;
+	if( pev->velocity.z < -2000.0f )
+		pev->velocity.z = -2000.0f;
+	z0 = pev->origin.z;
+	end = pev->origin;
+	end.z += pev->velocity.z * dt;
+	memset( &tr, 0, sizeof( tr ) );
+	TRACE_MONSTER_HULL( ENT( pev ), pev->origin, end, ignore_monsters, ENT( pev ), &tr );
+	s_npcStep = 0;
+	if( tr.fStartSolid || tr.fAllSolid )
+		return;
+	if( tr.flFraction < 1.0f && tr.flFraction > 0.0f )
+	{
+		end = tr.vecEndPos;
+		pev->velocity.z = 0.0f;
+		pev->flags |= FL_ONGROUND;
+		{
+			static int s_land;
+			float dz = end.z - z0;
+			if( dz < 0.0f )
+				dz = -dz;
+			if( dz >= 1.0f && s_land < 6 )
+			{
+				s_land++;
+				EFW_DebugPrint( "npc land z=%.0f -> %.0f at %.0f %.0f",
+					z0, end.z, end.x, end.y );
+			}
+		}
+		UTIL_SetOrigin( pev, end );
+		return;
+	}
+	{
+		static int s_fall;
+		float dz = end.z - z0;
+		if( dz < 0.0f )
+			dz = -dz;
+		if( dz >= 1.0f && s_fall < 6 )
+		{
+			s_fall++;
+			EFW_DebugPrint( "npc fall z=%.0f -> %.0f at %.0f %.0f",
+				z0, end.z, end.x, end.y );
+		}
+	}
+	UTIL_SetOrigin( pev, end );
+}
+
 /* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
    Trace the PE hull (-16..16, 0..72) and ignore other monsters so touch
    does not call back into think. MoveExecute walks
@@ -229,6 +337,18 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 
 	if( !pev || s_npcStep )
 		return 0;
+	/* MOVE_TO_ORIGIN walks only once FL_ONGROUND is set. An embedded hull
+	   is not airborne; the lift below still has to pull it out of the floor. */
+	if( !( pev->flags & ( FL_ONGROUND | FL_FLY | FL_SWIM ) ) )
+	{
+		int support;
+
+		s_npcStep = 1;
+		support = EFW_ProbeSupport( pev );
+		s_npcStep = 0;
+		if( support == 0 )
+			return 0;
+	}
 	delta = goal - pev->origin;
 	delta.z = 0.0f;
 	len = delta.Length();
@@ -467,6 +587,10 @@ static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		return;
 	pev = pMon->pev;
 	if( !pev->modelindex || s_npcStep )
+		return;
+	/* Physics runs before MonsterThink. Land, then animate. */
+	EFW_NpcFall( pev );
+	if( s_npcStep )
 		return;
 	/* MonsterThink calls StudioFrameAdvance(0), which uses sv.time.
 	   That clock does not move one think per pump, so the feet (host
