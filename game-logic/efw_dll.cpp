@@ -354,10 +354,11 @@ void EFW_AdjustHope( float delta )
 	EFW_SetHudFloat( 1, hope );
 }
 
+static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
+
 void EFW_ThinkHope( void )
 {
 	static int s_hopeN;
-	static int s_hopePulse;
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
@@ -374,22 +375,19 @@ void EFW_ThinkHope( void )
 
 	if( EFW_GetHudInt( 6 ) )
 		return;
-	if( g_efw.hopeClock <= 0.0f )
-		g_efw.hopeClock = now;
-	elapsed = now - g_efw.hopeClock;
-	if( elapsed <= 0.0f )
+	/* The DLL drains hope from gpGlobals->time, which was one host second
+	   per real second. This listen server bursts StartFrame, so that clock
+	   is not the original one. The pump hands in wall-clock seconds and
+	   ThinkHope spends that budget once. */
+	if( s_hopeWall > 0.0f )
 	{
-		/* Frozen gpGlobals->time still calls StartFrame every rendered
-		   frame. A full frametime per call spends hope in a couple of
-		   minutes. 1/60s per pulse matches a live host. */
-		if( s_hopePulse == s_hudPulse )
-			return;
-		elapsed = 1.0f / 60.0f;
+		elapsed = s_hopeWall;
+		s_hopeWall = 0.0f;
 	}
-	s_hopePulse = s_hudPulse;
-	g_efw.hopeClock = now;
-	if( elapsed > 0.2f )
-		elapsed = 0.2f;
+	else
+		return;
+	if( elapsed > 0.25f )
+		elapsed = 0.25f;
 	hope = EFW_GetHudFloat( 1 );
 	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
@@ -1757,6 +1755,14 @@ static void EFW_HostPump( void )
 	char line[80];
 
 	n++;
+	{
+		float wall = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.12f;
+		if( wall < 0.0f )
+			wall = 0.0f;
+		if( wall > 0.25f )
+			wall = 0.25f;
+		s_hopeWall += wall;
+	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();
 	pPlayer = EFW_Player();
@@ -2180,7 +2186,15 @@ static int EFW_BindOneDetainee( void )
 		if( idx <= 0 )
 			idx = MODEL_INDEX( "models/Security.mdl" );
 		pent->v.modelindex = idx;
-		pent->v.solid = SOLID_NOT;
+		pent->v.effects &= ~EF_NODRAW;
+		pent->v.sequence = 0;
+		pent->v.frame = 0;
+		pent->v.framerate = 1.0f;
+		/* PE CRefugee::Spawn hull. SOLID_BBOX so look-use can see them.
+		   MOVETYPE_NONE: WALK_MOVE on these studios stalls the WASM frame. */
+		pent->v.mins = Vector( -16, -16, 0 );
+		pent->v.maxs = Vector( 16, 16, 72 );
+		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
 		pent->v.movetype = MOVETYPE_NONE;
 		{
@@ -2292,7 +2306,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		float len = delta.Length();
 		if( len < 0.01f )
 			return;
-		delta = delta * ( ( 220.0f * dt ) / len );
+		/* GoldSrc sv_maxspeed. Usercmds still do not flush on this listen
+		   server, so the latch is the walk; the speed is the engine's. */
+		delta = delta * ( ( 270.0f * dt ) / len );
 	}
 	dest = pPlayer->pev->origin + delta;
 	{
@@ -2841,22 +2857,31 @@ static int EFW_UseNearbyDoor( CBasePlayer *pPlayer )
 	static const char *kClasses[] = { "func_door_rotating", "func_door", "func_button" };
 	CBaseEntity *pBest = NULL;
 	Vector bestMid;
-	float best = 160.0f;
+	float bestDot = 0.7f; /* HL PlayerUse VIEW_FIELD_NARROW */
 	Vector eye;
+	Vector fwd;
 	int c;
 	if( !pPlayer )
 		return 0;
 	eye = pPlayer->EyePosition();
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	fwd = gpGlobals->v_forward;
 	for( c = 0; c < (int)( sizeof( kClasses ) / sizeof( kClasses[0] ) ); c++ )
 	{
 		CBaseEntity *pScan = NULL;
 		while( ( pScan = UTIL_FindEntityByClassname( pScan, kClasses[c] ) ) != NULL )
 		{
 			Vector mid = ( pScan->pev->absmin + pScan->pev->absmax ) * 0.5f;
-			float d = ( mid - eye ).Length();
-			if( d < best )
+			Vector dir = mid - eye;
+			float d = dir.Length();
+			float dot;
+			if( d > 96.0f || d < 1.0f )
+				continue;
+			dir = dir * ( 1.0f / d );
+			dot = DotProduct( dir, fwd );
+			if( dot > bestDot )
 			{
-				best = d;
+				bestDot = dot;
 				pBest = pScan;
 				bestMid = mid;
 			}
@@ -2864,8 +2889,8 @@ static int EFW_UseNearbyDoor( CBasePlayer *pPlayer )
 	}
 	if( !pBest )
 		return 0;
-	EFW_DebugPrint( ">>> use door %s %s dist=%.0f",
-		STRING( pBest->pev->classname ), STRING( pBest->pev->targetname ), best );
+	EFW_DebugPrint( ">>> use door %s %s dot=%.2f",
+		STRING( pBest->pev->classname ), STRING( pBest->pev->targetname ), bestDot );
 	{
 		/* Step back so the hull is not inside the leaf. A blocked door
 		   reverses and looks like Use did nothing. */

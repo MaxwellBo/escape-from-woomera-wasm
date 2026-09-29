@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll136`;
+    return `${url}?v=efw-dll137`;
   return url;
 }
 
@@ -167,6 +167,12 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
 let storyNext = '';
 let storyPaused = false;
 
+function storyIsSprite(code: number): boolean {
+  /* FUN_10047830 loads a Storyboard SPR for these codes. */
+  return code === 0x3f || code === 0x43 || code === 0x46
+    || (code >= 0x49 && code <= 0x52);
+}
+
 function storyboardPauses(code: number): boolean {
   /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu.
      0x47 FUN_10048790 caption Panel also pauses. 0x48 FUN_10048710 pauses. */
@@ -271,6 +277,7 @@ function showEfwStory(code: number, fallback?: string) {
     return;
   text.textContent = title;
   storyNext = spec?.next || '';
+  layer.classList.toggle('efw-story-spr', storyIsSprite(code));
   layer.hidden = false;
   const interact = document.getElementById('efw-interact');
   if (interact) interact.hidden = true;
@@ -801,8 +808,12 @@ function startHostPumps() {
   /* Keep pulsing StartFrame after key_game. Libmenu used to pause the
      listen server; a 80-tick cap left hope/TalkScan frozen once HostPump
      stopped even though WebGL2 was still presenting. */
+  let lastPumpMs = 0;
   pumpTimer = setInterval(() => {
-    runEngineCmd('efw_pump');
+    const now = performance.now();
+    const dt = lastPumpMs ? Math.min(0.25, (now - lastPumpMs) / 1000) : 0.12;
+    lastPumpMs = now;
+    runEngineCmd(`efw_pump ${dt.toFixed(3)}`);
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
       log(`listen: hostpump n=${pumps}`);

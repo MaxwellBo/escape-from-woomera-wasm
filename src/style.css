@@ -245,6 +245,24 @@ canvas#canvas {
   pointer-events: auto;
 }
 
+/* Storyboard codes draw the original SPR on the canvas. The HTML layer
+   only keeps the Continue click, so the sprite is the picture. */
+.efw-story.efw-story-spr {
+  background: transparent;
+  align-items: flex-end;
+  padding-bottom: 24px;
+}
+
+.efw-story.efw-story-spr .efw-story-card {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+.efw-story.efw-story-spr .efw-story-card p {
+  display: none;
+}
+
 .efw-story-card {
   border: 1px solid #fff;
   background: #000;
