@@ -1084,7 +1084,8 @@ void CPatrolGuard::PatrolThink( void )
 	{
 		Vector seen = m_vecLastSeen - pev->origin;
 		seen.z = 0;
-		if( seen.Length() > 12.0f )
+		/* Move() advances a location route at ShouldAdvanceRoute's 8. */
+		if( seen.Length() > 8.0f )
 		{
 			m_moveWaitTime = 0;
 			m_movementActivity = ACT_WALK;
@@ -1138,11 +1139,36 @@ void CPatrolGuard::PatrolThink( void )
 	else if( m_movementGoal == MOVEGOAL_LOCATION )
 	{
 		Vector delta = m_vecMoveGoal - pev->origin;
+		float remain;
 		delta.z = 0;
-		if( delta.Length() > 12.0f )
+		remain = delta.Length();
+		/* FUN_1005f6e0: the waypoint distance is 2D, and the route
+		   advances at 8. A 12-unit stop left the last-seen walk short. */
+		if( remain > 8.0f )
+		{
+			if( remain < 20.0f )
+			{
+				static int s_close;
+				if( s_close < 6 )
+				{
+					s_close++;
+					EFW_DebugPrint( "investigate close %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", remain );
+				}
+			}
 			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ) );
+		}
 		else
 		{
+			{
+				static int s_arrive;
+				if( s_arrive < 4 )
+				{
+					s_arrive++;
+					EFW_DebugPrint( "investigate arrive %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", remain );
+				}
+			}
 			m_movementGoal = MOVEGOAL_NONE;
 			if( m_Activity != ACT_IDLE )
 				SetActivity( ACT_IDLE );
