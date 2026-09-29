@@ -279,6 +279,59 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support < 0 )
 	{
+		Vector buried;
+		Vector raised;
+		Vector landed;
+		int stepUp;
+		/* The 2-unit probe is startsolid, so this hull is in the floor.
+		   The walk's own lift only climbs sv_stepsize (18). A detainee
+		   who had been stepping toward the barracks finished at z=-35
+		   and then every later step moved 0. Climb the standing hull
+		   (72) until the box is free, then sit it on the floor. */
+		buried = pev->origin;
+		for( stepUp = 1; stepUp <= 18; stepUp++ )
+		{
+			TraceResult clear;
+			float savedMins;
+
+			raised = buried;
+			raised.z = buried.z + stepUp * 4.0f;
+			savedMins = pev->mins.z;
+			if( savedMins < 1.0f )
+				pev->mins.z = 1.0f;
+			memset( &clear, 0, sizeof( clear ) );
+			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &clear );
+			pev->mins.z = savedMins;
+			if( clear.fStartSolid || clear.fAllSolid )
+				continue;
+			if( EFW_LandMonster( pev, raised, &landed ) )
+			{
+				savedMins = pev->mins.z;
+				if( savedMins < 1.0f )
+					pev->mins.z = 1.0f;
+				memset( &clear, 0, sizeof( clear ) );
+				TRACE_MONSTER_HULL( ENT( pev ), landed, landed, ignore_monsters, ENT( pev ), &clear );
+				pev->mins.z = savedMins;
+				if( !clear.fStartSolid && !clear.fAllSolid && landed.z > buried.z + 0.5f )
+					raised = landed;
+			}
+			if( raised.z <= buried.z + 0.5f )
+				continue;
+			{
+				static int s_embed;
+				if( s_embed < 6 )
+				{
+					s_embed++;
+					EFW_DebugPrint( "embedded lift z=%.0f -> %.0f at %.0f %.0f",
+						buried.z, raised.z, raised.x, raised.y );
+				}
+			}
+			s_npcStep = 0;
+			pev->velocity.z = 0.0f;
+			pev->flags |= FL_ONGROUND;
+			UTIL_SetOrigin( pev, raised );
+			return;
+		}
 		s_npcStep = 0;
 		pev->flags &= ~FL_ONGROUND;
 		return;
