@@ -339,13 +339,12 @@ static void EFW_NpcFall( entvars_t *pev )
    groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
 
-static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
+static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
 {
 	Vector delta;
 	Vector start;
 	Vector landed;
 	float len;
-	float dt;
 	float total;
 	float moved;
 	int chunks;
@@ -369,16 +368,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	len = delta.Length();
 	if( len < 1.0f )
 		return 0;
-	/* sv.time is stuck between pulses. The host pump is the think interval
-	   MonsterThink would have passed into Move(). */
-	dt = EFW_HostInterval();
-	total = speed * dt;
-	if( total > len )
-		total = len;
-	if( total < 0.001f )
-		return 0;
 	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
-	   once, before the 16-unit chunks. */
+	   once, before the 16-unit chunks, including the think whose
+	   StudioFrameAdvance interval is 0. */
 	{
 		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
 		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
@@ -409,6 +401,26 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		else
 			pev->angles.y = UTIL_VecToYaw( wish );
 	}
+	/* ResetSequenceInfo stores animtime = now. MoveExecute then gets a
+	   zero interval and does not translate. A SetActivity that ran after
+	   the anim call still has that clock; rewind it so the next pump is
+	   not another hold. dt is the interval StudioFrameAdvance returned. */
+	{
+		float skew = pev->animtime - gpGlobals->time;
+		if( skew < 0.0f )
+			skew = -skew;
+		if( dt < 0.001f || skew <= 0.001f )
+		{
+			if( skew <= 0.001f )
+				pev->animtime = gpGlobals->time - 1.0f;
+			return 0;
+		}
+	}
+	total = speed * dt;
+	if( total > len )
+		total = len;
+	if( total < 0.001f )
+		return 0;
 	s_npcStep = 1;
 	start = pev->origin;
 	landed = start;
@@ -609,29 +621,38 @@ static float EFW_NpcGroundSpeed( CBaseMonster *pMon )
 }
 
 /* FUN_1005d160 anim half: StudioFrameAdvance, idle fidget, DispatchAnimEvents.
-   Move()'s WALK_MOVE is not called. */
-static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
+   Move()'s WALK_MOVE is not called. Returns the interval MoveExecute uses. */
+static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 {
 	entvars_t *pev;
 	float flInterval;
+	float skew;
 
 	if( !pMon )
-		return;
+		return 0.0f;
 	pev = pMon->pev;
 	if( !pev->modelindex || s_npcStep )
-		return;
+		return 0.0f;
 	/* Physics runs before MonsterThink. Land, then animate. */
 	EFW_NpcFall( pev );
 	if( s_npcStep )
-		return;
-	/* MonsterThink calls StudioFrameAdvance(0), which uses sv.time.
-	   That clock does not move one think per pump, so the feet (host
-	   interval) and the sequence were on different clocks. Pass the
-	   same interval MoveExecute just used. animtime 0 makes
-	   StudioFrameAdvance drop the interval, including when sv.time is 0. */
+		return 0.0f;
+	/* MonsterThink calls StudioFrameAdvance(0). ResetSequenceInfo sets
+	   animtime to gpGlobals->time, so that call returns 0 and the feet
+	   do not move on the SetActivity think. sv.time does not advance
+	   between pumps, so a literal 0 every think would freeze the pose.
+	   A clock that was just reset (or still 0) gets interval 0. After
+	   the call, animtime is rewound one second so the next stuck clock
+	   is a real host interval. */
 	if( !pev->animtime )
 		pev->animtime = ( gpGlobals->time > 0.0f ) ? gpGlobals->time : 0.001f;
-	flInterval = EFW_HostInterval();
+	skew = pev->animtime - gpGlobals->time;
+	if( skew < 0.0f )
+		skew = -skew;
+	if( skew <= 0.001f )
+		flInterval = 0.0f;
+	else
+		flInterval = EFW_HostInterval();
 	flInterval = pMon->StudioFrameAdvance( flInterval );
 	if( pMon->m_MonsterState != MONSTERSTATE_SCRIPT && pMon->m_MonsterState != MONSTERSTATE_DEAD
 		&& pMon->m_Activity == ACT_IDLE && pMon->m_fSequenceFinished )
@@ -658,6 +679,16 @@ static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		}
 	}
 	pMon->DispatchAnimEvents( flInterval );
+	if( skew <= 0.001f && pMon->m_Activity == ACT_WALK && name && EFW_FStrEq( name, "Amir" ) )
+	{
+		static int s_hold;
+		if( s_hold < 4 )
+		{
+			s_hold++;
+			EFW_DebugPrint( "seq hold Amir frame=%.1f origin=%.0f %.0f",
+				pev->frame, pev->origin.x, pev->origin.y );
+		}
+	}
 	{
 		static int s_frame;
 		if( s_frame < 6 && ( pMon->m_Activity == ACT_WALK || pMon->m_Activity == ACT_RUN ) )
@@ -668,6 +699,10 @@ static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 				flInterval, pMon->m_flGroundSpeed );
 		}
 	}
+	/* StudioFrameAdvance and ResetSequenceInfo both store animtime = now.
+	   Leave it a second behind so the next pump is not another hold. */
+	pev->animtime = gpGlobals->time - 1.0f;
+	return flInterval;
 }
 
 void CRefugee::IdleThink( void )
@@ -807,8 +842,8 @@ void CRefugee::IdleThink( void )
 		}
 	}
 	/* FUN_1005d160 anim half, then the hull step stands in for Move.
-	   SetOrigin does not return into this frame. */
-	EFW_AdvanceNpcAnim( this, tn );
+	   The returned interval is 0 on the SetActivity think. */
+	float flInterval = EFW_AdvanceNpcAnim( this, tn );
 	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
 	if( pPlayer && !( tn && strstr( tn, "queue" ) )
 		&& m_movementActivity == ACT_WALK && m_Activity == ACT_WALK
@@ -828,7 +863,17 @@ void CRefugee::IdleThink( void )
 					( tn && tn[0] ) ? tn : "?", (int)m_movementActivity, dist, speed );
 			}
 		}
-		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed );
+		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
+		if( moved && EFW_FStrEq( tn, "Amir" ) )
+		{
+			static int s_amirStep;
+			if( s_amirStep < 4 )
+			{
+				s_amirStep++;
+				EFW_DebugPrint( "seq step Amir moved=%d origin=%.0f %.0f %.0f frame=%.1f",
+					moved, pev->origin.x, pev->origin.y, pev->origin.z, pev->frame );
+			}
+		}
 		{
 			static int s_stepLog;
 			if( s_stepLog < 8 )
@@ -1369,7 +1414,7 @@ void CPatrolGuard::PatrolThink( void )
 		EFW_IdleHeadTurn( this, m_vecLastSeen );
 
 	/* MonsterThink anim, then the hull step stands in for Move. */
-	EFW_AdvanceNpcAnim( this, tn );
+	float flInterval = EFW_AdvanceNpcAnim( this, tn );
 	{
 		static entvars_t *s_animWho;
 		static int s_animLog;
@@ -1386,7 +1431,7 @@ void CPatrolGuard::PatrolThink( void )
 	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
 	{
 		float speed = EFW_NpcGroundSpeed( this );
-		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed );
+		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
 		{
 			static int s_chaseLog;
 			if( s_chaseLog < 6 )
@@ -1418,7 +1463,7 @@ void CPatrolGuard::PatrolThink( void )
 						( tn && tn[0] ) ? tn : "?", remain );
 				}
 			}
-			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ) );
+			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval );
 		}
 		else
 		{
@@ -1470,7 +1515,7 @@ void CPatrolGuard::PatrolThink( void )
 				if( m_Activity != ACT_WALK )
 					SetActivity( ACT_WALK );
 				speed = EFW_NpcGroundSpeed( this );
-				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed );
+				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed, flInterval );
 				{
 					static int s_stepLog;
 					if( s_stepLog < 6 )
@@ -1610,7 +1655,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		if( pMon->m_Activity != ACT_IDLE )
 			pMon->SetActivity( ACT_IDLE );
 	}
-	EFW_AdvanceNpcAnim( pMon, tn );
+	float flInterval = EFW_AdvanceNpcAnim( pMon, tn );
 	{
 		static int s_anim;
 		if( s_anim < 8 && EFW_FStrEq( tn, "efw_electrician" ) )
@@ -1629,7 +1674,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		if( delta.Length() > 8.0f )
 		{
 			speed = EFW_NpcGroundSpeed( pMon );
-			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed );
+			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed, flInterval );
 			{
 				static int s_step;
 				if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
