@@ -292,6 +292,93 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	return 1;
 }
 
+/* FUN_1009b420: if bits_CAP_TURN_HEAD, yaw toward the point and
+   SetBoneController(0). Spawn writes that capability as 0x7c0. */
+static void EFW_IdleHeadTurn( CBaseMonster *pMon, const Vector &spot )
+{
+	float yaw;
+
+	if( !pMon || !( pMon->m_afCapability & bits_CAP_TURN_HEAD ) )
+		return;
+	if( !pMon->pev->modelindex )
+		return;
+	yaw = UTIL_VecToYaw( spot - pMon->pev->origin ) - pMon->pev->angles.y;
+	if( yaw > 180.0f )
+		yaw -= 360.0f;
+	if( yaw < -180.0f )
+		yaw += 360.0f;
+	pMon->SetBoneController( 0, yaw );
+}
+
+static float EFW_NpcGroundSpeed( CBaseMonster *pMon )
+{
+	float speed;
+
+	speed = pMon->m_flGroundSpeed * pMon->pev->framerate;
+	if( speed < 1.0f )
+		speed = 64.0f;
+	return speed;
+}
+
+/* FUN_1005d160 anim half: StudioFrameAdvance, idle fidget, DispatchAnimEvents.
+   Move()'s WALK_MOVE is not called. */
+static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
+{
+	entvars_t *pev;
+	float flInterval;
+	float clock;
+
+	if( !pMon )
+		return;
+	pev = pMon->pev;
+	if( !pev->modelindex || s_npcStep )
+		return;
+	clock = gpGlobals->time - pev->animtime;
+	if( clock > 0.001f && clock < 0.25f )
+		flInterval = 0.0f;
+	else
+	{
+		flInterval = gpGlobals->frametime;
+		if( flInterval < 0.001f || flInterval > 0.1f )
+			flInterval = 1.0f / 60.0f;
+	}
+	flInterval = pMon->StudioFrameAdvance( flInterval );
+	if( pMon->m_MonsterState != MONSTERSTATE_SCRIPT && pMon->m_MonsterState != MONSTERSTATE_DEAD
+		&& pMon->m_Activity == ACT_IDLE && pMon->m_fSequenceFinished )
+	{
+		int iSequence;
+
+		if( pMon->m_fSequenceLoops )
+			iSequence = pMon->LookupActivity( pMon->m_Activity );
+		else
+			iSequence = pMon->LookupActivityHeaviest( pMon->m_Activity );
+		if( iSequence != ACTIVITY_NOT_AVAILABLE )
+		{
+			pev->sequence = iSequence;
+			pMon->ResetSequenceInfo();
+			{
+				static int s_fidget;
+				if( s_fidget < 4 )
+				{
+					s_fidget++;
+					EFW_DebugPrint( "idle fidget %s seq=%d",
+						( name && name[0] ) ? name : "?", pev->sequence );
+				}
+			}
+		}
+	}
+	pMon->DispatchAnimEvents( flInterval );
+	{
+		static int s_frame;
+		if( s_frame < 6 && ( pMon->m_Activity == ACT_WALK || pMon->m_Activity == ACT_RUN ) )
+		{
+			s_frame++;
+			EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f gs=%.0f",
+				( name && name[0] ) ? name : "?", pev->sequence, pev->frame, pMon->m_flGroundSpeed );
+		}
+	}
+}
+
 void CRefugee::IdleThink( void )
 {
 	CBasePlayer *pPlayer = NULL;
@@ -388,60 +475,9 @@ void CRefugee::IdleThink( void )
 			}
 		}
 	}
-	/* FUN_1005d160 is CBaseMonster::MonsterThink: StudioFrameAdvance, the
-	   idle fidget, DispatchAnimEvents, then Move. Move's WALK_MOVE stalls,
-	   so the hull step stands in for it and runs after the anim. SetOrigin
-	   does not return into this frame. */
-	if( pev->modelindex && !s_npcStep )
-	{
-		float flInterval;
-		float clock;
-
-		clock = gpGlobals->time - pev->animtime;
-		if( clock > 0.001f && clock < 0.25f )
-			flInterval = 0.0f;
-		else
-		{
-			flInterval = gpGlobals->frametime;
-			if( flInterval < 0.001f || flInterval > 0.1f )
-				flInterval = 1.0f / 60.0f;
-		}
-		flInterval = StudioFrameAdvance( flInterval );
-		if( m_MonsterState != MONSTERSTATE_SCRIPT && m_MonsterState != MONSTERSTATE_DEAD
-			&& m_Activity == ACT_IDLE && m_fSequenceFinished )
-		{
-			int iSequence;
-
-			if( m_fSequenceLoops )
-				iSequence = LookupActivity( m_Activity );
-			else
-				iSequence = LookupActivityHeaviest( m_Activity );
-			if( iSequence != ACTIVITY_NOT_AVAILABLE )
-			{
-				pev->sequence = iSequence;
-				ResetSequenceInfo();
-				{
-					static int s_fidget;
-					if( s_fidget < 4 )
-					{
-						s_fidget++;
-						EFW_DebugPrint( "idle fidget %s seq=%d",
-							( tn && tn[0] ) ? tn : "?", pev->sequence );
-					}
-				}
-			}
-		}
-		DispatchAnimEvents( flInterval );
-		{
-			static int s_frame;
-			if( s_frame < 6 && m_Activity == ACT_WALK )
-			{
-				s_frame++;
-				EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f gs=%.0f",
-					( tn && tn[0] ) ? tn : "?", pev->sequence, pev->frame, m_flGroundSpeed );
-			}
-		}
-	}
+	/* FUN_1005d160 anim half, then the hull step stands in for Move.
+	   SetOrigin does not return into this frame. */
+	EFW_AdvanceNpcAnim( this, tn );
 	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
 	if( pPlayer && !EFW_FStrEq( tn, "queue" )
 		&& m_movementActivity == ACT_WALK && dist > 100.0f
@@ -450,9 +486,7 @@ void CRefugee::IdleThink( void )
 		float speed;
 		int moved;
 
-		speed = m_flGroundSpeed * pev->framerate;
-		if( speed < 1.0f )
-			speed = 64.0f;
+		speed = EFW_NpcGroundSpeed( this );
 		{
 			static int s_gateLog;
 			if( s_gateLog < 8 )
@@ -622,7 +656,6 @@ public:
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT PatrolThink( void );
-	void WalkToward( const Vector &dest );
 	int CanSeePlayer( CBasePlayer *pPlayer );
 	int CanHearPlayer( CBasePlayer *pPlayer );
 	float Dist2D( CBaseEntity *pOther );
@@ -746,19 +779,6 @@ float CPatrolGuard::Dist2D( CBaseEntity *pOther )
 	return d.Length();
 }
 
-void CPatrolGuard::WalkToward( const Vector &dest )
-{
-	Vector delta = dest - pev->origin;
-	float len;
-
-	delta.z = 0;
-	len = delta.Length();
-	if( len < 12.0f )
-		return;
-	SetActivity( ACT_WALK );
-	EFW_StepNpc( pev, dest, 80.0f );
-}
-
 void EFW_PatrolAlertAll( void )
 {
 	CBaseEntity *pGuard = NULL;
@@ -779,20 +799,18 @@ void EFW_PatrolAlertAll( void )
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
 	{
 		CPatrolGuard *pg = (CPatrolGuard *)pGuard;
+		/* FUN_100c5480: EHANDLE +0x168 = player, MoveToTarget(ACT_RUN), alert 4.
+		   FRefreshRoute stalls, so only the goal fields are stored. */
+		pg->m_hTargetEnt = pPlayer;
 		pg->m_hEnemy = pPlayer;
+		pg->m_moveWaitTime = 0;
+		pg->m_movementActivity = ACT_RUN;
+		pg->m_movementGoal = MOVEGOAL_TARGETENT;
 		pg->m_iAlert = 4;
 		if( pPlayer )
 			pg->m_vecLastSeen = pPlayer->pev->origin;
-		pg->SetActivity( ACT_WALK );
-		{
-			static int s_think;
-			if( !s_think )
-			{
-				s_think = 1;
-				EFW_DebugPrint( ">>> FUN_100c54e0" );
-				pg->PatrolThink();
-			}
-		}
+		if( pg->m_Activity != ACT_RUN )
+			pg->SetActivity( ACT_RUN );
 	}
 }
 
@@ -831,7 +849,16 @@ void CPatrolGuard::PatrolThink( void )
 		return;
 	}
 	pev->framerate = 1.0f;
-	pev->movetype = MOVETYPE_NONE;
+	/* FUN_100c54e0 writes movetype 4 (MOVETYPE_STEP) on the non-pause path. */
+	pev->movetype = MOVETYPE_STEP;
+	{
+		static int s_mv;
+		if( !s_mv )
+		{
+			s_mv = 1;
+			EFW_DebugPrint( "patrol movetype STEP" );
+		}
+	}
 	see = CanSeePlayer( pPlayer );
 	hear = CanHearPlayer( pPlayer );
 	if( hear )
@@ -910,20 +937,91 @@ void CPatrolGuard::PatrolThink( void )
 		break;
 	}
 
+	/* Tail of FUN_100c54e0. MoveToTarget / MoveToLocation call FRefreshRoute
+	   (WALK_MOVE) and stall, so only their goal fields are stored. Alert 0
+	   falls through to MonsterThink; the path_corner walk stands in for the
+	   schedule RunAI would run and that we still cannot call. */
 	if( m_iAlert == 4 )
 	{
-		WalkToward( m_vecLastSeen );
+		if( m_movementGoal == MOVEGOAL_NONE && pPlayer )
+		{
+			m_hTargetEnt = pPlayer;
+			m_moveWaitTime = 0;
+			m_movementActivity = ACT_RUN;
+			m_movementGoal = MOVEGOAL_TARGETENT;
+			if( m_Activity != ACT_RUN )
+			{
+				SetActivity( ACT_RUN );
+				EFW_DebugPrint( "patrol chase RUN %s seq=%d",
+					( tn && tn[0] ) ? tn : "?", pev->sequence );
+			}
+		}
 		m_hEnemy = pPlayer;
 	}
 	else if( m_iAlert == 2 || m_iAlert == 3 )
-		WalkToward( m_vecLastSeen );
-	else if( !FStringNull( pev->target ) )
+	{
+		Vector seen = m_vecLastSeen - pev->origin;
+		seen.z = 0;
+		if( seen.Length() > 12.0f )
+		{
+			m_moveWaitTime = 0;
+			m_movementActivity = ACT_WALK;
+			m_movementGoal = MOVEGOAL_LOCATION;
+			m_vecMoveGoal = m_vecLastSeen;
+			if( m_Activity != ACT_WALK )
+			{
+				SetActivity( ACT_WALK );
+				EFW_DebugPrint( "patrol investigate WALK %s seq=%d",
+					( tn && tn[0] ) ? tn : "?", pev->sequence );
+			}
+		}
+		if( pPlayer )
+			m_hTargetEnt = pPlayer;
+	}
+	else if( m_Activity == ACT_RESET )
+		SetActivity( ACT_IDLE );
+	if( m_iAlert == 2 || m_iAlert == 3 || m_iAlert == 4 )
+		EFW_IdleHeadTurn( this, m_vecLastSeen );
+
+	/* MonsterThink anim, then the hull step stands in for Move. */
+	EFW_AdvanceNpcAnim( this, tn );
+	{
+		static entvars_t *s_animWho;
+		static int s_animLog;
+		if( !s_animWho )
+			s_animWho = pev;
+		if( pev == s_animWho && s_animLog < 8 )
+		{
+			s_animLog++;
+			EFW_DebugPrint( "patrol anim %s alert=%d seq=%d frame=%.2f act=%d mt=%d",
+				( tn && tn[0] ) ? tn : "?", m_iAlert, pev->sequence, pev->frame,
+				(int)m_Activity, pev->movetype );
+		}
+	}
+	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
+		EFW_StepNpc( pev, pPlayer->pev->origin, EFW_NpcGroundSpeed( this ) );
+	else if( m_movementGoal == MOVEGOAL_LOCATION )
+	{
+		Vector delta = m_vecMoveGoal - pev->origin;
+		delta.z = 0;
+		if( delta.Length() > 12.0f )
+			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ) );
+		else
+		{
+			m_movementGoal = MOVEGOAL_NONE;
+			if( m_Activity != ACT_IDLE )
+				SetActivity( ACT_IDLE );
+		}
+	}
+	else if( ( m_iAlert == 0 || m_iAlert == 1 ) && !FStringNull( pev->target ) )
 	{
 		if( !m_pGoalEnt )
 			m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
 		if( m_pGoalEnt )
 		{
 			Vector delta = m_pGoalEnt->pev->origin - pev->origin;
+			float speed;
+			int moved;
 			delta.z = 0;
 			if( delta.Length() < 32.0f )
 			{
@@ -931,10 +1029,24 @@ void CPatrolGuard::PatrolThink( void )
 					m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
 			}
 			else
-				EFW_StepNpc( pev, m_pGoalEnt->pev->origin, 80.0f );
+			{
+				if( m_Activity != ACT_WALK )
+					SetActivity( ACT_WALK );
+				speed = EFW_NpcGroundSpeed( this );
+				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed );
+				{
+					static int s_stepLog;
+					if( s_stepLog < 6 )
+					{
+						s_stepLog++;
+						EFW_DebugPrint( "patrol step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", moved, pev->sequence, speed,
+							pev->origin.x, pev->origin.y );
+					}
+				}
+			}
 		}
 	}
-	/* FUN_100c54e0 StudioFrameAdvance; skip until SET_MODEL returns, same as IdleThink. */
 }
 
 void CPatrolGuard::Spawn( void )
@@ -964,6 +1076,9 @@ void CPatrolGuard::Spawn( void )
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
 	m_iAlert = 0;
+	/* FUN_1000d1d0: m_afCapability = 0x7c0 (use, hear, doors, turn head). */
+	m_afCapability = bits_CAP_USE | bits_CAP_HEAR | bits_CAP_AUTO_DOORS
+		| bits_CAP_OPEN_DOORS | bits_CAP_TURN_HEAD;
 	m_flAlertTime = 0;
 	m_flStateTime = 0;
 	m_iCaught = 0;
@@ -1020,8 +1135,8 @@ void EFW_EnableNpcThink( edict_t *pent )
 		CPatrolGuard *pGuard = (CPatrolGuard *)pEnt;
 		pGuard->SetThink( &CPatrolGuard::PatrolThink );
 		pent->v.nextthink = gpGlobals->time;
-		pent->v.movetype = MOVETYPE_NONE;
-		pent->v.solid = SOLID_NOT;
+		/* Bind already set SOLID_BBOX. Leave it. PatrolThink sets
+		   MOVETYPE_STEP once the model index exists. */
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}
