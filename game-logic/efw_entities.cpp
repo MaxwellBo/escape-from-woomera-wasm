@@ -305,11 +305,11 @@ static void EFW_NpcFall( entvars_t *pev )
 					EFW_DebugPrint( "step down z=%.0f -> %.0f at %.0f %.0f",
 						pev->origin.z, landed.z, landed.x, landed.y );
 				}
-				s_npcStep = 0;
 				pev->velocity.z = 0.0f;
 				pev->flags |= FL_ONGROUND;
 				if( drop >= 0.5f )
 					UTIL_SetOrigin( pev, landed );
+				s_npcStep = 0;
 				return;
 			}
 		}
@@ -788,8 +788,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		s_npcStep = 0;
 		return 0;
 	}
-	s_npcStep = 0;
 	UTIL_SetOrigin( pev, landed );
+	s_npcStep = 0;
 	return 1;
 }
 
@@ -948,6 +948,11 @@ void CRefugee::IdleThink( void )
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
 	pev->nextthink = gpGlobals->time;
+	/* A hull link from inside this think can touch and re-enter it.
+	   s_npcStep is set across that link so the re-entry does not fall
+	   and link again (that blew the host pump's stack). */
+	if( s_npcStep )
+		return;
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
