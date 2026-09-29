@@ -2020,10 +2020,12 @@ function syncWalkLatch() {
   runGameCmd(`efw_clmove ${fwd} ${side}`);
 }
 function syncJump(on: boolean) {
-  runGameCmd(`efw_cjump ${on ? 1 : 0}`);
+  /* Listen-server console runs the client command. Stufftext from
+     efw_cjump does not reach CL_CreateMove. */
+  runGameCmd(`efw_pjump ${on ? 1 : 0}`);
 }
 function syncDuck(on: boolean) {
-  runGameCmd(`efw_cduck ${on ? 1 : 0}`);
+  runGameCmd(`efw_pduck ${on ? 1 : 0}`);
 }
 
 /* Coalesce pointer deltas to one usercmd look per frame. The client DLL
