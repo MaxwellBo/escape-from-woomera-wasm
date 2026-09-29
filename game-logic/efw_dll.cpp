@@ -2618,6 +2618,9 @@ void EFW_StartFrame( void )
 			EFW_LogLine( line );
 		}
 	}
+	/* After the pulse. Linking inside the think re-entered it until the
+	   pump faulted and the hull stopped. */
+	EFW_FlushNpcOrigins();
 }
 
 int EFW_PrecacheOnce( const char *szClassname )

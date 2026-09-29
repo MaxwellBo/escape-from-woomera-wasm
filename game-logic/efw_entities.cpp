@@ -189,10 +189,69 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
-/* Set while the hull trace is on the stack. Cleared before SetOrigin:
-   that link does not return into this frame, so a flag held across it
-   sticks and later thinks never step. */
+/* Set while the hull trace is on the stack. Cleared before any link.
+   SET_ORIGIN from inside the think re-enters IdleThink until the host
+   pump faults, so the think only records the origin. StartFrame links
+   the queue after the pulse returns. */
 static int s_npcStep;
+static edict_t *s_linkEdict[48];
+static Vector s_linkOrigin[48];
+static int s_linkN;
+
+static void EFW_QueueOrigin( entvars_t *pev, const Vector &org )
+{
+	edict_t *e;
+	int i;
+
+	if( !pev )
+		return;
+	pev->origin = org;
+	e = ENT( pev );
+	if( !e )
+		return;
+	for( i = 0; i < s_linkN; i++ )
+	{
+		if( s_linkEdict[i] == e )
+		{
+			s_linkOrigin[i] = org;
+			return;
+		}
+	}
+	if( s_linkN >= (int)( sizeof( s_linkEdict ) / sizeof( s_linkEdict[0] ) ) )
+		return;
+	s_linkEdict[s_linkN] = e;
+	s_linkOrigin[s_linkN] = org;
+	s_linkN++;
+}
+
+void EFW_FlushNpcOrigins( void )
+{
+	edict_t *queued[48];
+	Vector origins[48];
+	int n;
+	int i;
+
+	n = s_linkN;
+	if( n <= 0 )
+		return;
+	if( n > 48 )
+		n = 48;
+	for( i = 0; i < n; i++ )
+	{
+		queued[i] = s_linkEdict[i];
+		origins[i] = s_linkOrigin[i];
+	}
+	/* Moves queued by a touch during the link wait until the next pump. */
+	s_linkN = 0;
+	for( i = 0; i < n; i++ )
+	{
+		if( !queued[i] || queued[i]->free )
+			continue;
+		s_npcStep = 1;
+		UTIL_SetOrigin( &queued[i]->v, origins[i] );
+		s_npcStep = 0;
+	}
+}
 
 /* SV_MoveStep: stand the hull on the floor within sv_stepsize (18, set in
    CWorld::Precache). Raise the candidate by that, drop twice that, and
@@ -346,7 +405,7 @@ static void EFW_NpcFall( entvars_t *pev )
 					z0, end.z, end.x, end.y );
 			}
 		}
-		UTIL_SetOrigin( pev, end );
+		EFW_QueueOrigin( pev, end );
 		return;
 	}
 	{
@@ -361,7 +420,7 @@ static void EFW_NpcFall( entvars_t *pev )
 				z0, end.z, end.x, end.y );
 		}
 	}
-	UTIL_SetOrigin( pev, end );
+	EFW_QueueOrigin( pev, end );
 }
 
 /* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
@@ -479,7 +538,7 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 		if( dirx == 0.0f )
 			diag = ( diry == 90.0f ) ? 45.0f : 315.0f;
 		else
-			diag = ( diry == 90.0f ) ? 135.0f : 215.0f;
+			diag = ( diry == 90.0f ) ? 135.0f : 225.0f;
 		tryYaw[ntry++] = diag;
 	}
 	if( fabsf( deltay ) > fabsf( deltax ) )
@@ -788,7 +847,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		return 0;
 	}
 	s_npcStep = 0;
-	UTIL_SetOrigin( pev, landed );
+	EFW_QueueOrigin( pev, landed );
 	return 1;
 }
 
@@ -1084,6 +1143,18 @@ void CRefugee::IdleThink( void )
 			}
 		}
 		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
+		{
+			float left = ( pPlayer->pev->origin - pev->origin ).Length();
+			static int s_approach;
+
+			if( left < 130.0f && s_approach < 3 )
+			{
+				s_approach++;
+				EFW_DebugPrint( "approach %s dist=%.0f origin=%.0f %.0f %.0f",
+					( tn && tn[0] ) ? tn : "?", left,
+					pev->origin.x, pev->origin.y, pev->origin.z );
+			}
+		}
 		if( moved && EFW_FStrEq( tn, "Amir" ) )
 		{
 			static int s_amirStep;
