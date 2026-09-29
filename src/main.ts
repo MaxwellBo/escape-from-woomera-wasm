@@ -2015,9 +2015,11 @@ function walkSlot(key: string): keyof typeof walkKeys | null {
 function syncWalkLatch() {
   const fwd = (walkKeys.w ? 1 : 0) + (walkKeys.s ? -1 : 0);
   const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
-  /* CL_CreateMove writes this into the usercmd. PM_Move walks; the origin
-     latch stays at zero. */
-  runGameCmd(`efw_clmove ${fwd} ${side}`);
+  /* CL_CreateMove writes efw_pmove into the usercmd. The listen-server
+     console runs that client command; stufftext from efw_clmove does not
+     arrive. efw_move 0 0 keeps the origin latch clear. */
+  runGameCmd('efw_move 0 0');
+  runGameCmd(`efw_pmove ${fwd} ${side}`);
 }
 function syncJump(on: boolean) {
   /* Listen-server console runs the client command. Stufftext from
@@ -2046,7 +2048,9 @@ function queueLook(yaw: number, pitch: number) {
     lookPending.yaw = 0;
     lookPending.pitch = 0;
     if (!y && !p) return;
-    runGameCmd(`efw_clook ${y.toFixed(3)} ${p.toFixed(3)}`);
+    /* Same console path as efw_pmove. efw_clook's stufftext never reaches
+       CL_CreateMove, so the view delta is applied here. */
+    runGameCmd(`efw_plook ${y.toFixed(3)} ${p.toFixed(3)}`);
   });
 }
 
