@@ -762,63 +762,24 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	return 1;
 }
 
-/* PE ChangeYaw 0x100603b0: degrees = yawSpeed * gpGlobals->frametime * 10,
-   once per MonsterThink (nextthink +0.1). monsteryawspeedfix is the later
-   SDK path and sv.time does not move, so that path never sees a frame.
-   The host pump is the 0.1s think, not the engine frame inside it.
-   Passing the whole interval turns at yawSpeed*10 deg/s. A GoldSrc frame
-   is about a tenth of that think, so frametime*10 collapses to the think
-   and the body turns at yawSpeed degrees per second. */
+/* PE ChangeYaw 0x100603b0: speed = yawSpeed * frametime * 10.
+   monsteryawspeedfix is the later SDK path (yawSpeed * delta * 2) and
+   sv.time does not move between thinks, so that path never sees a
+   frame. The host pump is the frametime this call would have had. */
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed )
 {
 	float savedFix;
 	float savedFrame;
-	float before;
-	float turned;
-	float dt;
 
 	if( !pMon )
 		return;
-	before = pMon->pev->angles.y;
-	dt = EFW_HostInterval();
 	savedFix = monsteryawspeedfix.value;
 	savedFrame = gpGlobals->frametime;
 	monsteryawspeedfix.value = 0.0f;
-	gpGlobals->frametime = dt * 0.1f;
+	gpGlobals->frametime = EFW_HostInterval();
 	pMon->ChangeYaw( yawSpeed );
 	monsteryawspeedfix.value = savedFix;
 	gpGlobals->frametime = savedFrame;
-	turned = pMon->pev->angles.y - before;
-	while( turned > 180.0f )
-		turned -= 360.0f;
-	while( turned < -180.0f )
-		turned += 360.0f;
-	if( turned < 0.0f )
-		turned = -turned;
-	{
-		static int s_rate;
-		/* A full ideal-error snap is yawSpeed*dt*10 (~84° at dt 0.12).
-		   The PE step is about a tenth of that. Keep the samples that
-		   still had a large error so the cap is visible. */
-		if( s_rate < 8 && turned > 0.5f )
-		{
-			float err = pMon->pev->ideal_yaw - before;
-			while( err > 180.0f )
-				err -= 360.0f;
-			while( err < -180.0f )
-				err += 360.0f;
-			if( err < 0.0f )
-				err = -err;
-			if( err > 25.0f )
-			{
-				const char *tn = STRING( pMon->pev->targetname );
-				s_rate++;
-				EFW_DebugPrint( "yaw rate %s before=%.0f ang=%.0f step=%.1f err=%.0f spd=%d dt=%.3f",
-					( tn && tn[0] ) ? tn : "?",
-					before, pMon->pev->angles.y, turned, err, yawSpeed, dt );
-			}
-		}
-	}
 }
 
 /* FUN_1009b420: if bits_CAP_TURN_HEAD, yaw toward the point and
