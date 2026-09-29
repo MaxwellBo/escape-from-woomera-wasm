@@ -279,18 +279,31 @@ void CRefugee::IdleThink( void )
 		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
-			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
+			/* iuser1 survives even if the CRefugee tail field does not. */
 			m_iWalkState = 3;
+			pev->iuser1 = 3;
 			m_hEnemy = pPlayer;
+			EFW_DebugPrint( "now walking %s state=%d user=%d dist=%.0f",
+				( tn && tn[0] ) ? tn : "?", m_iWalkState, pev->iuser1, dist );
 		}
-		/* FUN_100c6440 walk state 3 is FUN_1005d500. Trace the hull toward
-		   the player instead of WALK_MOVE, which stalls the WASM frame. */
-		if( m_iWalkState == 3 && dist > 100.0f )
+		/* FUN_100c6440 walk state 3 is FUN_1005d500. Trace toward the
+		   player instead of WALK_MOVE, which stalls the WASM frame. */
+		if( ( m_iWalkState == 3 || pev->iuser1 == 3 ) && dist > 100.0f )
 		{
-			int moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
+			int moved;
+			{
+				static int s_gateLog;
+				if( s_gateLog < 8 )
+				{
+					s_gateLog++;
+					EFW_DebugPrint( "IdleThink gate %s user=%d dist=%.0f",
+						( tn && tn[0] ) ? tn : "?", pev->iuser1, dist );
+				}
+			}
+			moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
 			{
 				static int s_stepLog;
-				if( s_stepLog < 16 )
+				if( s_stepLog < 8 )
 				{
 					s_stepLog++;
 					EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
@@ -300,10 +313,16 @@ void CRefugee::IdleThink( void )
 				}
 			}
 			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
+			{
 				m_iWalkState = 0;
+				pev->iuser1 = 0;
+			}
 		}
 		else if( dist <= 100.0f )
+		{
 			m_iWalkState = 0;
+			pev->iuser1 = 0;
+		}
 	}
 	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
 }
