@@ -379,12 +379,12 @@ void EFW_ThinkHope( void )
 	elapsed = now - g_efw.hopeClock;
 	if( elapsed <= 0.0f )
 	{
-		/* Frozen gpGlobals->time: drain once per StartFrame pulse. */
+		/* Frozen gpGlobals->time still calls StartFrame every rendered
+		   frame. A full frametime per call spends hope in a couple of
+		   minutes. 1/60s per pulse matches a live host. */
 		if( s_hopePulse == s_hudPulse )
 			return;
-		elapsed = gpGlobals->frametime;
-		if( elapsed <= 0.0f )
-			elapsed = 0.05f;
+		elapsed = 1.0f / 60.0f;
 	}
 	s_hopePulse = s_hudPulse;
 	g_efw.hopeClock = now;

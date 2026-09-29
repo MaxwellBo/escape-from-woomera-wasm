@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll135`;
+    return `${url}?v=efw-dll136`;
   return url;
 }
 
@@ -572,6 +572,12 @@ function log(text: string) {
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live=')
       || normalized.includes('efw: world present live='))
     resumeAfterFirstClientFrame();
+  if (consoleForPlaque && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip'))
+    schedulePlaqueClose();
+  if (chapterNeedsGameKey && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip')) {
+    chapterNeedsGameKey = false;
+    setTimeout(() => dismissChapterOverlay(), 2500);
+  }
   if (/\bSpawning\b/.test(normalized) && normalized.includes('loopback'))
     finishListenSpawn();
   if (applyEfwStory(normalized)) return;
@@ -647,10 +653,13 @@ let lastResumeMs = 0;
    Hold key_console only for SCR_BeginLoadingPlaque, then release after
    HUD_Redraw (proof of ca_active). */
 let consoleForPlaque = false;
+let plaqueCloseTimer: ReturnType<typeof setTimeout> | null = null;
 /* First-map libmenu pause is why engine StartFrame never advances without
    HostPump. Software present hung on UI_SetActiveMenu(false). WebGL2
    (gles3compat) is the new present path that can survive key_game. */
 let firstMapKeyGame = false;
+let chapterChanging = false;
+let chapterNeedsGameKey = false;
 function resumeEngineLoop() {
   const now = Date.now();
   /* resume() increments currentlyRunningMainloop and aborts the in-flight
@@ -667,10 +676,44 @@ function resumeEngineLoop() {
   }
 }
 
+function dismissChapterOverlay() {
+  /* Same open-then-close as the first map. One toggle leaves the console
+     up; the second calls UI_SetActiveMenu(false) and the chapter view
+     stays on screen. */
+  log('listen: chapter double toggleconsole → key_game');
+  runEngineCmd('pausable 0');
+  runEngineCmd('toggleconsole');
+  setTimeout(() => {
+    runEngineCmd('toggleconsole');
+    runEngineCmd('setpause 0');
+    runEngineCmd('unpause');
+    runEngineCmd('pausable 0');
+    log('listen: chapter key_game');
+  }, 300);
+}
+
+function schedulePlaqueClose() {
+  if (!consoleForPlaque || plaqueCloseTimer)
+    return;
+  /* HUD_Redraw skip is the ca_active proof. A toggle any earlier is ignored
+     and the loading console stays over the next chapter. */
+  plaqueCloseTimer = setTimeout(() => {
+    plaqueCloseTimer = null;
+    releaseConsoleToGame();
+  }, 3500);
+}
+
 function releaseConsoleToGame() {
   if (!consoleForPlaque)
     return;
   consoleForPlaque = false;
+  if (plaqueCloseTimer) {
+    clearTimeout(plaqueCloseTimer);
+    plaqueCloseTimer = null;
+  }
+  /* The first-map double toggle must not run after this close, or it
+     opens the console again on top of the next chapter. */
+  firstMapKeyGame = true;
   /* ca_active is required: otherwise Con_ToggleConsole_f reopens the menu. */
   runEngineCmd('toggleconsole');
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
@@ -678,8 +721,12 @@ function releaseConsoleToGame() {
 
 function dismissMenuAfterHud() {
   if (consoleForPlaque) {
-    releaseConsoleToGame();
+    /* HUD_Redraw can fire while CHANGE_LEVEL is still connecting.
+       toggleconsole then leaves the console open over the next chapter.
+       The ServerActivate world-present timeout closes it once the view
+       origin is live. */
     startHostPumps();
+    log('listen: hold plaque console until world present');
     return;
   }
   if (firstMapKeyGame)
@@ -797,7 +844,13 @@ function loadMap(name: string, reason: string) {
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
   consoleForPlaque = false;
-  firstMapKeyGame = false;
+  chapterChanging = true;
+  chapterNeedsGameKey = true;
+  if (plaqueCloseTimer) {
+    clearTimeout(plaqueCloseTimer);
+    plaqueCloseTimer = null;
+  }
+  firstMapKeyGame = true;
   if (pumpTimer) {
     clearInterval(pumpTimer);
     pumpTimer = null;
@@ -819,13 +872,14 @@ function loadMap(name: string, reason: string) {
     log(`listen: pfnChangeLevel ${name}`);
     runEngineCmd('pausable 0');
     runEngineCmd('sv_validate_changelevel 0');
-    /* Plaque SCR_UpdateScreen hangs the software renderer. key_console
-       makes SCR_BeginLoadingPlaque return before that present.
-       Do not toggleconsole again until HUD_Redraw: closing the console
-       while !ca_active calls UI_SetActiveMenu(true) and brings libmenu back. */
-    runEngineCmd('toggleconsole');
-    consoleForPlaque = true;
-    log('listen: key_console for plaque (skip software present hang)');
+    /* WebGL presents through the loading plaque, so do not open the
+       console here. While cls.state is ca_connected the engine draws the
+       console anyway; toggleconsole before ca_active is a no-op, and the
+       same call once background cvars are set opens the main menu. */
+    runEngineCmd('sv_background 0');
+    runEngineCmd('cl_background 0');
+    consoleForPlaque = false;
+    log('listen: changelevel without plaque console');
     runEngineCmd(`efw_changelevel ${name}`);
     /* Do not resumeMainLoop here. A live rAF is what runs SV_ExecChangeLevel
        on the next COM_Frame; kicking resume aborts that runner (dll65/74). */
@@ -942,8 +996,9 @@ function onServerActivateSeen() {
     finishListenSpawn();
     runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
-    if (!firstMapKeyGame)
+    if (!chapterChanging && !firstMapKeyGame && !consoleForPlaque)
       dismissMenuAfterHud();
+    chapterChanging = false;
   }, 2500);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {

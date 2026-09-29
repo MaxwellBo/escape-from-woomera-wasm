@@ -1673,10 +1673,17 @@ static void EFW_DrawIconFly( void )
 		return;
 	}
 	dt = now - g_iconFlyAt;
-	if( dt > 2.0f )
+	/* m_flTime sticks across a chapter load, which left the stand-in
+	   quad in the middle of the view for the rest of the map. */
 	{
-		g_iconFlyOn = 0;
-		return;
+		static int s_flyFrames;
+		s_flyFrames++;
+		if( dt > 2.0f || s_flyFrames > 90 )
+		{
+			g_iconFlyOn = 0;
+			s_flyFrames = 0;
+			return;
+		}
 	}
 	t = dt * 3.3333333f;
 	if( t < 0.0f )
