@@ -218,12 +218,44 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	start = pev->origin;
 	end = start + wish;
 	s_npcStep = 1;
-	/* Feet-origin mins.z == 0 sits in the floor and the trace is startsolid. */
+	/* Feet-origin mins.z == 0 sits in the floor and the trace is startsolid.
+	   StartMonster adds 1 to origin.z and DROP_TO_FLOOR before WALK_MOVE.
+	   DROP_TO_FLOOR cannot lift an origin that is already inside the floor,
+	   so climb until the monster hull is clear, then step that hull. */
 	savedMins = pev->mins.z;
 	if( savedMins < 1.0f )
 		pev->mins.z = 1.0f;
 	memset( &tr, 0, sizeof( tr ) );
 	TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+	if( tr.fAllSolid || tr.fStartSolid )
+	{
+		int stepUp;
+		float baseZ = start.z;
+		for( stepUp = 1; stepUp <= 24; stepUp++ )
+		{
+			Vector raised = start;
+			raised.z = baseZ + stepUp * 2.0f;
+			memset( &tr, 0, sizeof( tr ) );
+			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
+			if( !tr.fStartSolid && !tr.fAllSolid )
+			{
+				start = raised;
+				end = start + wish;
+				memset( &tr, 0, sizeof( tr ) );
+				TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+				{
+					static int s_lift;
+					if( s_lift < 6 )
+					{
+						s_lift++;
+						EFW_DebugPrint( "floor lift z=%.0f -> %.0f solid=%d frac=%.2f",
+							baseZ, start.z, tr.fStartSolid, tr.flFraction );
+					}
+				}
+				break;
+			}
+		}
+	}
 	pev->mins.z = savedMins;
 	{
 		static int s_hullLog;
