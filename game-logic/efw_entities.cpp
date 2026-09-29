@@ -741,7 +741,6 @@ public:
 	float m_flAlertTime; /* this+0x3a8 */
 	float m_flStateTime; /* this+0x3ac */
 	int m_iCaught;
-	int m_iHearLatch; /* FUN_100c5e30 this+0x2e4 == 8 consume-once */
 };
 
 LINK_ENTITY_TO_CLASS( monster_patrol_guard, CPatrolGuard )
@@ -804,46 +803,57 @@ int CPatrolGuard::CanSeePlayer( CBasePlayer *pPlayer )
 	}
 	if( dot < 0.5f )
 		return 0;
-	from = pev->origin + Vector( 0, 0, 40 );
-	to = pPlayer->pev->origin + Vector( 0, 0, 40 );
+	/* FUN_100c5c50: first TRACE_LINE is origin to origin. If that
+	   fraction is below 1, both ends are raised 40 and traced again. */
+	from = pev->origin;
+	to = pPlayer->pev->origin;
 	UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
-	if( tr.flFraction >= 1.0f )
-		return 1;
-	to.z += 40.0f;
-	UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
-	return tr.flFraction >= 1.0f;
+	{
+		float feet = tr.flFraction;
+		float chest = -1.0f;
+		int hit;
+		if( feet < 1.0f )
+		{
+			from.z += 40.0f;
+			to.z += 40.0f;
+			UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
+			chest = tr.flFraction;
+		}
+		hit = ( feet >= 1.0f || chest >= 1.0f ) ? 1 : 0;
+		{
+			static int s_ray;
+			if( s_ray < 4 )
+			{
+				const char *rn = STRING( pev->targetname );
+				s_ray++;
+				EFW_DebugPrint( "see ray %s feet=%.2f z=%.0f->%.0f chest=%.2f hit=%d",
+					( rn && rn[0] ) ? rn : "?", feet, pev->origin.z,
+					pPlayer->pev->origin.z, chest, hit );
+			}
+		}
+		return hit;
+	}
 }
 
 int CPatrolGuard::CanHearPlayer( CBasePlayer *pPlayer )
 {
-	/* FUN_100c5e30: if this+0x2e4 == 8, clear and return 1. Latch is set when
-	   the player is loud (2D vel > 80) within 256u — original memory bit 8. */
-	Vector d;
-	if( !pPlayer )
+	(void)pPlayer;
+	/* FUN_100c5e30 is 29 bytes. this+0x2e4 is m_iTriggerCondition, written
+	   by KeyValue for "TriggerCondition". 8 is AITRIGGER_HEARPLAYER. The
+	   function clears that field and returns 1. It does not read velocity.
+	   Level 2 guards have no TriggerCondition key, so this stays 0. */
+	if( m_iTriggerCondition != AITRIGGER_HEARPLAYER )
 		return 0;
-	d = pPlayer->pev->origin - pev->origin;
-	d.z = 0;
-	if( d.Length() <= 256.0f )
 	{
-		Vector vel = pPlayer->pev->velocity;
-		vel.z = 0;
-		if( vel.Length() > 80.0f )
-			m_iHearLatch = 8;
-	}
-	if( m_iHearLatch == 8 )
-	{
+		static int s_hear;
+		if( !s_hear )
 		{
-			static int s_hear;
-			if( !s_hear )
-			{
-				s_hear = 1;
-				EFW_DebugPrint( ">>> FUN_100c5e30" );
-			}
+			s_hear = 1;
+			EFW_DebugPrint( ">>> FUN_100c5e30" );
 		}
-		m_iHearLatch = 0;
-		return 1;
 	}
-	return 0;
+	m_iTriggerCondition = AITRIGGER_NONE;
+	return 1;
 }
 
 float CPatrolGuard::Dist2D( CBaseEntity *pOther )
@@ -941,10 +951,13 @@ void CPatrolGuard::PatrolThink( void )
 			EFW_DebugPrint( "patrol movetype STEP" );
 		}
 	}
+	/* The print call sits before the switch and consumes TriggerCondition.
+	   Each case calls FUN_100c5e30 again, so the state machine does not
+	   see the same true result. */
+	if( CanHearPlayer( pPlayer ) )
+		EFW_DebugPrint( "can hear player!!!!!!!!" );
 	see = CanSeePlayer( pPlayer );
 	hear = CanHearPlayer( pPlayer );
-	if( hear )
-		EFW_DebugPrint( "can hear player!!!!!!!!" );
 
 	/* FUN_100c54e0 patrol alert FSM, this+0x398. */
 	switch( m_iAlert )
@@ -1017,6 +1030,33 @@ void CPatrolGuard::PatrolThink( void )
 		break;
 	default:
 		break;
+	}
+	{
+		static int s_sense;
+		float spd = 0.0f;
+		if( pPlayer )
+		{
+			Vector vel = pPlayer->pev->velocity;
+			vel.z = 0;
+			spd = vel.Length();
+		}
+		if( ( see || hear || m_iAlert ) && s_sense < 6 )
+		{
+			s_sense++;
+			EFW_DebugPrint( "patrol sense %s see=%d hear=%d alert=%d vel=%.0f trig=%d",
+				( tn && tn[0] ) ? tn : "?", see, hear, m_iAlert, spd,
+				m_iTriggerCondition );
+		}
+		if( see && spd > 80.0f )
+		{
+			static int s_runSee;
+			if( s_runSee < 4 )
+			{
+				s_runSee++;
+				EFW_DebugPrint( "patrol sense run %s see=%d hear=%d alert=%d vel=%.0f",
+					( tn && tn[0] ) ? tn : "?", see, hear, m_iAlert, spd );
+			}
+		}
 	}
 
 	/* Tail of FUN_100c54e0. MoveToTarget / MoveToLocation call FRefreshRoute
@@ -1191,7 +1231,6 @@ void CPatrolGuard::Spawn( void )
 	m_flAlertTime = 0;
 	m_flStateTime = 0;
 	m_iCaught = 0;
-	m_iHearLatch = 0;
 	SetUse( &CPatrolGuard::TalkUse );
 	{
 		static int s_pt;
