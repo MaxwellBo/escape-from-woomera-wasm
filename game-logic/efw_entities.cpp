@@ -182,6 +182,36 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
    sticks and later thinks never step. */
 static int s_npcStep;
 
+/* SV_MoveStep: stand the hull on the floor within sv_stepsize (18, set in
+   CWorld::Precache). Raise the candidate by that, drop twice that, and
+   take the hit. MOVE_TO_ORIGIN is the engine call that stalls with
+   WALK_MOVE, so this is the same test with TRACE_MONSTER_HULL. */
+static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
+{
+	TraceResult tr;
+	Vector top;
+	Vector bot;
+	const float step = 18.0f;
+
+	top = pos;
+	bot = pos;
+	top.z += step;
+	bot.z -= step;
+	memset( &tr, 0, sizeof( tr ) );
+	TRACE_MONSTER_HULL( ENT( pev ), top, bot, ignore_monsters, ENT( pev ), &tr );
+	/* The raised hull is in the ceiling. Retry from the candidate z. */
+	if( tr.fStartSolid || tr.fAllSolid )
+	{
+		top = pos;
+		memset( &tr, 0, sizeof( tr ) );
+		TRACE_MONSTER_HULL( ENT( pev ), top, bot, ignore_monsters, ENT( pev ), &tr );
+	}
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
+		return 0;
+	*out = tr.vecEndPos;
+	return 1;
+}
+
 /* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
    Trace the PE hull (-16..16, 0..72) and ignore other monsters so touch
    does not call back into think. MoveExecute walks
@@ -287,7 +317,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		{
 			int stepUp;
 			float baseZ = start.z;
-			for( stepUp = 1; stepUp <= 24; stepUp++ )
+			/* sv_stepsize is 18. A taller climb is the pop past a ceiling. */
+			for( stepUp = 1; stepUp <= 9; stepUp++ )
 			{
 				Vector raised = start;
 				raised.z = baseZ + stepUp * 2.0f;
@@ -322,17 +353,44 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 					tr.flFraction, tr.fStartSolid, tr.fAllSolid );
 			}
 		}
-		if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		/* Prefer the step-size landing at the full chunk. A blocked hull
+		   falls back to the partial slide, then lands if a floor is near. */
+		if( EFW_LandMonster( pev, end, &stepLand ) )
+		{
+			float dz = stepLand.z - start.z;
+			if( dz < 0.0f )
+				dz = -dz;
+			if( dz >= 1.0f )
+			{
+				static int s_ground;
+				if( s_ground < 6 )
+				{
+					s_ground++;
+					EFW_DebugPrint( "step ground z=%.0f -> %.0f at %.0f %.0f",
+						start.z, stepLand.z, stepLand.x, stepLand.y );
+				}
+			}
+		}
+		else if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
 		{
 			Vector chest = start + Vector( 0, 0, 36 );
 			UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
 			if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
 				break;
 			stepLand = start + wish * tr.flFraction;
+			stepLand.z = start.z;
 		}
 		else
+		{
 			stepLand = start + ( end - start ) * tr.flFraction;
-		stepLand.z = start.z;
+			{
+				Vector grounded;
+				if( EFW_LandMonster( pev, stepLand, &grounded ) )
+					stepLand = grounded;
+				else
+					stepLand.z = start.z;
+			}
+		}
 		stepLen = ( stepLand - start ).Length();
 		if( stepLen < 0.5f )
 			break;
