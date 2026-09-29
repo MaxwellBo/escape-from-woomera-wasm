@@ -177,10 +177,10 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
-/* Set while the hull trace is on the stack. A second flag covers SetOrigin,
-   which can re-enter think; IdleThink must still finish or the flag sticks. */
+/* Set while the hull trace is on the stack. Cleared before SetOrigin:
+   that link does not return into this frame, so a flag held across it
+   sticks and later thinks never step. */
 static int s_npcStep;
-static int s_npcLink;
 
 /* FUN_1005d500 / MoveExecute step. WALK_MOVE stalls Host_Frame on these
    studios. Trace the PE hull (-16..16, 0..72) and ignore other monsters so
@@ -199,7 +199,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	float step;
 	float savedMins;
 
-	if( !pev || s_npcStep || s_npcLink )
+	if( !pev || s_npcStep )
 		return 0;
 	delta = goal - pev->origin;
 	delta.z = 0.0f;
@@ -255,9 +255,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	}
 	pev->angles.y = UTIL_VecToYaw( wish );
 	s_npcStep = 0;
-	s_npcLink = 1;
 	UTIL_SetOrigin( pev, landed );
-	s_npcLink = 0;
 	return 1;
 }
 
