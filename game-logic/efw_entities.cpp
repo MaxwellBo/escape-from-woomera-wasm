@@ -177,6 +177,86 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
+/* FUN_1005d500 / MoveExecute step. Engine WALK_MOVE and MOVETYPE_STEP stall
+   Host_Frame on these studios, so the same hull the PE sets (-16..16, 0..72)
+   is traced here. 16 units is the stair limit in CBaseMonster::MoveExecute. */
+static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
+{
+	Vector delta;
+	Vector wish;
+	Vector start;
+	Vector end;
+	Vector landed;
+	TraceResult tr;
+	float len;
+	float dt;
+	float step;
+
+	if( !pev )
+		return 0;
+	delta = goal - pev->origin;
+	delta.z = 0.0f;
+	len = delta.Length();
+	if( len < 1.0f )
+		return 0;
+	dt = gpGlobals->frametime;
+	if( dt < 0.001f || dt > 0.25f )
+		dt = 0.05f;
+	step = speed * dt;
+	if( step > 16.0f )
+		step = 16.0f;
+	if( step > len )
+		step = len;
+	wish = delta * ( step / len );
+	start = pev->origin;
+	end = start + wish;
+	TRACE_MONSTER_HULL( ENT( pev ), start, end, dont_ignore_monsters, ENT( pev ), &tr );
+	if( tr.fStartSolid )
+	{
+		TraceResult over;
+		Vector up( 0, 0, 18 );
+		TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
+		if( over.fStartSolid || over.flFraction < 1.0f )
+			return 0;
+		start = over.vecEndPos;
+		end = start + wish;
+		TRACE_MONSTER_HULL( ENT( pev ), start, end, dont_ignore_monsters, ENT( pev ), &tr );
+		if( tr.fStartSolid )
+			return 0;
+	}
+	landed = tr.vecEndPos;
+	if( tr.flFraction < 1.0f )
+	{
+		TraceResult over;
+		TraceResult across;
+		Vector up( 0, 0, 18 );
+		TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
+		if( !over.fStartSolid && over.flFraction >= 1.0f )
+		{
+			TRACE_MONSTER_HULL( ENT( pev ), over.vecEndPos, over.vecEndPos + wish, dont_ignore_monsters, ENT( pev ), &across );
+			if( !across.fStartSolid && across.flFraction > tr.flFraction )
+			{
+				TraceResult drop;
+				TRACE_MONSTER_HULL( ENT( pev ), across.vecEndPos, across.vecEndPos - up, dont_ignore_monsters, ENT( pev ), &drop );
+				landed = drop.fStartSolid ? across.vecEndPos : drop.vecEndPos;
+			}
+		}
+	}
+	else
+	{
+		TraceResult drop;
+		Vector down( 0, 0, 18 );
+		TRACE_MONSTER_HULL( ENT( pev ), landed, landed - down, dont_ignore_monsters, ENT( pev ), &drop );
+		if( !drop.fStartSolid && drop.flFraction < 1.0f && drop.flFraction > 0.0f )
+			landed = drop.vecEndPos;
+	}
+	if( ( landed - pev->origin ).Length() < 0.5f )
+		return 0;
+	pev->angles.y = UTIL_VecToYaw( wish );
+	UTIL_SetOrigin( pev, landed );
+	return 1;
+}
+
 void CRefugee::IdleThink( void )
 {
 	CBasePlayer *pPlayer;
@@ -228,18 +308,16 @@ void CRefugee::IdleThink( void )
 			m_iWalkState = 3;
 			m_hEnemy = pPlayer;
 		}
-		/* FUN_100c6440 Spirit walk state 3 (FUN_1005d500). WALK_MOVE without
-		   a studio stalls Host_Frame, so close the gap by origin lerp. */
+		/* FUN_100c6440 walk state 3 is FUN_1005d500. Trace the hull toward
+		   the player instead of WALK_MOVE, which stalls the WASM frame. */
 		if( m_iWalkState == 3 && dist > 100.0f )
 		{
-			Vector step;
-			float len = dist;
-			if( len < 1.0f )
-				len = 1.0f;
-			step = delta * ( 12.0f / len );
-			step.z = 0;
-			UTIL_SetOrigin( pev, pev->origin + step );
-			pev->angles.y = UTIL_VecToYaw( delta );
+			int moved = EFW_StepNpc( pev, pPlayer->pev->origin, 100.0f );
+			if( ( s_walkTick % 30 ) == 0 )
+				EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", moved,
+					pev->origin.x, pev->origin.y, pev->origin.z,
+					( pPlayer->pev->origin - pev->origin ).Length() );
 			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
 				m_iWalkState = 0;
 		}
@@ -524,14 +602,8 @@ void CPatrolGuard::WalkToward( const Vector &dest )
 	len = delta.Length();
 	if( len < 12.0f )
 		return;
-	pev->angles.y = UTIL_VecToYaw( delta );
 	SetActivity( ACT_WALK );
-	/* WALK_MOVE without a studio stalls Host_Frame; lerp like IdleThink. */
-	if( len < 1.0f )
-		len = 1.0f;
-	delta = delta * ( 8.0f / len );
-	delta.z = 0;
-	UTIL_SetOrigin( pev, pev->origin + delta );
+	EFW_StepNpc( pev, dest, 80.0f );
 }
 
 void EFW_PatrolAlertAll( void )
@@ -706,16 +778,7 @@ void CPatrolGuard::PatrolThink( void )
 					m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
 			}
 			else
-			{
-				Vector step;
-				float len = delta.Length();
-				pev->angles.y = UTIL_VecToYaw( delta );
-				if( len < 1.0f )
-					len = 1.0f;
-				step = delta * ( 8.0f / len );
-				step.z = 0;
-				UTIL_SetOrigin( pev, pev->origin + step );
-			}
+				EFW_StepNpc( pev, m_pGoalEnt->pev->origin, 80.0f );
 		}
 	}
 	/* FUN_100c54e0 StudioFrameAdvance; skip until SET_MODEL returns, same as IdleThink. */
