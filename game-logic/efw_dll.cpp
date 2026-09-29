@@ -27,6 +27,7 @@ int gmsgEFWCtPrv = 0;
 
 static EfwDllState g_efw;
 static int s_hudPulse; /* StartFrame pulses; ThinkHope drains once per pulse if sv.time is frozen */
+static int EFW_UseNearbyDoor( CBasePlayer *pPlayer );
 
 typedef char EFW_SCAN_SIZE_CHECK[( sizeof( EfwScanSlot ) == EFW_SCAN_BYTES ) ? 1 : -1];
 
@@ -1510,6 +1511,8 @@ static void EFW_HostFwd( void )
 		if( e && !e->free && e->pvPrivateData )
 		{
 			hit = EFW_LookUse( pPlayer );
+			if( !hit )
+				hit = EFW_UseNearbyDoor( pPlayer );
 			EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
 		}
 		else
@@ -1526,7 +1529,8 @@ static void EFW_HostFwd( void )
 	if( pcmd && !strcmp( pcmd, "efw_turn" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
-		EFW_LatchTurn( yaw );
+		float pitch = ( CMD_ARGC() > 2 ) ? (float)atof( CMD_ARGV( 2 ) ) : 0.0f;
+		EFW_LatchTurn( yaw, pitch );
 		return;
 	}
 	if( e && !e->free && e->pvPrivateData )
@@ -1613,10 +1617,10 @@ static void EFW_HostFwd( void )
 				who = a;
 		}
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, g_efw.player );
 		if( !pEnt && !( who && who[0] ) )
 		{
-			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			pEnt = EFW_FindNamedNearest( "Amir", g_efw.player );
 			if( !pEnt )
 				pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		}
@@ -1682,12 +1686,15 @@ static void EFW_HostFwd( void )
 	{
 		CBaseEntity *pEnt = NULL;
 		const char *who = ( CMD_ARGC() > 1 ) ? CMD_ARGV( 1 ) : NULL;
+		/* Several refugees share targetname "detainee". The first edict is
+		   often across the compound, so Talk opened and ThinkConversation
+		   immediately hid it ("partner too far"). Use the nearest. */
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, g_efw.player );
 		if( !pEnt && g_efw.scanCount && g_efw.scan[0].type == 0 && g_efw.scan[0].name[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, g_efw.scan[0].name );
+			pEnt = EFW_FindNamedNearest( g_efw.scan[0].name, g_efw.player );
 		if( !pEnt )
-			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			pEnt = EFW_FindNamedNearest( "Amir", g_efw.player );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		if( pEnt )
@@ -1938,17 +1945,33 @@ void EFW_LatchMove( int fwd, int side )
 	s_moveSide = side;
 }
 
-void EFW_LatchTurn( float yawDelta )
+void EFW_LatchTurn( float yawDelta, float pitchDelta )
 {
 	CBasePlayer *pPlayer = EFW_Player();
-	if( !pPlayer || yawDelta == 0.0f )
+	float yaw;
+	float pitch;
+	if( !pPlayer || ( yawDelta == 0.0f && pitchDelta == 0.0f ) )
 		return;
-	pPlayer->pev->angles.y += yawDelta;
-	while( pPlayer->pev->angles.y > 180.0f )
-		pPlayer->pev->angles.y -= 360.0f;
-	while( pPlayer->pev->angles.y < -180.0f )
-		pPlayer->pev->angles.y += 360.0f;
-	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	/* Keep the pitched view. Copying pev->angles onto v_angle zeroed pitch
+	   because the player hull stores yaw only. */
+	yaw = pPlayer->pev->v_angle.y + yawDelta;
+	pitch = pPlayer->pev->v_angle.x + pitchDelta;
+	while( yaw > 180.0f )
+		yaw -= 360.0f;
+	while( yaw < -180.0f )
+		yaw += 360.0f;
+	if( pitch > 89.0f )
+		pitch = 89.0f;
+	if( pitch < -89.0f )
+		pitch = -89.0f;
+	pPlayer->pev->v_angle.x = pitch;
+	pPlayer->pev->v_angle.y = yaw;
+	pPlayer->pev->v_angle.z = 0.0f;
+	/* svc_setangle follows pev->angles. Pitch has to live there or the
+	   view stays level while only v_angle changes. */
+	pPlayer->pev->angles.x = pitch;
+	pPlayer->pev->angles.y = yaw;
+	pPlayer->pev->angles.z = 0.0f;
 	pPlayer->pev->fixangle = 1;
 }
 
@@ -2272,6 +2295,72 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		delta = delta * ( ( 220.0f * dt ) / len );
 	}
 	dest = pPlayer->pev->origin + delta;
+	{
+		/* Browser WASD is a latched origin step because usercmds never
+		   flush. Clip the player hull, step onto low ledges, and slide
+		   along walls so a bunk does not freeze the pawn in the brush. */
+		TraceResult tr;
+		TraceResult over;
+		TraceResult down;
+		Vector step( 0, 0, 18 );
+		Vector start = pPlayer->pev->origin;
+		int stepped = 0;
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+		{
+			UTIL_TraceHull( start, start + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+			if( over.fStartSolid || over.flFraction < 1.0f )
+				return;
+			start = over.vecEndPos;
+			dest = dest + step;
+			UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+			if( tr.fStartSolid )
+				return;
+		}
+		if( tr.flFraction < 1.0f )
+		{
+			UTIL_TraceHull( start, start + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+			if( !over.fStartSolid && over.flFraction >= 1.0f )
+			{
+				UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
+				if( !down.fStartSolid && down.flFraction > 0.2f )
+				{
+					TraceResult drop;
+					UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, human_hull, pPlayer->edict(), &drop );
+					if( !drop.fStartSolid )
+					{
+						dest = drop.vecEndPos;
+						stepped = 1;
+					}
+				}
+			}
+			if( !stepped )
+			{
+				Vector hit = tr.vecEndPos;
+				Vector left = dest - hit;
+				float into = DotProduct( left, tr.vecPlaneNormal );
+				if( into < 0.0f )
+					left = left - tr.vecPlaneNormal * into;
+				left = left + tr.vecPlaneNormal; /* stay a unit out of the brush */
+				UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+				if( over.fStartSolid )
+					return;
+				dest = over.vecEndPos;
+				/* Stand off the face so the view is not inside the brush
+				   and PlayerUse can see the door. */
+				if( tr.vecPlaneNormal.z < 0.5f && tr.vecPlaneNormal.z > -0.5f )
+				{
+					TraceResult gap;
+					Vector back = dest + tr.vecPlaneNormal * 4.0f;
+					UTIL_TraceHull( dest, back, dont_ignore_monsters, human_hull, pPlayer->edict(), &gap );
+					if( !gap.fStartSolid )
+						dest = gap.vecEndPos;
+				}
+			}
+		}
+		else
+			dest = tr.vecEndPos;
+	}
 	pPlayer->pev->origin = dest;
 	pPlayer->pev->velocity = delta * ( 1.0f / dt );
 	pPlayer->pev->flags |= FL_ONGROUND;
@@ -2297,9 +2386,9 @@ static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
 	CVAR_SET_FLOAT( "r_norefresh", 0.0f );
 	CVAR_SET_FLOAT( "r_drawworld", 1.0f );
 	CVAR_SET_FLOAT( "r_drawentities", 1.0f );
-	CVAR_SET_FLOAT( "r_fullbright", 1.0f );
+	CVAR_SET_FLOAT( "r_fullbright", 0.0f );
 	CVAR_SET_FLOAT( "r_novis", 1.0f );
-	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 1\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
+	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 0\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\n" );
 	snprintf( line, sizeof( line ),
 		"efw: world present live=%d origin=%.0f %.0f %.0f\n",
@@ -2423,6 +2512,15 @@ void EFW_StartFrame( void )
 				continue;
 			if( ( e->v.flags & FL_MONSTER ) && e->v.modelindex > 0 )
 				continue;
+			/* Doors and buttons move on their own think. Zeroing nextthink
+			   every frame left the barracks door shut. */
+			if( e->v.movetype == MOVETYPE_PUSH )
+				continue;
+			{
+				const char *cn = e->v.classname ? STRING( e->v.classname ) : "";
+				if( !strncmp( cn, "func_", 5 ) || !strncmp( cn, "trigger_", 8 ) )
+					continue;
+			}
 			e->v.nextthink = 0;
 			if( e->v.movetype == MOVETYPE_STEP || e->v.movetype == MOVETYPE_FLY
 				|| e->v.movetype == MOVETYPE_TOSS || e->v.movetype == MOVETYPE_WALK )
@@ -2738,6 +2836,57 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	CLIENT_COMMAND( pPlayer->edict(), "bind ] efw_diary_next\n" );
 }
 
+static int EFW_UseNearbyDoor( CBasePlayer *pPlayer )
+{
+	static const char *kClasses[] = { "func_door_rotating", "func_door", "func_button" };
+	CBaseEntity *pBest = NULL;
+	Vector bestMid;
+	float best = 160.0f;
+	Vector eye;
+	int c;
+	if( !pPlayer )
+		return 0;
+	eye = pPlayer->EyePosition();
+	for( c = 0; c < (int)( sizeof( kClasses ) / sizeof( kClasses[0] ) ); c++ )
+	{
+		CBaseEntity *pScan = NULL;
+		while( ( pScan = UTIL_FindEntityByClassname( pScan, kClasses[c] ) ) != NULL )
+		{
+			Vector mid = ( pScan->pev->absmin + pScan->pev->absmax ) * 0.5f;
+			float d = ( mid - eye ).Length();
+			if( d < best )
+			{
+				best = d;
+				pBest = pScan;
+				bestMid = mid;
+			}
+		}
+	}
+	if( !pBest )
+		return 0;
+	EFW_DebugPrint( ">>> use door %s %s dist=%.0f",
+		STRING( pBest->pev->classname ), STRING( pBest->pev->targetname ), best );
+	{
+		/* Step back so the hull is not inside the leaf. A blocked door
+		   reverses and looks like Use did nothing. */
+		Vector away = pPlayer->pev->origin - bestMid;
+		TraceResult tr;
+		away.z = 0.0f;
+		if( away.Length() < 1.0f )
+			away = Vector( 0, -1, 0 );
+		away = away.Normalize() * 48.0f;
+		UTIL_TraceHull( pPlayer->pev->origin, pPlayer->pev->origin + away,
+			dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		if( !tr.fStartSolid )
+		{
+			pPlayer->pev->origin = tr.vecEndPos;
+			UTIL_SetOrigin( pPlayer->pev, tr.vecEndPos );
+		}
+	}
+	pBest->Use( pPlayer, pPlayer, USE_TOGGLE, 1 );
+	return 1;
+}
+
 void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 {
 	static int s_preN;
@@ -2771,6 +2920,8 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	{
 		int hit = EFW_LookUse( pPlayer );
 		EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
+		if( !hit )
+			hit = EFW_UseNearbyDoor( pPlayer );
 		if( hit )
 			pPlayer->m_afButtonPressed &= ~IN_USE;
 	}

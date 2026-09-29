@@ -112,6 +112,30 @@ static Vector EFW_Place( CBaseEntity *pEnt )
 	return c;
 }
 
+CBaseEntity *EFW_FindNamedNearest( const char *name, CBasePlayer *pPlayer )
+{
+	CBaseEntity *pScan = NULL;
+	CBaseEntity *pBest = NULL;
+	float best = 0.0f;
+	if( !name || !name[0] )
+		return NULL;
+	/* UTIL_FindEntityByTargetname(NULL) is the first edict. Several
+	   refugees share "detainee", and that first one is often across the
+	   compound, so ThinkConversation closes the menu the same frame. */
+	while( ( pScan = UTIL_FindEntityByTargetname( pScan, name ) ) != NULL )
+	{
+		float d = 0.0f;
+		if( pPlayer )
+			d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
+		if( !pBest || d < best )
+		{
+			best = d;
+			pBest = pScan;
+		}
+	}
+	return pBest;
+}
+
 static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist )
 {
 	CBaseEntity *pScan = NULL;
@@ -690,9 +714,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 		const char *who = EFW_CmdName( arg0 );
 		EfwDllState *st = EFW_Dll();
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, pPlayer );
 		if( !pEnt && st->scanCount && st->scan[0].type == 0 && st->scan[0].name[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, st->scan[0].name );
+			pEnt = EFW_FindNamedNearest( st->scan[0].name, pPlayer );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
@@ -719,7 +743,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 				wep = atoi( a );
 		}
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, pPlayer );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 160.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )

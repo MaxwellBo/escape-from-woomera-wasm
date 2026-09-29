@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll126`;
+    return `${url}?v=efw-dll135`;
   return url;
 }
 
@@ -704,7 +704,7 @@ function dismissMenuAfterHud() {
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawworld 1');
     runEngineCmd('r_drawentities 1');
-    runEngineCmd('r_fullbright 1');
+    runEngineCmd('r_fullbright 0');
     runEngineCmd('r_novis 1');
     runEngineCmd('gl_clear 1');
     runEngineCmd('ui_renderworld 1');
@@ -717,7 +717,7 @@ function forceWorldPresent() {
   runEngineCmd('r_norefresh 0');
   runEngineCmd('r_drawworld 1');
   runEngineCmd('r_drawentities 1');
-  runEngineCmd('r_fullbright 1');
+  runEngineCmd('r_fullbright 0');
   runEngineCmd('r_novis 1');
   runEngineCmd('gl_clear 1');
   runEngineCmd('ui_renderworld 1');
@@ -1499,7 +1499,7 @@ async function boot() {
       '+ui_renderworld',
       '1',
       '+r_fullbright',
-      '1',
+      '0',
       '+cl_himodels',
       '0',
     ];
@@ -1756,6 +1756,16 @@ function syncWalkLatch() {
   const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
   runGameCmd(`efw_move ${fwd} ${side}`);
 }
+
+document.addEventListener('mousemove', (e) => {
+  if (!inputCaptured()) return;
+  if (!e.movementX && !e.movementY) return;
+  /* Usercmds do not flush in this listen server, so SDL mouse look never
+     reaches the pawn the walk latch uses. Slave yaw/pitch here. */
+  const yaw = (-e.movementX * 0.08).toFixed(3);
+  const pitch = (e.movementY * 0.08).toFixed(3);
+  runGameCmd(`efw_turn ${yaw} ${pitch}`);
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)

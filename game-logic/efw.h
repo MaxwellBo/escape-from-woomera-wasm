@@ -29,6 +29,7 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480 */
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
+CBaseEntity *EFW_FindNamedNearest( const char *name, CBasePlayer *pPlayer );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_OnDispatchSpawn( edict_t *pent ); /* edict-budget log during map spawn */
