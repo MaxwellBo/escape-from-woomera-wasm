@@ -811,6 +811,11 @@ void EFW_PatrolAlertAll( void )
 			pg->m_vecLastSeen = pPlayer->pev->origin;
 		if( pg->m_Activity != ACT_RUN )
 			pg->SetActivity( ACT_RUN );
+		{
+			const char *gn = STRING( pg->pev->targetname );
+			EFW_DebugPrint( "patrol alert RUN %s seq=%d act=%d",
+				( gn && gn[0] ) ? gn : "?", pg->pev->sequence, (int)pg->m_Activity );
+		}
 	}
 }
 
@@ -999,7 +1004,20 @@ void CPatrolGuard::PatrolThink( void )
 		}
 	}
 	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
-		EFW_StepNpc( pev, pPlayer->pev->origin, EFW_NpcGroundSpeed( this ) );
+	{
+		float speed = EFW_NpcGroundSpeed( this );
+		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed );
+		{
+			static int s_chaseLog;
+			if( s_chaseLog < 6 )
+			{
+				s_chaseLog++;
+				EFW_DebugPrint( "patrol chase step %s moved=%d seq=%d act=%d spd=%.0f origin=%.0f %.0f dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", moved, pev->sequence, (int)m_Activity, speed,
+					pev->origin.x, pev->origin.y, Dist2D( pPlayer ) );
+			}
+		}
+	}
 	else if( m_movementGoal == MOVEGOAL_LOCATION )
 	{
 		Vector delta = m_vecMoveGoal - pev->origin;
