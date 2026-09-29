@@ -13,6 +13,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 static int g_refugeeCount;
 
@@ -339,6 +340,166 @@ static void EFW_NpcFall( entvars_t *pev )
    groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
 
+/* SV_MoveToOrigin MOVE_NORMAL steps along ideal_yaw. When that step cannot
+   be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
+   the other 45-degree headings. This is that search with the hull trace,
+   not WALK_MOVE. */
+static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
+{
+	Vector wish;
+	Vector end;
+	Vector stepLand;
+	TraceResult tr;
+	float savedMins;
+	float horiz;
+
+	wish = dir;
+	wish.z = 0.0f;
+	if( wish.Length() < 0.001f )
+		return 0;
+	wish = wish.Normalize();
+	end = start + wish * step;
+	savedMins = pev->mins.z;
+	if( savedMins < 1.0f )
+		pev->mins.z = 1.0f;
+	memset( &tr, 0, sizeof( tr ) );
+	TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+	if( tr.fAllSolid || tr.fStartSolid )
+	{
+		int stepUp;
+		float baseZ = start.z;
+
+		for( stepUp = 1; stepUp <= 9; stepUp++ )
+		{
+			Vector raised = start;
+
+			raised.z = baseZ + stepUp * 2.0f;
+			memset( &tr, 0, sizeof( tr ) );
+			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
+			if( !tr.fStartSolid && !tr.fAllSolid )
+			{
+				end = raised + wish * step;
+				memset( &tr, 0, sizeof( tr ) );
+				TRACE_MONSTER_HULL( ENT( pev ), raised, end, ignore_monsters, ENT( pev ), &tr );
+				break;
+			}
+		}
+	}
+	pev->mins.z = savedMins;
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction < 0.5f )
+		return 0;
+	if( !EFW_LandMonster( pev, end, &stepLand ) )
+		return 0;
+	horiz = ( stepLand - start ).Length2D();
+	if( horiz < step * 0.5f || horiz < 0.5f )
+		return 0;
+	*out = stepLand;
+	return 1;
+}
+
+static float EFW_NormYaw360( float yaw )
+{
+	while( yaw < 0.0f )
+		yaw += 360.0f;
+	while( yaw >= 360.0f )
+		yaw -= 360.0f;
+	return yaw;
+}
+
+static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &goal, float step, Vector *out )
+{
+	float deltax;
+	float deltay;
+	float dirx;
+	float diry;
+	float turnaround;
+	float tryYaw[16];
+	int ntry;
+	int i;
+	Vector landed;
+
+	deltax = goal.x - start.x;
+	deltay = goal.y - start.y;
+	dirx = ( deltax > 10.0f ) ? 0.0f : ( deltax < -10.0f ) ? 180.0f : -1.0f;
+	diry = ( deltay < -10.0f ) ? 270.0f : ( deltay > 10.0f ) ? 90.0f : -1.0f;
+	turnaround = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f - 180.0f );
+	ntry = 0;
+	if( dirx >= 0.0f && diry >= 0.0f )
+	{
+		float diag;
+
+		if( dirx == 0.0f )
+			diag = ( diry == 90.0f ) ? 45.0f : 315.0f;
+		else
+			diag = ( diry == 90.0f ) ? 135.0f : 215.0f;
+		tryYaw[ntry++] = diag;
+	}
+	if( fabsf( deltay ) > fabsf( deltax ) )
+	{
+		if( diry >= 0.0f )
+			tryYaw[ntry++] = diry;
+		if( dirx >= 0.0f )
+			tryYaw[ntry++] = dirx;
+	}
+	else
+	{
+		if( dirx >= 0.0f )
+			tryYaw[ntry++] = dirx;
+		if( diry >= 0.0f )
+			tryYaw[ntry++] = diry;
+	}
+	tryYaw[ntry++] = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f );
+	for( i = 0; i < 8; i++ )
+		tryYaw[ntry++] = (float)( i * 45 );
+	tryYaw[ntry++] = turnaround;
+	for( i = 0; i < ntry; i++ )
+	{
+		float yaw = EFW_NormYaw360( tryYaw[i] );
+		Vector dir;
+		int seen;
+		int j;
+
+		if( fabsf( yaw - turnaround ) < 0.5f && i + 1 != ntry )
+			continue;
+		seen = 0;
+		for( j = 0; j < i; j++ )
+		{
+			if( fabsf( EFW_NormYaw360( tryYaw[j] ) - yaw ) < 0.5f )
+			{
+				seen = 1;
+				break;
+			}
+		}
+		if( seen )
+			continue;
+		dir.x = cosf( yaw * 0.01745329252f );
+		dir.y = sinf( yaw * 0.01745329252f );
+		dir.z = 0.0f;
+		if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
+			continue;
+		{
+			static int s_chase;
+			if( s_chase < 6 )
+			{
+				s_chase++;
+				EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
+					yaw, start.x, start.y, landed.x, landed.y );
+			}
+		}
+		*out = landed;
+		return 1;
+	}
+	{
+		static int s_stuck;
+		if( s_stuck < 4 )
+		{
+			s_stuck++;
+			EFW_DebugPrint( "chase stuck %.0f %.0f", start.x, start.y );
+		}
+	}
+	return 0;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
 {
 	Vector delta;
@@ -536,8 +697,19 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 		stepLen = ( stepLand - start ).Length();
+		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
+		   instead of stopping on the wall. */
 		if( stepLen < 0.5f )
-			break;
+		{
+			Vector chased;
+
+			if( !EFW_ChaseChunk( pev, start, goal, step, &chased ) )
+				break;
+			stepLand = chased;
+			stepLen = ( stepLand - start ).Length();
+			if( stepLen < 0.5f )
+				break;
+		}
 		landed = stepLand;
 		start = stepLand;
 		moved += stepLen;
