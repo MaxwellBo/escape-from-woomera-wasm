@@ -340,10 +340,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		start = stepLand;
 		moved += stepLen;
 		chunks++;
-		/* MoveExecute subtracts the requested chunk, then tries the next. */
+		/* MoveExecute always subtracts the requested chunk. A fraction just
+		   under 1 is still a clear step; stop only when the next chunk
+		   cannot move. */
 		total -= step;
-		if( tr.flFraction < 1.0f )
-			break;
 	}
 	{
 		static int s_exec;
@@ -351,6 +351,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		{
 			s_exec++;
 			EFW_DebugPrint( "move execute iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
+				dt, speed, speed * dt, moved, chunks );
+		}
+		else if( s_exec < 12 && speed > 120.0f && chunks > 0 )
+		{
+			s_exec++;
+			EFW_DebugPrint( "move execute run iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
 				dt, speed, speed * dt, moved, chunks );
 		}
 	}
