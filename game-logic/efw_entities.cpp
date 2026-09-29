@@ -283,6 +283,36 @@ static void EFW_NpcFall( entvars_t *pev )
 		pev->flags &= ~FL_ONGROUND;
 		return;
 	}
+	/* The 2-unit probe only looks down. Feet already at or under the
+	   surface read as air, and one gravity step (800*dt^2) is a
+	   fraction==1 teleport through that floor. LandMonster also looks
+	   up one step. A floor there means the hull is standing: set
+	   FL_ONGROUND and leave the origin alone. Linking here re-enters
+	   the think and overflows the host pump. */
+	{
+		Vector stood;
+
+		if( EFW_LandMonster( pev, pev->origin, &stood ) )
+		{
+			float drop = pev->origin.z - stood.z;
+
+			if( drop <= 1.0f )
+			{
+				static int s_stand;
+
+				s_npcStep = 0;
+				pev->flags |= FL_ONGROUND;
+				pev->velocity.z = 0.0f;
+				if( s_stand < 8 )
+				{
+					s_stand++;
+					EFW_DebugPrint( "npc stand z=%.0f floor=%.0f at %.0f %.0f",
+						pev->origin.z, stood.z, pev->origin.x, pev->origin.y );
+				}
+				return;
+			}
+		}
+	}
 	pev->flags &= ~FL_ONGROUND;
 	dt = EFW_HostInterval();
 	grav = 800.0f;
@@ -925,6 +955,14 @@ void CRefugee::IdleThink( void )
 	if( s_idleLog < 1 )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
+	if( EFW_FStrEq( tn, "Shala" ) )
+	{
+		static int s_shalaHold;
+		s_shalaHold++;
+		if( s_shalaHold == 40 )
+			EFW_DebugPrint( "shala hold z=%.0f at %.0f %.0f",
+				pev->origin.z, pev->origin.x, pev->origin.y );
+	}
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
 	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
 	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
@@ -1066,6 +1104,9 @@ void CRefugee::IdleThink( void )
 		}
 		{
 			static int s_stepLog;
+			static int s_stepN;
+			static int s_sink;
+			s_stepN++;
 			if( s_stepLog < 8 )
 			{
 				s_stepLog++;
@@ -1073,6 +1114,20 @@ void CRefugee::IdleThink( void )
 					( tn && tn[0] ) ? tn : "?", moved,
 					pev->origin.x, pev->origin.y, pev->origin.z,
 					( pPlayer->pev->origin - pev->origin ).Length() );
+			}
+			else if( s_stepN == 40 || s_stepN == 160 )
+			{
+				EFW_DebugPrint( "step late %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", moved,
+					pev->origin.x, pev->origin.y, pev->origin.z,
+					( pPlayer->pev->origin - pev->origin ).Length() );
+			}
+			if( pev->origin.z < -1.0f && s_sink < 4 )
+			{
+				s_sink++;
+				EFW_DebugPrint( "npc sink %s z=%.0f at %.0f %.0f",
+					( tn && tn[0] ) ? tn : "?",
+					pev->origin.z, pev->origin.x, pev->origin.y );
 			}
 		}
 	}
