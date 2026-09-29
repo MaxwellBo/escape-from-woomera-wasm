@@ -315,7 +315,10 @@ static void EFW_NpcFall( entvars_t *pev )
 				if( !clear.fStartSolid && !clear.fAllSolid && landed.z > buried.z + 0.5f )
 					raised = landed;
 			}
-			if( raised.z <= buried.z + 0.5f )
+			/* sv_stepsize is 18. Two of those is as far as MoveStep will
+			   drop. A clear pocket 60 units up is the ceiling, which
+			   popped Shala from her spawn at z=28 to z=90. */
+			if( raised.z <= buried.z + 0.5f || raised.z > buried.z + 36.0f )
 				continue;
 			{
 				static int s_embed;
