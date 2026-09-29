@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll173`;
+    return `${url}?v=efw-dll174`;
   return url;
 }
 
@@ -2019,6 +2019,12 @@ function syncWalkLatch() {
      latch stays at zero. */
   runGameCmd(`efw_clmove ${fwd} ${side}`);
 }
+function syncJump(on: boolean) {
+  runGameCmd(`efw_cjump ${on ? 1 : 0}`);
+}
+function syncDuck(on: boolean) {
+  runGameCmd(`efw_cduck ${on ? 1 : 0}`);
+}
 
 /* Coalesce pointer deltas to one usercmd look per frame. The client DLL
    adds them to cmd->viewangles; PM_Move turns. efw_turn remains the
@@ -2051,6 +2057,18 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncJump(true);
+    return;
+  }
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncDuck(true);
+    return;
+  }
   const walk = walkSlot(e.key);
   if (walk) {
     if (e.repeat) return;
@@ -2089,6 +2107,14 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  if (e.code === 'Space') {
+    syncJump(false);
+    return;
+  }
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    syncDuck(false);
+    return;
+  }
   const walk = walkSlot(e.key);
   if (!walk) return;
   walkKeys[walk] = false;

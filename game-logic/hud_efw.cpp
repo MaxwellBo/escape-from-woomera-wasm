@@ -339,6 +339,8 @@ static int EFW_ContextOn( void )
    The origin latch stays at zero. */
 static int s_pmFwd;
 static int s_pmSide;
+static int s_pmJump;
+static int s_pmDuck;
 static int s_lookOn;
 static float s_lookYaw;
 static float s_lookPitch;
@@ -368,6 +370,24 @@ static void EFW_PMove_f( void )
 	gEngfuncs.Con_Printf( "efw: pmove cmd %d %d\n", s_pmFwd, s_pmSide );
 }
 
+/* Space / Ctrl. PM_Jump reads IN_JUMP once per press (oldbuttons), and
+   PM_Duck holds IN_DUCK until it is cleared. */
+static void EFW_PJump_f( void )
+{
+	s_pmJump = ( gEngfuncs.Cmd_Argc() > 1 ) ? atoi( gEngfuncs.Cmd_Argv( 1 ) ) : 0;
+	if( s_pmJump )
+		s_pmJump = 1;
+	gEngfuncs.Con_Printf( "efw: pjump cmd %d\n", s_pmJump );
+}
+
+static void EFW_PDuck_f( void )
+{
+	s_pmDuck = ( gEngfuncs.Cmd_Argc() > 1 ) ? atoi( gEngfuncs.Cmd_Argv( 1 ) ) : 0;
+	if( s_pmDuck )
+		s_pmDuck = 1;
+	gEngfuncs.Con_Printf( "efw: pduck cmd %d\n", s_pmDuck );
+}
+
 /* Deltas from the browser pointer. Applied once, then held as the view
    so a later fixangle cannot snap the usercmd back to the spawn yaw. */
 static void EFW_PLook_f( void )
@@ -380,12 +400,20 @@ static void EFW_PLook_f( void )
 void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 {
 	static int n;
+	static int airLog;
 	float spd;
 	float ang[3];
 	(void)frametime;
 	if( !cmd )
 		return;
 	n++;
+	if( s_pmJump || s_pmDuck )
+	{
+		if( airLog < 12 )
+			airLog++;
+	}
+	else
+		airLog = 0;
 	if( s_pmFwd || s_pmSide )
 	{
 		/* active==0 means signon is unfinished and the engine ignores the
@@ -413,6 +441,10 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		else if( s_pmSide < 0 )
 			cmd->buttons |= IN_MOVELEFT;
 	}
+	if( s_pmJump )
+		cmd->buttons |= IN_JUMP;
+	if( s_pmDuck )
+		cmd->buttons |= IN_DUCK;
 	if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f || s_lookOn )
 	{
 		if( !s_lookOn )
@@ -440,7 +472,8 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		cmd->viewangles[1] = ang[1];
 		cmd->viewangles[2] = 0.0f;
 	}
-	if( n <= 4 || ( n % 120 ) == 0 || ( ( s_pmFwd || s_pmSide || s_lookOn ) && ( n % 30 ) == 0 ) )
+	if( n <= 4 || ( n % 120 ) == 0 || ( airLog > 0 && airLog <= 8 )
+		|| ( ( s_pmFwd || s_pmSide || s_lookOn ) && ( n % 30 ) == 0 ) )
 		gEngfuncs.Con_Printf( "efw: createmove n=%d active=%d fwd=%.0f side=%.0f btn=%d yaw=%.1f pitch=%.1f\n",
 			n, active, cmd->forwardmove, cmd->sidemove, cmd->buttons,
 			cmd->viewangles[1], cmd->viewangles[0] );
@@ -1191,6 +1224,8 @@ int CHudEfw::Init( void )
 	EFW_HookMenuSlots();
 	gEngfuncs.pfnAddCommand( "efw_pmove", EFW_PMove_f );
 	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
+	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );
+	gEngfuncs.pfnAddCommand( "efw_pduck", EFW_PDuck_f );
 	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );

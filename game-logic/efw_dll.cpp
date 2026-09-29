@@ -16,6 +16,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 extern int gmsgTextMsg;
 
@@ -1544,6 +1545,22 @@ static void EFW_HostFwd( void )
 		EFW_DebugPrint( ">>> efw_clmove stuff %d %d pawn=%d", fwd, side, pPlayer ? 1 : 0 );
 		return;
 	}
+	if( pcmd && !strcmp( pcmd, "efw_cjump" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pjump %d\n", on ? 1 : 0 );
+		EFW_DebugPrint( ">>> efw_cjump stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_cduck" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pduck %d\n", on ? 1 : 0 );
+		EFW_DebugPrint( ">>> efw_cduck stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_clook" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
@@ -1824,6 +1841,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
 		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
+		"efw_cjump", "efw_cduck",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -2971,6 +2989,20 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 			pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z,
 			pPlayer->pev->v_angle.y, pPlayer->pev->v_angle.x );
 		EFW_LogLine( line );
+	}
+	if( ( pPlayer->pev->button & ( IN_JUMP | IN_DUCK ) ) || fabs( pPlayer->pev->velocity.z ) > 80.0f )
+	{
+		static int s_airN;
+		char line[128];
+		if( s_airN < 48 )
+		{
+			s_airN++;
+			snprintf( line, sizeof( line ),
+				"efw: air n=%d btn=%d velz=%.0f z=%.1f viewz=%.0f flags=%d\n",
+				s_airN, pPlayer->pev->button, pPlayer->pev->velocity.z,
+				pPlayer->pev->origin.z, pPlayer->pev->view_ofs.z, pPlayer->pev->flags );
+			EFW_LogLine( line );
+		}
 	}
 	if( g_efw.player != pPlayer )
 		EFW_SetPlayer( pPlayer );
