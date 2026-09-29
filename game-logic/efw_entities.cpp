@@ -7,6 +7,7 @@
 #include "activity.h"
 #include "animation.h"
 #include "player.h"
+#include "game.h"
 #include "efw_dll.h"
 #include "studio.h"
 
@@ -326,6 +327,8 @@ static void EFW_NpcFall( entvars_t *pev )
    Trace the PE hull (-16..16, 0..72) and ignore other monsters so touch
    does not call back into think. MoveExecute walks
    groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
+static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 {
 	Vector delta;
@@ -365,8 +368,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	if( total < 0.001f )
 		return 0;
 	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
-	   once, before the 16-unit chunks. monsteryawspeedfix measures
-	   gpGlobals->time, which does not move between these thinks. */
+	   once, before the 16-unit chunks. */
 	{
 		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
 		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
@@ -377,12 +379,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 			float before;
 			if( yawSpeed < 1 )
 				yawSpeed = 90;
-			pMon->m_flLastYawTime = gpGlobals->time - dt;
-			if( pMon->m_flLastYawTime == 0.0f )
-				pMon->m_flLastYawTime = -dt;
 			before = pev->angles.y;
 			pMon->MakeIdealYaw( goal );
-			pMon->ChangeYaw( yawSpeed );
+			EFW_PeChangeYaw( pMon, yawSpeed );
 			{
 				static entvars_t *s_yawWho;
 				static int s_yawLog;
@@ -548,6 +547,26 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	s_npcStep = 0;
 	UTIL_SetOrigin( pev, landed );
 	return 1;
+}
+
+/* PE ChangeYaw 0x100603b0: speed = yawSpeed * frametime * 10.
+   monsteryawspeedfix is the later SDK path (yawSpeed * delta * 2) and
+   sv.time does not move between thinks, so that path never sees a
+   frame. The host pump is the frametime this call would have had. */
+static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed )
+{
+	float savedFix;
+	float savedFrame;
+
+	if( !pMon )
+		return;
+	savedFix = monsteryawspeedfix.value;
+	savedFrame = gpGlobals->frametime;
+	monsteryawspeedfix.value = 0.0f;
+	gpGlobals->frametime = EFW_HostInterval();
+	pMon->ChangeYaw( yawSpeed );
+	monsteryawspeedfix.value = savedFix;
+	gpGlobals->frametime = savedFrame;
 }
 
 /* FUN_1009b420: if bits_CAP_TURN_HEAD, yaw toward the point and
@@ -717,26 +736,22 @@ void CRefugee::IdleThink( void )
 		{
 			float beforeYaw;
 			int yawSpeed;
-			float dt;
 
 			/* vtable+0x1a8(1) every close think. It does not clear the
 			   move goal. ResetSequenceInfo sets animtime to now, so
 			   StudioFrameAdvance(0) adds nothing and the idle pose stays
 			   on the frame SetActivity just chose. The host-interval
 			   advance would keep playing it; framerate 0 is that zero step.
-			   The next IdleThink entry restores framerate. */
+			   The next IdleThink entry restores framerate. Move() would
+			   then ChangeYaw; that call is yawSpeed * frametime * 10. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
 			yawSpeed = (int)pev->yaw_speed;
 			if( yawSpeed < 1 )
 				yawSpeed = 90;
-			dt = EFW_HostInterval();
-			m_flLastYawTime = gpGlobals->time - dt;
-			if( m_flLastYawTime == 0.0f )
-				m_flLastYawTime = -dt;
 			beforeYaw = pev->angles.y;
 			MakeIdealYaw( pPlayer->pev->origin );
-			ChangeYaw( yawSpeed );
+			EFW_PeChangeYaw( this, yawSpeed );
 			{
 				static int s_close;
 				if( s_close < 6 && EFW_FStrEq( tn, "Amir" ) )
