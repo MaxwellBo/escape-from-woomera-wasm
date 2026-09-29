@@ -182,22 +182,20 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
    sticks and later thinks never step. */
 static int s_npcStep;
 
-/* FUN_1005d500 / MoveExecute step. WALK_MOVE stalls Host_Frame on these
-   studios. Trace the PE hull (-16..16, 0..72) and ignore other monsters so
-   touch does not call back into think. 16 units is the stair limit in
-   CBaseMonster::MoveExecute. */
+/* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
+   Trace the PE hull (-16..16, 0..72) and ignore other monsters so touch
+   does not call back into think. MoveExecute walks
+   groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 {
 	Vector delta;
-	Vector wish;
 	Vector start;
-	Vector end;
 	Vector landed;
-	TraceResult tr;
 	float len;
 	float dt;
-	float step;
-	float savedMins;
+	float total;
+	float moved;
+	int chunks;
 
 	if( !pev || s_npcStep )
 		return 0;
@@ -206,91 +204,21 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	len = delta.Length();
 	if( len < 1.0f )
 		return 0;
-	dt = gpGlobals->frametime;
-	if( dt < 0.001f || dt > 0.25f )
-		dt = 0.05f;
-	step = speed * dt;
-	if( step > 16.0f )
-		step = 16.0f;
-	if( step > len )
-		step = len;
-	wish = delta * ( step / len );
-	start = pev->origin;
-	end = start + wish;
-	s_npcStep = 1;
-	/* Feet-origin mins.z == 0 sits in the floor and the trace is startsolid.
-	   StartMonster adds 1 to origin.z and DROP_TO_FLOOR before WALK_MOVE.
-	   DROP_TO_FLOOR cannot lift an origin that is already inside the floor,
-	   so climb until the monster hull is clear, then step that hull. */
-	savedMins = pev->mins.z;
-	if( savedMins < 1.0f )
-		pev->mins.z = 1.0f;
-	memset( &tr, 0, sizeof( tr ) );
-	TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
-	if( tr.fAllSolid || tr.fStartSolid )
-	{
-		int stepUp;
-		float baseZ = start.z;
-		for( stepUp = 1; stepUp <= 24; stepUp++ )
-		{
-			Vector raised = start;
-			raised.z = baseZ + stepUp * 2.0f;
-			memset( &tr, 0, sizeof( tr ) );
-			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
-			if( !tr.fStartSolid && !tr.fAllSolid )
-			{
-				start = raised;
-				end = start + wish;
-				memset( &tr, 0, sizeof( tr ) );
-				TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
-				{
-					static int s_lift;
-					if( s_lift < 6 )
-					{
-						s_lift++;
-						EFW_DebugPrint( "floor lift z=%.0f -> %.0f solid=%d frac=%.2f",
-							baseZ, start.z, tr.fStartSolid, tr.flFraction );
-					}
-				}
-				break;
-			}
-		}
-	}
-	pev->mins.z = savedMins;
-	{
-		static int s_hullLog;
-		if( s_hullLog < 6 )
-		{
-			s_hullLog++;
-			EFW_DebugPrint( "hull step frac=%.2f solid=%d all=%d",
-				tr.flFraction, tr.fStartSolid, tr.fAllSolid );
-		}
-	}
-	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
-	{
-		Vector chest = start + Vector( 0, 0, 36 );
-		UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
-		if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
-		{
-			s_npcStep = 0;
-			return 0;
-		}
-		landed = start + wish * tr.flFraction;
-	}
-	else
-		landed = start + ( end - start ) * tr.flFraction;
-	landed.z = start.z;
-	if( ( landed - start ).Length() < 0.5f )
-	{
-		s_npcStep = 0;
+	/* sv.time is stuck between pulses. The host pump is the think interval
+	   MonsterThink would have passed into Move(). */
+	dt = EFW_HostInterval();
+	total = speed * dt;
+	if( total > len )
+		total = len;
+	if( total < 0.001f )
 		return 0;
-	}
-	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed).
-	   monsteryawspeedfix measures gpGlobals->time, which does not move
-	   between these thinks, so seed the last yaw time one step back. */
+	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
+	   once, before the 16-unit chunks. monsteryawspeedfix measures
+	   gpGlobals->time, which does not move between these thinks. */
 	{
 		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
 		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
+		Vector wish = delta * ( 1.0f / len );
 		if( pMon )
 		{
 			int yawSpeed = (int)pev->yaw_speed;
@@ -318,6 +246,118 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		}
 		else
 			pev->angles.y = UTIL_VecToYaw( wish );
+	}
+	s_npcStep = 1;
+	start = pev->origin;
+	landed = start;
+	moved = 0.0f;
+	chunks = 0;
+	while( total > 0.001f && chunks < 8 )
+	{
+		Vector wish;
+		Vector end;
+		Vector stepLand;
+		TraceResult tr;
+		float savedMins;
+		float step;
+		float stepLen;
+		float remain;
+
+		delta = goal - start;
+		delta.z = 0.0f;
+		remain = delta.Length();
+		if( remain < 1.0f )
+			break;
+		step = total;
+		if( step > 16.0f )
+			step = 16.0f;
+		if( step > remain )
+			step = remain;
+		wish = delta * ( step / remain );
+		end = start + wish;
+		savedMins = pev->mins.z;
+		if( savedMins < 1.0f )
+			pev->mins.z = 1.0f;
+		memset( &tr, 0, sizeof( tr ) );
+		TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+		/* Feet-origin mins.z == 0 sits in the floor and the trace is
+		   startsolid. StartMonster adds 1 to origin.z; DROP_TO_FLOOR
+		   cannot lift an origin already inside the floor. */
+		if( tr.fAllSolid || tr.fStartSolid )
+		{
+			int stepUp;
+			float baseZ = start.z;
+			for( stepUp = 1; stepUp <= 24; stepUp++ )
+			{
+				Vector raised = start;
+				raised.z = baseZ + stepUp * 2.0f;
+				memset( &tr, 0, sizeof( tr ) );
+				TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
+				if( !tr.fStartSolid && !tr.fAllSolid )
+				{
+					start = raised;
+					end = start + wish;
+					memset( &tr, 0, sizeof( tr ) );
+					TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+					{
+						static int s_lift;
+						if( s_lift < 6 )
+						{
+							s_lift++;
+							EFW_DebugPrint( "floor lift z=%.0f -> %.0f solid=%d frac=%.2f",
+								baseZ, start.z, tr.fStartSolid, tr.flFraction );
+						}
+					}
+					break;
+				}
+			}
+		}
+		pev->mins.z = savedMins;
+		{
+			static int s_hullLog;
+			if( s_hullLog < 6 )
+			{
+				s_hullLog++;
+				EFW_DebugPrint( "hull step frac=%.2f solid=%d all=%d",
+					tr.flFraction, tr.fStartSolid, tr.fAllSolid );
+			}
+		}
+		if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		{
+			Vector chest = start + Vector( 0, 0, 36 );
+			UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
+			if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+				break;
+			stepLand = start + wish * tr.flFraction;
+		}
+		else
+			stepLand = start + ( end - start ) * tr.flFraction;
+		stepLand.z = start.z;
+		stepLen = ( stepLand - start ).Length();
+		if( stepLen < 0.5f )
+			break;
+		landed = stepLand;
+		start = stepLand;
+		moved += stepLen;
+		chunks++;
+		/* MoveExecute subtracts the requested chunk, then tries the next. */
+		total -= step;
+		if( tr.flFraction < 1.0f )
+			break;
+	}
+	{
+		static int s_exec;
+		if( s_exec < 6 && chunks > 0 )
+		{
+			s_exec++;
+			EFW_DebugPrint( "move execute iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
+				dt, speed, speed * dt, moved, chunks );
+		}
+	}
+	if( moved < 0.5f )
+	{
+		s_npcStep = 0;
+		return 0;
 	}
 	s_npcStep = 0;
 	UTIL_SetOrigin( pev, landed );

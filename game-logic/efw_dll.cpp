@@ -355,6 +355,15 @@ void EFW_AdjustHope( float delta )
 }
 
 static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
+static float s_hostInterval; /* same pump delta, read by MoveExecute steps */
+
+float EFW_HostInterval( void )
+{
+	/* MonsterThink schedules itself at +0.1s. The pump is that clock. */
+	if( s_hostInterval < 0.001f || s_hostInterval > 0.25f )
+		return 0.1f;
+	return s_hostInterval;
+}
 
 void EFW_ThinkHope( void )
 {
@@ -1788,6 +1797,7 @@ static void EFW_HostPump( void )
 		if( wall > 0.25f )
 			wall = 0.25f;
 		s_hopeWall += wall;
+		s_hostInterval = wall;
 	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();
