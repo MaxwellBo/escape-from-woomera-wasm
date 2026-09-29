@@ -283,37 +283,6 @@ static void EFW_NpcFall( entvars_t *pev )
 		pev->flags &= ~FL_ONGROUND;
 		return;
 	}
-	/* support == 0. The 2-unit probe can miss a floor the feet are
-	   already on. One pump of gravity is 800*dt^2, about 12 units at
-	   dt 0.12 and 50 at the 0.25 cap, and that trace then misses the
-	   same floor. A walking detainee left z=1 and finished at z=-49
-	   with every later step moved 0. SV_movestep only drops
-	   sv_stepsize (18). If that window has a floor, stand on it. */
-	{
-		Vector landed;
-		float drop;
-
-		if( EFW_LandMonster( pev, pev->origin, &landed ) )
-		{
-			drop = pev->origin.z - landed.z;
-			if( drop >= -1.0f && drop <= 18.0f )
-			{
-				static int s_snap;
-				if( s_snap < 6 && drop >= 1.0f )
-				{
-					s_snap++;
-					EFW_DebugPrint( "step down z=%.0f -> %.0f at %.0f %.0f",
-						pev->origin.z, landed.z, landed.x, landed.y );
-				}
-				pev->velocity.z = 0.0f;
-				pev->flags |= FL_ONGROUND;
-				if( drop >= 0.5f )
-					UTIL_SetOrigin( pev, landed );
-				s_npcStep = 0;
-				return;
-			}
-		}
-	}
 	pev->flags &= ~FL_ONGROUND;
 	dt = EFW_HostInterval();
 	grav = 800.0f;
@@ -788,8 +757,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		s_npcStep = 0;
 		return 0;
 	}
-	UTIL_SetOrigin( pev, landed );
 	s_npcStep = 0;
+	UTIL_SetOrigin( pev, landed );
 	return 1;
 }
 
@@ -948,11 +917,6 @@ void CRefugee::IdleThink( void )
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
 	pev->nextthink = gpGlobals->time;
-	/* A hull link from inside this think can touch and re-enter it.
-	   s_npcStep is set across that link so the re-entry does not fall
-	   and link again (that blew the host pump's stack). */
-	if( s_npcStep )
-		return;
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
