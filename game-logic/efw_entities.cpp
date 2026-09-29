@@ -279,65 +279,40 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support < 0 )
 	{
-		Vector buried;
-		Vector raised;
-		Vector landed;
-		int stepUp;
-		/* The 2-unit probe is startsolid, so this hull is in the floor.
-		   The walk's own lift only climbs sv_stepsize (18). A detainee
-		   who had been stepping toward the barracks finished at z=-35
-		   and then every later step moved 0. Climb the standing hull
-		   (72) until the box is free, then sit it on the floor. */
-		buried = pev->origin;
-		for( stepUp = 1; stepUp <= 18; stepUp++ )
-		{
-			TraceResult clear;
-			float savedMins;
-
-			raised = buried;
-			raised.z = buried.z + stepUp * 4.0f;
-			savedMins = pev->mins.z;
-			if( savedMins < 1.0f )
-				pev->mins.z = 1.0f;
-			memset( &clear, 0, sizeof( clear ) );
-			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &clear );
-			pev->mins.z = savedMins;
-			if( clear.fStartSolid || clear.fAllSolid )
-				continue;
-			if( EFW_LandMonster( pev, raised, &landed ) )
-			{
-				savedMins = pev->mins.z;
-				if( savedMins < 1.0f )
-					pev->mins.z = 1.0f;
-				memset( &clear, 0, sizeof( clear ) );
-				TRACE_MONSTER_HULL( ENT( pev ), landed, landed, ignore_monsters, ENT( pev ), &clear );
-				pev->mins.z = savedMins;
-				if( !clear.fStartSolid && !clear.fAllSolid && landed.z > buried.z + 0.5f )
-					raised = landed;
-			}
-			/* sv_stepsize is 18. Two of those is as far as MoveStep will
-			   drop. A clear pocket 60 units up is the ceiling, which
-			   popped Shala from her spawn at z=28 to z=90. */
-			if( raised.z <= buried.z + 0.5f || raised.z > buried.z + 36.0f )
-				continue;
-			{
-				static int s_embed;
-				if( s_embed < 6 )
-				{
-					s_embed++;
-					EFW_DebugPrint( "embedded lift z=%.0f -> %.0f at %.0f %.0f",
-						buried.z, raised.z, raised.x, raised.y );
-				}
-			}
-			s_npcStep = 0;
-			pev->velocity.z = 0.0f;
-			pev->flags |= FL_ONGROUND;
-			UTIL_SetOrigin( pev, raised );
-			return;
-		}
 		s_npcStep = 0;
 		pev->flags &= ~FL_ONGROUND;
 		return;
+	}
+	/* support == 0. The 2-unit probe can miss a floor the feet are
+	   already on. One pump of gravity is 800*dt^2, about 12 units at
+	   dt 0.12 and 50 at the 0.25 cap, and that trace then misses the
+	   same floor. A walking detainee left z=1 and finished at z=-49
+	   with every later step moved 0. SV_movestep only drops
+	   sv_stepsize (18). If that window has a floor, stand on it. */
+	{
+		Vector landed;
+		float drop;
+
+		if( EFW_LandMonster( pev, pev->origin, &landed ) )
+		{
+			drop = pev->origin.z - landed.z;
+			if( drop >= -1.0f && drop <= 18.0f )
+			{
+				static int s_snap;
+				if( s_snap < 6 && drop >= 1.0f )
+				{
+					s_snap++;
+					EFW_DebugPrint( "step down z=%.0f -> %.0f at %.0f %.0f",
+						pev->origin.z, landed.z, landed.x, landed.y );
+				}
+				s_npcStep = 0;
+				pev->velocity.z = 0.0f;
+				pev->flags |= FL_ONGROUND;
+				if( drop >= 0.5f )
+					UTIL_SetOrigin( pev, landed );
+				return;
+			}
+		}
 	}
 	pev->flags &= ~FL_ONGROUND;
 	dt = EFW_HostInterval();
