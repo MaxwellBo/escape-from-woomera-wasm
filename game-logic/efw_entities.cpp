@@ -177,9 +177,14 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
-/* FUN_1005d500 / MoveExecute step. Engine WALK_MOVE and MOVETYPE_STEP stall
-   Host_Frame on these studios, so the same hull the PE sets (-16..16, 0..72)
-   is traced here. 16 units is the stair limit in CBaseMonster::MoveExecute. */
+/* Set while a step trace or SetOrigin is on the stack. IdleThink returns
+   immediately so a hull trace cannot re-enter the walk. */
+static int s_npcStep;
+
+/* FUN_1005d500 / MoveExecute step. WALK_MOVE stalls Host_Frame on these
+   studios. Trace the PE hull (-16..16, 0..72) and ignore other monsters so
+   touch does not call back into think. 16 units is the stair limit in
+   CBaseMonster::MoveExecute. */
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 {
 	Vector delta;
@@ -191,8 +196,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 	float len;
 	float dt;
 	float step;
+	float savedMins;
 
-	if( !pev )
+	if( !pev || s_npcStep )
 		return 0;
 	delta = goal - pev->origin;
 	delta.z = 0.0f;
@@ -209,26 +215,46 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		step = len;
 	wish = delta * ( step / len );
 	start = pev->origin;
-	/* TRACE_MONSTER_HULL re-enters think on these studios and never
-	   returns. A point trace at chest height still stops on brushes. */
+	end = start + wish;
+	s_npcStep = 1;
+	/* Feet-origin mins.z == 0 sits in the floor and the trace is startsolid. */
+	savedMins = pev->mins.z;
+	if( savedMins < 1.0f )
+		pev->mins.z = 1.0f;
+	memset( &tr, 0, sizeof( tr ) );
+	TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+	pev->mins.z = savedMins;
 	{
-		static int s_inStep;
-		Vector chest;
-		if( s_inStep )
-			return 0;
-		s_inStep = 1;
-		chest = start + Vector( 0, 0, 36 );
-		UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
-		s_inStep = 0;
+		static int s_hullLog;
+		if( s_hullLog < 6 )
+		{
+			s_hullLog++;
+			EFW_DebugPrint( "hull step frac=%.2f solid=%d all=%d",
+				tr.flFraction, tr.fStartSolid, tr.fAllSolid );
+		}
 	}
 	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
-		return 0;
-	landed = start + wish * tr.flFraction;
+	{
+		Vector chest = start + Vector( 0, 0, 36 );
+		UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
+		if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		{
+			s_npcStep = 0;
+			return 0;
+		}
+		landed = start + wish * tr.flFraction;
+	}
+	else
+		landed = start + ( end - start ) * tr.flFraction;
 	landed.z = start.z;
-	if( ( landed - pev->origin ).Length() < 0.5f )
+	if( ( landed - start ).Length() < 0.5f )
+	{
+		s_npcStep = 0;
 		return 0;
+	}
 	pev->angles.y = UTIL_VecToYaw( wish );
 	UTIL_SetOrigin( pev, landed );
+	s_npcStep = 0;
 	return 1;
 }
 
@@ -254,6 +280,8 @@ void CRefugee::IdleThink( void )
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
 	pev->nextthink = gpGlobals->time;
+	if( s_npcStep )
+		return;
 	if( !pev->modelindex )
 		return;
 	if( pev->health == 2.0f )
