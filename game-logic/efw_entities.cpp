@@ -693,7 +693,28 @@ void CRefugee::IdleThink( void )
 	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
 	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
 	pPlayer = EFW_Player();
-	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
+	/* 0x100c8160 is strstr(targetname, "queue"), not exact equality.
+	   The yard line is named detainee_queue and must not approach. */
+	if( pPlayer && tn && strstr( tn, "queue" ) )
+	{
+		delta = pPlayer->pev->origin - pev->origin;
+		dist = delta.Length();
+		if( m_Activity == ACT_RESET )
+			SetActivity( ACT_IDLE );
+		pev->movetype = MOVETYPE_STEP;
+		{
+			static int s_qtick;
+			static int s_qlog;
+			s_qtick++;
+			if( s_qlog < 6 && dist > 100.0f && dist < 300.0f && ( s_qtick % 15 ) == 1 )
+			{
+				s_qlog++;
+				EFW_DebugPrint( "queue stay %s dist=%.0f origin=%.0f %.0f",
+					tn, dist, pev->origin.x, pev->origin.y );
+			}
+		}
+	}
+	else if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
 	{
 		s_walkTick++;
 		delta = pPlayer->pev->origin - pev->origin;
@@ -777,7 +798,7 @@ void CRefugee::IdleThink( void )
 	   SetOrigin does not return into this frame. */
 	EFW_AdvanceNpcAnim( this, tn );
 	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
-	if( pPlayer && !EFW_FStrEq( tn, "queue" )
+	if( pPlayer && !( tn && strstr( tn, "queue" ) )
 		&& m_movementActivity == ACT_WALK && m_Activity == ACT_WALK
 		&& dist > 100.0f
 		&& m_movementGoal == MOVEGOAL_TARGETENT )
