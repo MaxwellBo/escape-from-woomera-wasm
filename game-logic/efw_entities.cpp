@@ -715,15 +715,37 @@ void CRefugee::IdleThink( void )
 		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
-			/* vtable+0x1a8(1). Original calls it every close think; the
-			   activity sticks, so one successful call matches the pose. */
-			if( m_Activity != ACT_IDLE )
+			float beforeYaw;
+			int yawSpeed;
+			float dt;
+
+			/* vtable+0x1a8(1) every close think. It does not clear the
+			   move goal. ResetSequenceInfo sets animtime to now, so
+			   StudioFrameAdvance(0) adds nothing and the idle pose stays
+			   on the frame SetActivity just chose. The host-interval
+			   advance would keep playing it; framerate 0 is that zero step.
+			   The next IdleThink entry restores framerate. */
+			SetActivity( ACT_IDLE );
+			pev->framerate = 0.0f;
+			yawSpeed = (int)pev->yaw_speed;
+			if( yawSpeed < 1 )
+				yawSpeed = 90;
+			dt = EFW_HostInterval();
+			m_flLastYawTime = gpGlobals->time - dt;
+			if( m_flLastYawTime == 0.0f )
+				m_flLastYawTime = -dt;
+			beforeYaw = pev->angles.y;
+			MakeIdealYaw( pPlayer->pev->origin );
+			ChangeYaw( yawSpeed );
 			{
-				SetActivity( ACT_IDLE );
-				EFW_DebugPrint( "SetActivity IDLE close %s seq=%d",
-					( tn && tn[0] ) ? tn : "?", pev->sequence );
+				static int s_close;
+				if( s_close < 6 && EFW_FStrEq( tn, "Amir" ) )
+				{
+					s_close++;
+					EFW_DebugPrint( "close idle %s frame=%.1f yaw %.0f -> %.0f dist=%.0f",
+						tn, pev->frame, beforeYaw, pev->angles.y, dist );
+				}
 			}
-			m_movementGoal = MOVEGOAL_NONE;
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
 		pev->movetype = MOVETYPE_STEP;
@@ -741,7 +763,8 @@ void CRefugee::IdleThink( void )
 	EFW_AdvanceNpcAnim( this, tn );
 	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
 	if( pPlayer && !EFW_FStrEq( tn, "queue" )
-		&& m_movementActivity == ACT_WALK && dist > 100.0f
+		&& m_movementActivity == ACT_WALK && m_Activity == ACT_WALK
+		&& dist > 100.0f
 		&& m_movementGoal == MOVEGOAL_TARGETENT )
 	{
 		float speed;
@@ -769,8 +792,6 @@ void CRefugee::IdleThink( void )
 					( pPlayer->pev->origin - pev->origin ).Length() );
 			}
 		}
-		if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
-			m_movementGoal = MOVEGOAL_NONE;
 	}
 }
 
