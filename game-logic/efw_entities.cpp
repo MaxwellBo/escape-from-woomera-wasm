@@ -404,22 +404,20 @@ static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 {
 	entvars_t *pev;
 	float flInterval;
-	float clock;
 
 	if( !pMon )
 		return;
 	pev = pMon->pev;
 	if( !pev->modelindex || s_npcStep )
 		return;
-	clock = gpGlobals->time - pev->animtime;
-	if( clock > 0.001f && clock < 0.25f )
-		flInterval = 0.0f;
-	else
-	{
-		flInterval = gpGlobals->frametime;
-		if( flInterval < 0.001f || flInterval > 0.1f )
-			flInterval = 1.0f / 60.0f;
-	}
+	/* MonsterThink calls StudioFrameAdvance(0), which uses sv.time.
+	   That clock does not move one think per pump, so the feet (host
+	   interval) and the sequence were on different clocks. Pass the
+	   same interval MoveExecute just used. animtime 0 makes
+	   StudioFrameAdvance drop the interval, including when sv.time is 0. */
+	if( !pev->animtime )
+		pev->animtime = ( gpGlobals->time > 0.0f ) ? gpGlobals->time : 0.001f;
+	flInterval = EFW_HostInterval();
 	flInterval = pMon->StudioFrameAdvance( flInterval );
 	if( pMon->m_MonsterState != MONSTERSTATE_SCRIPT && pMon->m_MonsterState != MONSTERSTATE_DEAD
 		&& pMon->m_Activity == ACT_IDLE && pMon->m_fSequenceFinished )
@@ -451,8 +449,9 @@ static void EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		if( s_frame < 6 && ( pMon->m_Activity == ACT_WALK || pMon->m_Activity == ACT_RUN ) )
 		{
 			s_frame++;
-			EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f gs=%.0f",
-				( name && name[0] ) ? name : "?", pev->sequence, pev->frame, pMon->m_flGroundSpeed );
+			EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f iv=%.3f gs=%.0f",
+				( name && name[0] ) ? name : "?", pev->sequence, pev->frame,
+				flInterval, pMon->m_flGroundSpeed );
 		}
 	}
 }
