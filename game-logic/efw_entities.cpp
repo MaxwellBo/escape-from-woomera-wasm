@@ -209,41 +209,22 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed )
 		step = len;
 	wish = delta * ( step / len );
 	start = pev->origin;
-	end = start + wish;
-	/* Feet-origin hulls (mins.z == 0) sit in the floor, so the trace is
-	   startsolid and the refugee never leaves the brush. Keep their z. */
+	/* TRACE_MONSTER_HULL re-enters think on these studios and never
+	   returns. A point trace at chest height still stops on brushes. */
 	{
-		float saved = pev->mins.z;
-		int stepped = 0;
-		if( saved < 1.0f )
-			pev->mins.z = 1.0f;
-		TRACE_MONSTER_HULL( ENT( pev ), start, end, dont_ignore_monsters, ENT( pev ), &tr );
-		if( tr.fStartSolid )
-		{
-			pev->mins.z = saved;
+		static int s_inStep;
+		Vector chest;
+		if( s_inStep )
 			return 0;
-		}
-		landed = tr.vecEndPos;
-		if( tr.flFraction < 1.0f )
-		{
-			TraceResult over;
-			TraceResult across;
-			Vector up( 0, 0, 18 );
-			TRACE_MONSTER_HULL( ENT( pev ), start, start + up, dont_ignore_monsters, ENT( pev ), &over );
-			if( !over.fStartSolid && over.flFraction >= 1.0f )
-			{
-				TRACE_MONSTER_HULL( ENT( pev ), over.vecEndPos, over.vecEndPos + wish, dont_ignore_monsters, ENT( pev ), &across );
-				if( !across.fStartSolid && across.flFraction > tr.flFraction )
-				{
-					landed = across.vecEndPos;
-					stepped = 1;
-				}
-			}
-		}
-		pev->mins.z = saved;
-		if( !stepped )
-			landed.z = start.z;
+		s_inStep = 1;
+		chest = start + Vector( 0, 0, 36 );
+		UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
+		s_inStep = 0;
 	}
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		return 0;
+	landed = start + wish * tr.flFraction;
+	landed.z = start.z;
 	if( ( landed - pev->origin ).Length() < 0.5f )
 		return 0;
 	pev->angles.y = UTIL_VecToYaw( wish );
