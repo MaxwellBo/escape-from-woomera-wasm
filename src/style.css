@@ -201,6 +201,31 @@ canvas#canvas {
   border: 1px solid #fff;
 }
 
+/* FUN_10044f70 Image buttons: the sprite is the control (128², hotspot centered). */
+.efw-vgui button.efw-menu {
+  background: transparent;
+  border: none;
+  color: transparent;
+  padding: 0;
+}
+
+.efw-vgui button.efw-prompt {
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100% 100%;
+  border: none;
+  padding: 12% 8% 16%;
+  color: #111;
+  font-size: 11px;
+  line-height: 1.15;
+  text-shadow:
+    -1px -1px 0 #fff,
+    1px -1px 0 #fff,
+    -1px 1px 0 #fff,
+    1px 1px 0 #fff;
+}
+
 .efw-hint {
   position: absolute;
   left: 8px;

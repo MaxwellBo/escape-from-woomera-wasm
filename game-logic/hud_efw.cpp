@@ -1206,34 +1206,6 @@ static int EFW_Project( float wx, float wy, float wz, int *sx, int *sy )
 	return 1;
 }
 
-static void EFW_DrawPrompt( int x, int y, const char *label, HSPRITE icon, int r, int g, int b )
-{
-	wrect_t rc;
-	int dw, dh;
-	if( icon )
-	{
-		dw = SPR_Width( icon, 0 );
-		dh = SPR_Height( icon, 0 );
-		if( dw < 1 )
-			dw = 32;
-		if( dh < 1 )
-			dh = 32;
-		rc.left = 0;
-		rc.top = 0;
-		rc.right = dw;
-		rc.bottom = dh;
-		SPR_Set( icon, 255, 255, 255 );
-		SPR_DrawHoles( 0, x - dw / 2, y - dh - 4, &rc );
-		y += 4;
-	}
-	else
-	{
-		FillRGBA( x - 40, y - 18, 80, 16, 0, 0, 0, 160 );
-	}
-	if( label && label[0] )
-		gHUD.DrawHudString( x - 60, y, x + 120, label, r, g, b );
-}
-
 static int EFW_HasWep( int id )
 {
 	{
@@ -1528,12 +1500,12 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 		/* FUN_10044f70 returns without creating CommandButtons when the
 		   projection misses or sits in the 90px edge band. */
 	}
-	for( i = 0; i < g_vguiN; i++ )
-	{
-		EfwVguiBtn *btn = &g_vgui[i];
-		EFW_DrawPrompt( btn->x + btn->w / 2, btn->y + btn->h, btn->label, btn->icon, r, g, b );
-		FillRGBA( btn->x, btn->y, btn->w, 2, r, g, b, 180 );
-	}
+	/* FUN_10044f70 draws these as VGUI image buttons. The browser stand-in
+	   is the HTML overlay (EFW_VguiSync), which uses the same sprites.
+	   SPR_DrawHoles here as well stacked a second 128px icon on every prompt. */
+	(void)r;
+	(void)g;
+	(void)b;
 	EFW_VguiSync();
 }
 

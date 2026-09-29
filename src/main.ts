@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll137`;
+    return `${url}?v=efw-dll138`;
   return url;
 }
 
@@ -48,6 +48,205 @@ const staged = {
 let engine: XashInstance | null = null;
 let loopbackNet: EfwLoopbackNet | null = null;
 let logLines = 0;
+
+/* GoldSrc SPR (IDSP v2): uint16 palette count, RGB palette, then one frame.
+   texFormat 3 is alphatest (index 255 transparent). These are the
+   FUN_10044f70 CommandButton images. */
+const promptSpriteUrl: Record<string, string> = {};
+
+function decodeGoldSrcSpr(data: Uint8Array): string | null {
+  if (data.length < 80 || data[0] !== 0x49 || data[1] !== 0x44 || data[2] !== 0x53 || data[3] !== 0x50)
+    return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const tex = view.getInt32(12, true);
+  let off = 40;
+  const ncol = view.getUint16(off, true);
+  off += 2;
+  if (ncol < 1 || ncol > 256 || off + ncol * 3 + 20 > data.length)
+    return null;
+  const pal = data.subarray(off, off + ncol * 3);
+  off += ncol * 3;
+  off += 4;
+  const w = view.getInt32(off + 8, true);
+  const h = view.getInt32(off + 12, true);
+  off += 16;
+  if (w < 1 || h > 1024 || h < 1 || w > 1024 || off + w * h > data.length)
+    return null;
+  const canvasEl = document.createElement('canvas');
+  canvasEl.width = w;
+  canvasEl.height = h;
+  const ctx = canvasEl.getContext('2d');
+  if (!ctx)
+    return null;
+  const img = ctx.createImageData(w, h);
+  const pix = data.subarray(off, off + w * h);
+  for (let i = 0; i < pix.length; i++) {
+    const b = pix[i];
+    const o = i * 4;
+    if (tex === 3 && b === 255)
+      continue;
+    if (tex === 2) {
+      img.data[o] = 255;
+      img.data[o + 1] = 255;
+      img.data[o + 2] = 255;
+      img.data[o + 3] = b;
+      continue;
+    }
+    const p = b * 3;
+    img.data[o] = pal[p];
+    img.data[o + 1] = pal[p + 1];
+    img.data[o + 2] = pal[p + 2];
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvasEl.toDataURL('image/png');
+}
+
+function stagedBytes(rel: string): Uint8Array | undefined {
+  const want = `${GAME_DIR}/${rel}`.toLowerCase();
+  const direct = staged.woomera.get(`${GAME_DIR}/${rel}`);
+  if (direct)
+    return direct;
+  for (const [key, value] of staged.woomera) {
+    if (key.toLowerCase() === want)
+      return value;
+  }
+  return undefined;
+}
+
+function ensurePromptSprites() {
+  if (promptSpriteUrl.speech)
+    return;
+  const files: Array<[string, string]> = [
+    ['speech', 'sprites/efw_speech_bubble.spr'],
+    ['give', 'sprites/efw_give_icon.spr'],
+    ['hide', 'sprites/efw_hide_icon.spr'],
+    ['pliers', 'sprites/efw_item_pliers.spr'],
+    ['lever', 'sprites/efw_item_lever.spr'],
+    ['branch', 'sprites/efw_item_branch.spr'],
+    ['phone', 'sprites/efw_item_simcard.spr'],
+    ['idtag', 'sprites/efw_item_idtag.spr'],
+    ['card', 'sprites/efw_item_phonecard.spr'],
+    ['powder', 'sprites/efw_item_washingpowder.spr'],
+  ];
+  for (const [key, rel] of files) {
+    const bytes = stagedBytes(rel);
+    if (!bytes)
+      continue;
+    const url = decodeGoldSrcSpr(bytes);
+    if (url)
+      promptSpriteUrl[key] = url;
+  }
+}
+
+function itemPromptSprite(id: number): string | undefined {
+  switch (id) {
+    case 16: return promptSpriteUrl.pliers;
+    case 17: return promptSpriteUrl.lever;
+    case 18: return promptSpriteUrl.branch;
+    case 19: return promptSpriteUrl.phone;
+    case 20: return promptSpriteUrl.idtag;
+    case 21:
+    case 22:
+    case 23: return promptSpriteUrl.card;
+    case 24: return promptSpriteUrl.powder;
+    default: return promptSpriteUrl.give;
+  }
+}
+
+/* FUN_10044f70: talk uses the speech bubble; give/use uses that weapon's
+   item sprite (weapon info +0xbc); hide and pickup use their own icons. */
+function promptSpriteFor(cmd: string): string | undefined {
+  ensurePromptSprites();
+  const c = cmd.trim();
+  if (c.startsWith('efw_Talk'))
+    return promptSpriteUrl.speech;
+  if (c.startsWith('efw_HideUnderBuilding'))
+    return promptSpriteUrl.hide;
+  if (c.startsWith('efw_PickupPliers'))
+    return promptSpriteUrl.pliers;
+  const numbered = c.match(/^efw_(?:Give|UseWithMarker|Pickup)\s+(\d+)/);
+  if (numbered)
+    return itemPromptSprite(Number(numbered[1]));
+  if (c.startsWith('efw_Pickup') || c.startsWith('efw_Give'))
+    return promptSpriteUrl.give;
+  /* menuselect is the HUD topic list (FUN_100c6e60), not a world sprite. */
+  return undefined;
+}
+
+function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: string, nw: string, nh: string) {
+  const menu = cmd.trim().match(/^menuselect\s+(\d+)/);
+  if (menu) {
+    /* FUN_100c6e60 draws the topic list in the HUD. The HTML control is only
+       the click target over those lines. */
+    const screenH = canvas.height || 720;
+    const n = Number(menu[1]);
+    const y = (48 + 16 * n) / screenH;
+    const h = 16 / screenH;
+    btn.classList.remove('efw-prompt');
+    btn.classList.add('efw-menu');
+    btn.setAttribute('aria-label', btn.textContent || cmd);
+    btn.textContent = '';
+    btn.style.backgroundImage = '';
+    delete btn.dataset.ax;
+    delete btn.dataset.ay;
+    btn.style.left = '0%';
+    btn.style.top = `${(y * 100).toFixed(2)}%`;
+    btn.style.width = '100%';
+    btn.style.height = `${(h * 100).toFixed(2)}%`;
+    return;
+  }
+  btn.classList.remove('efw-menu');
+  const url = promptSpriteFor(cmd);
+  if (!url) {
+    btn.classList.remove('efw-prompt');
+    btn.style.backgroundImage = '';
+    delete btn.dataset.ax;
+    delete btn.dataset.ay;
+    btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+    btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+    btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+    btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    return;
+  }
+  /* Projected point is the sprite hotspot (origin -64, 64 on the 128² frame).
+     The server staggers buttons by 32px, which piles the full frames on top
+     of each other; layoutPromptColumn separates them. */
+  btn.dataset.ax = String(Number(nx) + Number(nw) / 2);
+  btn.dataset.ay = String(Number(ny) + Number(nh));
+  btn.classList.add('efw-prompt');
+  btn.style.backgroundImage = `url("${url}")`;
+}
+
+function layoutPromptColumn(layer: HTMLElement) {
+  const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
+  if (!buttons.length)
+    return;
+  const screenW = canvas.width || 960;
+  const screenH = canvas.height || 720;
+  /* 128px frames on a short WebGL view cover the character. Cap one icon
+     near a fifth of the height, the same weight 128px has on 640×480. */
+  const px = Math.min(128, Math.max(64, Math.round(screenH * 0.2)));
+  const sprW = px / screenW;
+  const sprH = px / screenH;
+  const ax = Number(buttons[0].dataset.ax || '0.5');
+  const ay = Number(buttons[0].dataset.ay || '0.5');
+  let left = ax + 0.02;
+  if (left + sprW > 0.98)
+    left = Math.max(0.02, ax - sprW - 0.02);
+  let top = ay - (sprH * buttons.length) / 2;
+  const total = sprH * buttons.length;
+  if (top < 0.04)
+    top = 0.04;
+  if (top + total > 0.96)
+    top = Math.max(0.04, 0.96 - total);
+  buttons.forEach((b, i) => {
+    b.style.left = `${(left * 100).toFixed(2)}%`;
+    b.style.top = `${((top + i * sprH) * 100).toFixed(2)}%`;
+    b.style.width = `${(sprW * 100).toFixed(2)}%`;
+    b.style.height = `${(sprH * 100).toFixed(2)}%`;
+  });
+}
 
 function applyEfwVgui(text: string): boolean {
   const layer = document.getElementById('efw-vgui');
@@ -98,10 +297,8 @@ function applyEfwVgui(text: string): boolean {
   const existing = buttons.find((b) => b.dataset.cmd === cmd);
   if (existing) {
     existing.textContent = label || cmd;
-    existing.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
-    existing.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
-    existing.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
-    existing.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    stylePromptButton(existing, cmd, nx, ny, nw, nh);
+    layoutPromptColumn(layer);
     return true;
   }
   if (buttons.length >= 6)
@@ -110,10 +307,7 @@ function applyEfwVgui(text: string): boolean {
   btn.type = 'button';
   btn.dataset.cmd = cmd;
   btn.textContent = label || cmd;
-  btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
-  btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
-  btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
-  btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+  stylePromptButton(btn, cmd, nx, ny, nw, nh);
   if (layer.dataset.font) {
     btn.style.fontFamily = layer.style.fontFamily;
     btn.style.fontSize = layer.style.fontSize;
@@ -131,6 +325,7 @@ function applyEfwVgui(text: string): boolean {
     runGameCmd(cmd);
   });
   layer.appendChild(btn);
+  layoutPromptColumn(layer);
   layer.hidden = false;
   /* Original CommandButtons own the cursor; unlock so the HTML stand-in is clickable. */
   if (document.pointerLockElement)
