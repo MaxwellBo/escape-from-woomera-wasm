@@ -212,8 +212,10 @@ static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
 	return 1;
 }
 
-/* 1 = floor within 4, 0 = air, -1 = hull still in solid.
-   mins.z is lifted to 1 so feet resting on the floor are not startsolid. */
+/* 1 = floor within 2, 0 = air, -1 = hull still in solid.
+   mins.z is lifted to 1 so feet resting on the floor are not startsolid.
+   A 4-unit probe treated the middle of a fall as ground and the hull
+   walked before it landed. */
 static int EFW_ProbeSupport( entvars_t *pev )
 {
 	TraceResult tr;
@@ -224,7 +226,7 @@ static int EFW_ProbeSupport( entvars_t *pev )
 	if( saved < 1.0f )
 		pev->mins.z = 1.0f;
 	down = pev->origin;
-	down.z -= 4.0f;
+	down.z -= 2.0f;
 	memset( &tr, 0, sizeof( tr ) );
 	TRACE_MONSTER_HULL( ENT( pev ), pev->origin, down, ignore_monsters, ENT( pev ), &tr );
 	pev->mins.z = saved;
