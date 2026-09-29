@@ -386,12 +386,30 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 		}
 	}
 	pev->mins.z = savedMins;
-	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction < 0.5f )
+	/* Same acceptance as the direct chunk: a destination with a floor
+	   counts, even when the feet-level trace started in the ground. */
+	if( EFW_LandMonster( pev, end, &stepLand ) )
+	{
+		horiz = ( stepLand - start ).Length2D();
+		if( horiz >= 0.5f )
+		{
+			*out = stepLand;
+			return 1;
+		}
+	}
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
 		return 0;
-	if( !EFW_LandMonster( pev, end, &stepLand ) )
-		return 0;
+	stepLand = start + ( end - start ) * tr.flFraction;
+	{
+		Vector grounded;
+
+		if( EFW_LandMonster( pev, stepLand, &grounded ) )
+			stepLand = grounded;
+		else
+			stepLand.z = start.z;
+	}
 	horiz = ( stepLand - start ).Length2D();
-	if( horiz < step * 0.5f || horiz < 0.5f )
+	if( horiz < 0.5f )
 		return 0;
 	*out = stepLand;
 	return 1;
