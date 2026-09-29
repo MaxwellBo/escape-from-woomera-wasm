@@ -350,8 +350,21 @@ void CRefugee::IdleThink( void )
 			m_iWalkState = 0;
 			pev->iuser1 = 0;
 		}
+		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
+		pev->movetype = MOVETYPE_STEP;
+		{
+			static int s_mv;
+			if( !s_mv )
+			{
+				s_mv = 1;
+				EFW_DebugPrint( "IdleThink movetype STEP %s", ( tn && tn[0] ) ? tn : "?" );
+			}
+		}
 	}
-	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
+	/* FUN_1005d160. Does not touch the studio header, so a missing SET_MODEL
+	   cannot stall the frame. */
+	if( pev->modelindex && !s_npcStep )
+		StudioFrameAdvance( 0.0f );
 }
 
 void CRefugee::Precache( void )
@@ -884,10 +897,8 @@ void EFW_EnableNpcThink( edict_t *pent )
 		pRef->SetThink( &CRefugee::IdleThink );
 		/* Fire this frame: +0.1 never elapses while gpGlobals->time is stuck. */
 		pent->v.nextthink = gpGlobals->time;
-		/* MOVETYPE_STEP without SET_MODEL stalls ServerFrame after a few
-		   seconds (same as think-without-studio). IdleThink still runs. */
-		pent->v.movetype = MOVETYPE_NONE;
-		pent->v.solid = SOLID_NOT;
+		/* Bind already set SOLID_BBOX. Leave it so the player hull can meet
+		   them. IdleThink sets MOVETYPE_STEP once the model index exists. */
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}
