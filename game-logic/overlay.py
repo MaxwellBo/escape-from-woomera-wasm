@@ -504,6 +504,25 @@ def main() -> None:
     input_cpp = cldll / "input.cpp"
     once(
         input_cpp,
+        "	else\n"
+        "	{\n"
+        "		VectorCopy( oldangles, cmd->viewangles );\n"
+        "	}\n"
+        "\n"
+        "}\n",
+        "	else\n"
+        "	{\n"
+        "		VectorCopy( oldangles, cmd->viewangles );\n"
+        "	}\n"
+        "	{\n"
+        "		extern void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active );\n"
+        "		EFW_ClientMove( frametime, cmd, active ); /* EFW_OVERLAY */\n"
+        "	}\n"
+        "\n"
+        "}\n",
+    )
+    once(
+        input_cpp,
         "int DLLEXPORT HUD_Key_Event( int down, int keynum, const char *pszCurrentBinding )\n"
         "{\n"
         "	if (gViewPort)\n"

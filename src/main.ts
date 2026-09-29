@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll138`;
+    return `${url}?v=efw-dll140`;
   return url;
 }
 
@@ -2015,17 +2015,37 @@ function walkSlot(key: string): keyof typeof walkKeys | null {
 function syncWalkLatch() {
   const fwd = (walkKeys.w ? 1 : 0) + (walkKeys.s ? -1 : 0);
   const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
-  runGameCmd(`efw_move ${fwd} ${side}`);
+  /* CL_CreateMove writes this into the usercmd. PM_Move walks; the origin
+     latch stays at zero. */
+  runGameCmd(`efw_clmove ${fwd} ${side}`);
+}
+
+/* Coalesce pointer deltas to one usercmd look per frame. The client DLL
+   adds them to cmd->viewangles; PM_Move turns. efw_turn remains the
+   server latch for anything that still calls it directly. */
+const lookPending = { yaw: 0, pitch: 0 };
+let lookFlushQueued = false;
+function queueLook(yaw: number, pitch: number) {
+  if (!yaw && !pitch) return;
+  lookPending.yaw += yaw;
+  lookPending.pitch += pitch;
+  if (lookFlushQueued) return;
+  lookFlushQueued = true;
+  requestAnimationFrame(() => {
+    lookFlushQueued = false;
+    const y = lookPending.yaw;
+    const p = lookPending.pitch;
+    lookPending.yaw = 0;
+    lookPending.pitch = 0;
+    if (!y && !p) return;
+    runGameCmd(`efw_clook ${y.toFixed(3)} ${p.toFixed(3)}`);
+  });
 }
 
 document.addEventListener('mousemove', (e) => {
   if (!inputCaptured()) return;
   if (!e.movementX && !e.movementY) return;
-  /* Usercmds do not flush in this listen server, so SDL mouse look never
-     reaches the pawn the walk latch uses. Slave yaw/pitch here. */
-  const yaw = (-e.movementX * 0.08).toFixed(3);
-  const pitch = (e.movementY * 0.08).toFixed(3);
-  runGameCmd(`efw_turn ${yaw} ${pitch}`);
+  queueLook(-e.movementX * 0.08, e.movementY * 0.08);
 });
 
 document.addEventListener('keydown', (e) => {
@@ -2041,11 +2061,11 @@ document.addEventListener('keydown', (e) => {
   if (e.repeat)
     return;
   if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
-    runGameCmd('efw_turn 12');
+    queueLook(12, 0);
     return;
   }
   if (e.key === 'ArrowRight' || e.key === 'z' || e.key === 'Z') {
-    runGameCmd('efw_turn -12');
+    queueLook(-12, 0);
     return;
   }
   if (e.key === 'e' || e.key === 'E' || e.key === 'Escape' || e.key === 'Enter') {

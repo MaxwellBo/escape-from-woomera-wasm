@@ -1524,6 +1524,32 @@ static void EFW_HostFwd( void )
 		EFW_LatchMove( fwd, side );
 		return;
 	}
+	if( pcmd && !strcmp( pcmd, "efw_clmove" ) )
+	{
+		int fwd = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		int side = ( CMD_ARGC() > 2 ) ? atoi( CMD_ARGV( 2 ) ) : 0;
+		/* Drop the origin latch so a real usercmd is what changes origin. */
+		EFW_LatchMove( 0, 0 );
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pmove %d %d\n", fwd, side );
+		EFW_DebugPrint( ">>> efw_clmove stuff %d %d pawn=%d", fwd, side, pPlayer ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_clook" ) )
+	{
+		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
+		float pitch = ( CMD_ARGC() > 2 ) ? (float)atof( CMD_ARGV( 2 ) ) : 0.0f;
+		/* Same delta the client writes into cmd->viewangles. fixangle stays
+		   clear so the engine does not snap the view back over the usercmd. */
+		if( pPlayer && ( yaw != 0.0f || pitch != 0.0f ) )
+		{
+			EFW_LatchTurn( yaw, pitch );
+			pPlayer->pev->fixangle = 0;
+			CLIENT_COMMAND( pPlayer->edict(), "efw_plook %g %g\n", yaw, pitch );
+		}
+		EFW_DebugPrint( ">>> efw_clook stuff %.1f %.1f pawn=%d", yaw, pitch, pPlayer ? 1 : 0 );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_turn" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
@@ -1787,7 +1813,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
-		"efw_move", "efw_turn",
+		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -2920,8 +2946,12 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	s_preN++;
 	if( s_preN <= 8 || ( s_preN % 60 ) == 1 )
 	{
-		char line[64];
-		snprintf( line, sizeof( line ), "efw: PreThink n=%d live=%d\n", s_preN, s_liveTicks );
+		char line[128];
+		snprintf( line, sizeof( line ),
+			"efw: PreThink n=%d live=%d btn=%d vel=%.0f origin=%.0f %.0f %.0f yaw=%.0f pitch=%.0f\n",
+			s_preN, s_liveTicks, pPlayer->pev->button, pPlayer->pev->velocity.Length(),
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z,
+			pPlayer->pev->v_angle.y, pPlayer->pev->v_angle.x );
 		EFW_LogLine( line );
 	}
 	if( g_efw.player != pPlayer )

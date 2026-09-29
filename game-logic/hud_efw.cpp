@@ -4,6 +4,8 @@
 #include "triangleapi.h"
 #include "screenfade.h"
 #include "shake.h"
+#include "const.h"
+#include "usercmd.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -330,6 +332,118 @@ static int EFW_ContextOn( void )
 		gEngfuncs.Con_Printf( ">>> FUN_10046990 v=%d\n", g_contextMode );
 	}
 	return g_contextMode;
+}
+
+/* Stuffed by the server as `efw_pmove` / `efw_plook` (CLIENT_COMMAND).
+   CL_CreateMove copies this into the usercmd so PM_Move walks and looks.
+   The origin latch stays at zero. */
+static int s_pmFwd;
+static int s_pmSide;
+static int s_lookOn;
+static float s_lookYaw;
+static float s_lookPitch;
+static float s_lookDyaw;
+static float s_lookDpitch;
+
+static void EFW_NormYaw( float *yaw )
+{
+	while( *yaw > 180.0f )
+		*yaw -= 360.0f;
+	while( *yaw < -180.0f )
+		*yaw += 360.0f;
+}
+
+static void EFW_PMove_f( void )
+{
+	s_pmFwd = ( gEngfuncs.Cmd_Argc() > 1 ) ? atoi( gEngfuncs.Cmd_Argv( 1 ) ) : 0;
+	s_pmSide = ( gEngfuncs.Cmd_Argc() > 2 ) ? atoi( gEngfuncs.Cmd_Argv( 2 ) ) : 0;
+	if( s_pmFwd > 1 )
+		s_pmFwd = 1;
+	if( s_pmFwd < -1 )
+		s_pmFwd = -1;
+	if( s_pmSide > 1 )
+		s_pmSide = 1;
+	if( s_pmSide < -1 )
+		s_pmSide = -1;
+	gEngfuncs.Con_Printf( "efw: pmove cmd %d %d\n", s_pmFwd, s_pmSide );
+}
+
+/* Deltas from the browser pointer. Applied once, then held as the view
+   so a later fixangle cannot snap the usercmd back to the spawn yaw. */
+static void EFW_PLook_f( void )
+{
+	s_lookDyaw += ( gEngfuncs.Cmd_Argc() > 1 ) ? (float)atof( gEngfuncs.Cmd_Argv( 1 ) ) : 0.0f;
+	s_lookDpitch += ( gEngfuncs.Cmd_Argc() > 2 ) ? (float)atof( gEngfuncs.Cmd_Argv( 2 ) ) : 0.0f;
+	gEngfuncs.Con_Printf( "efw: plook cmd %.1f %.1f\n", s_lookDyaw, s_lookDpitch );
+}
+
+void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
+{
+	static int n;
+	float spd;
+	float ang[3];
+	(void)frametime;
+	if( !cmd )
+		return;
+	n++;
+	if( s_pmFwd || s_pmSide )
+	{
+		/* active==0 means signon is unfinished and the engine ignores the
+		   cmd. Still fill it so a later active frame is not empty. */
+		if( !active )
+		{
+			cmd->forwardmove = 0.0f;
+			cmd->sidemove = 0.0f;
+			cmd->upmove = 0.0f;
+		}
+		spd = CVAR_GET_FLOAT( "cl_forwardspeed" );
+		if( spd < 1.0f )
+			spd = 400.0f;
+		cmd->forwardmove += spd * (float)s_pmFwd;
+		spd = CVAR_GET_FLOAT( "cl_sidespeed" );
+		if( spd < 1.0f )
+			spd = 400.0f;
+		cmd->sidemove += spd * (float)s_pmSide;
+		if( s_pmFwd > 0 )
+			cmd->buttons |= IN_FORWARD;
+		else if( s_pmFwd < 0 )
+			cmd->buttons |= IN_BACK;
+		if( s_pmSide > 0 )
+			cmd->buttons |= IN_MOVERIGHT;
+		else if( s_pmSide < 0 )
+			cmd->buttons |= IN_MOVELEFT;
+	}
+	if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f || s_lookOn )
+	{
+		if( !s_lookOn )
+		{
+			gEngfuncs.GetViewAngles( ang );
+			s_lookYaw = ang[1];
+			s_lookPitch = ang[0];
+			s_lookOn = 1;
+		}
+		s_lookYaw += s_lookDyaw;
+		s_lookPitch += s_lookDpitch;
+		s_lookDyaw = 0.0f;
+		s_lookDpitch = 0.0f;
+		EFW_NormYaw( &s_lookYaw );
+		if( s_lookPitch > 89.0f )
+			s_lookPitch = 89.0f;
+		if( s_lookPitch < -89.0f )
+			s_lookPitch = -89.0f;
+		/* viewangles: pitch, yaw, roll. GoldSrc index order. */
+		ang[0] = s_lookPitch;
+		ang[1] = s_lookYaw;
+		ang[2] = 0.0f;
+		gEngfuncs.SetViewAngles( ang );
+		cmd->viewangles[0] = ang[0];
+		cmd->viewangles[1] = ang[1];
+		cmd->viewangles[2] = 0.0f;
+	}
+	if( n <= 4 || ( n % 120 ) == 0 || ( ( s_pmFwd || s_pmSide || s_lookOn ) && ( n % 30 ) == 0 ) )
+		gEngfuncs.Con_Printf( "efw: createmove n=%d active=%d fwd=%.0f side=%.0f btn=%d yaw=%.1f pitch=%.1f\n",
+			n, active, cmd->forwardmove, cmd->sidemove, cmd->buttons,
+			cmd->viewangles[1], cmd->viewangles[0] );
 }
 
 /* FUN_10047720: HOOK_MESSAGE(EFW_Menu) then sprintf 7× "efw_ShowMenu %i". */
@@ -1075,6 +1189,8 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnHookUserMsg( "EFW_Cntxt", __MsgFunc_EFW_Cntxt );
 	EFW_HookUserMsgs();
 	EFW_HookMenuSlots();
+	gEngfuncs.pfnAddCommand( "efw_pmove", EFW_PMove_f );
+	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
 	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
