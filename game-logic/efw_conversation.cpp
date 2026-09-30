@@ -439,6 +439,8 @@ void EFW_CloseTalk( void )
 	st->menuMode = 0;
 	st->talkStart = 0;
 	st->prevQuestion[0] = '\0';
+	st->speech[0] = '\0';
+	st->speechAt = 0;
 	if( pPlayer )
 		EFW_CloseMenu( pPlayer );
 }
@@ -449,7 +451,7 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	const EfwScript *script;
 	const char *npc;
 	const char *lines[EFW_MENU_LINES];
-	char title[48];
+	char title[512];
 	int i;
 	int slot;
 
@@ -469,8 +471,20 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	snprintf( title, sizeof( title ), "Talk to %s",
-		EFW_DisplayName( STRING( pNpc->pev->targetname ) ) );
+	/* FUN_100b9bb9: speech younger than 20s replaces the empty title.
+	   A fresh efw_Talk clears speech in EFW_StartTalk, so the first
+	   open stays "Talk to %s". */
+	if( st->speech[0] && gpGlobals->time - st->speechAt < EFW_TALK_TIMEOUT )
+	{
+		strncpy( title, st->speech, sizeof( title ) - 1 );
+		title[sizeof( title ) - 1] = '\0';
+		EFW_DebugPrint( ">>> FUN_100b9bb9 speech=1" );
+	}
+	else
+	{
+		snprintf( title, sizeof( title ), "Talk to %s",
+			EFW_DisplayName( STRING( pNpc->pev->targetname ) ) );
+	}
 	slot = 0;
 	for( i = 0; i < script->questionCount && slot < 6; i++ )
 	{
@@ -508,6 +522,8 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 	(void)EFW_MapLevel();
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
+	st->speech[0] = '\0';
+	st->speechAt = 0;
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
 
@@ -619,13 +635,21 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 			}
 		}
 	}
+	/* FUN_100b9cd0 stores the reply (squark flag 8) then FUN_100b9990
+	   shows the topic lines again. "Continue" is not in the DLL. */
+	if( body[0] )
 	{
-		const char *cont = "Continue";
-		st->menuMode = 2;
-		st->menuCount = 1;
-		st->menuChoices[0] = 0;
-		EFW_ShowDllMenu( pPlayer, body[0] ? body : q->topic, &cont, 1 );
+		strncpy( st->speech, body, sizeof( st->speech ) - 1 );
+		st->speech[sizeof( st->speech ) - 1] = '\0';
+		st->speechAt = gpGlobals->time;
 	}
+	else
+	{
+		st->speech[0] = '\0';
+		st->speechAt = 0;
+	}
+	st->menuMode = 1;
+	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
 
 void EFW_ThinkConversation( void )
