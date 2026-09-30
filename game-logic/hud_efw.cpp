@@ -503,6 +503,42 @@ static void EFW_StartPitchDrift( void )
 	}
 }
 
+/* V_CalcNormalRefdef stair block. cl.time stays near 1, so steptime is 0
+   after the first paint and a step-up leaves the eye 18 units low.
+   frametime is the interval that clock would have spent. A stalled paint
+   is clamped to 50ms so one frame cannot swallow the whole 18. */
+void EFW_StairClock( float frametime, float *steptime, float simz, float oldz )
+{
+	float dt;
+	float lag;
+	static int s_log;
+	static float s_sent;
+
+	if( !steptime )
+		return;
+	dt = frametime;
+	if( dt < 0.001f )
+		dt = 0.016f;
+	if( dt > 0.05f )
+		dt = 0.05f;
+	*steptime = dt;
+	lag = simz - oldz;
+	if( lag < 1.0f )
+		return;
+	if( s_log < 10 && lag > s_sent + 2.0f )
+	{
+		s_log++;
+		s_sent = lag;
+		gEngfuncs.Con_Printf( "efw: stair lag=%.1f dt=%.3f z=%.1f\n", lag, dt, simz );
+	}
+	else if( s_log < 10 && s_sent > 4.0f && lag + 2.0f < s_sent )
+	{
+		s_log++;
+		s_sent = lag;
+		gEngfuncs.Con_Printf( "efw: stair lag=%.1f dt=%.3f z=%.1f\n", lag, dt, simz );
+	}
+}
+
 void EFW_DriftPitch( struct ref_params_s *pparams )
 {
 	float delta;
