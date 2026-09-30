@@ -66,7 +66,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 
 .viewport-frame {
-  width: min(100%, 680px, calc(52vh * 4 / 3));
+  /* FUN_10043750 centers a 800×600 storyboard. A smaller view clips the
+     caption off the right and bottom of the comic. */
+  width: min(100%, 800px);
   margin: 0 auto;
 }
 

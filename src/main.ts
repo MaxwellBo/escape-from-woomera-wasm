@@ -955,6 +955,10 @@ function resumeAfterFirstClientFrame() {
      aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
   setTimeout(() => {
     if (changeWatch) return;
+    /* Client cvars register after ServerActivate. An earlier
+       con_notifytime 0 is replaced by the default, so hopehud stays
+       painted on the storyboard. Set it once HUD_Redraw has run. */
+    runEngineCmd('con_notifytime 0');
     dismissMenuAfterHud();
   }, 80);
 }
@@ -1171,6 +1175,7 @@ function onServerActivateSeen() {
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
+    runEngineCmd('con_notifytime 0');
     finishListenSpawn();
     runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
@@ -1181,6 +1186,7 @@ function onServerActivateSeen() {
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
       runEngineCmd('pausable 0');
+      runEngineCmd('con_notifytime 0');
     }, 4000);
   }
 }
