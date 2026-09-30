@@ -2918,13 +2918,16 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
 			break;
 		/* Downhill the horizontal slice is clear and the floor falls
-		   away. A 45-degree ramp drops about as far as the hull moved.
-		   Snap that far, not a whole pump, so a ledge still misses. */
+		   away. A lip onto a 45-degree ramp can drop more than one
+		   slice of travel, up to STEPSIZE. Snap that far. A deeper
+		   ledge still misses and leaves the hull in the air. */
 		{
 			float hx = dest.x - pPlayer->pev->origin.x;
 			float hy = dest.y - pPlayer->pev->origin.y;
 			float horiz = sqrtf( hx * hx + hy * hy );
 			float drop = horiz + 2.0f;
+			if( drop < 18.0f )
+				drop = 18.0f;
 			TraceResult floor;
 			Vector bot;
 
