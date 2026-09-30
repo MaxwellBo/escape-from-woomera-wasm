@@ -47,7 +47,8 @@ static int g_weaponId = -1;
 static HSPRITE g_hDiary;
 static HSPRITE g_hLogo; /* sprites/efw_artslogo.spr; FUN_1001db00 tail */
 static int g_loadedPage = -1;
-static char g_menuLine[7][256];
+/* 0x100b7824, 14 slots, stride 0x3e8. Menu lines are 0..6. */
+static char g_menuLine[7][1000];
 static int g_menuOn;
 static EfwScanSlot g_scan[EFW_MAX_SCAN];
 static int g_scanCount;
@@ -2637,8 +2638,8 @@ int CHudEfw::Draw( float flTime )
 		   Choices use "Press [%d]     %s" once that count covers line 0.
 		   Previous text is the part after @@@@PREVIOUS_QUESTION:. */
 		static const char kPrevMark[] = "@@@@PREVIOUS_QUESTION:";
-		char body[256];
-		char prev[256];
+		char body[1000];
+		char prev[1000];
 		const char *hit;
 		int reveal;
 		int fullLen;
