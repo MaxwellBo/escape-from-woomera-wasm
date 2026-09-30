@@ -2474,10 +2474,11 @@ static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, flo
 
 /* PM_WalkMove / PM_AirMove wish. cl_forwardspeed and cl_sidespeed are 400.
    +speed multiplies by cl_movespeedkey (0.3) before the clamp, so one axis
-   is 120 and never hits sv_maxspeed 320. PM_Duck then scales by 0.333, so
-   shift-crouch is about 40. A full axis without the key clamps to 320.
-   Looking up zeroes the vertical part of the basis and renormalizes, so the
-   planar wish keeps the cmd speed. */
+   is 120. PM_CheckParameters then clamps the cmd to sv_maxspeed 320.
+   PM_Duck multiplies that clamped cmd by 0.333, so a crouch wishes 107,
+   not 400*0.333. A full axis without the key stays 320. Looking up zeroes
+   the vertical part of the basis and renormalizes, so the planar wish
+   keeps the cmd speed. */
 static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
 {
 	Vector fwdDir;
@@ -2510,11 +2511,6 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 		fmove *= key;
 		smove *= key;
 	}
-	if( pPlayer->pev->flags & FL_DUCKING )
-	{
-		fmove *= 0.333f;
-		smove *= 0.333f;
-	}
 	UTIL_MakeVectors( pPlayer->pev->v_angle );
 	fwdDir = gpGlobals->v_forward;
 	sideDir = gpGlobals->v_right;
@@ -2539,6 +2535,12 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 	{
 		wish = wish * ( maxspd / len );
 		len = maxspd;
+	}
+	/* PM_Duck runs after the maxspeed clamp. 320 * 0.333 = 107. */
+	if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		wish = wish * 0.333f;
+		len *= 0.333f;
 	}
 	*dir = wish * ( 1.0f / len );
 	*wishspeed = len;
