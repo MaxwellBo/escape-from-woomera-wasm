@@ -41,7 +41,6 @@ static int g_panel48On;
 static int g_diaryPage;
 static int g_diaryOpen;
 static int g_mapLevel; /* hudInt[3]; FUN_1001db00 clock am/pm + hour base */
-static int g_talkPrompt;
 static int g_menuCode;
 static int g_weaponId = -1;
 static HSPRITE g_hDiary;
@@ -641,21 +640,6 @@ static int EFW_DrawHudStringRight( int xmax, int y, int xmin, const char *text, 
 	return x;
 }
 
-/* FUN_1001e880: sprintf DAT_100789f4 "%d" then FUN_1001e8d0. */
-static void EFW_DrawHudNumberRight( int xmax, int y, int xmin, int n, int r, int g, int b )
-{
-	char buf[32];
-	static int s_logged;
-
-	snprintf( buf, sizeof( buf ), "%d", n );
-	if( !s_logged )
-	{
-		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_1001e880 n=%d\n", n );
-	}
-	EFW_DrawHudStringRight( xmax, y, xmin, buf, r, g, b );
-}
-
 /* FUN_10044860: client overlay stub, always 0. */
 static int EFW_HudStubZero( void )
 {
@@ -1059,8 +1043,10 @@ static int __MsgFunc_EFW_Menu( const char *pszName, int iSize, void *pbuf )
 
 static int __MsgFunc_EFW_CtPrv( const char *pszName, int iSize, void *pbuf )
 {
+	/* 0x10044bd0 reads the byte and drops it. The hope redraw does not
+	   print a TALK label from this message. */
 	BEGIN_READ( pbuf, iSize );
-	g_talkPrompt = READ_BYTE();
+	(void)READ_BYTE();
 	return 1;
 }
 
@@ -1199,7 +1185,6 @@ int CHudEfw::Init( void )
 	g_diaryPage = 0;
 	g_diaryOpen = 0;
 	g_mapLevel = 0;
-	g_talkPrompt = 0;
 	g_menuOn = 0;
 	g_scanCount = 0;
 	g_storyCode = 0;
@@ -1273,7 +1258,6 @@ void CHudEfw::Reset( void )
 	g_hudDrawTime = 0.0f;
 	g_contextOpenedAt = 0.0f;
 	g_panel48On = 0;
-	g_talkPrompt = 0;
 	g_menuOn = 0;
 	g_scanCount = 0;
 	g_storyCode = 0;
@@ -2478,10 +2462,6 @@ int CHudEfw::Draw( float flTime )
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 	{
-		/* Still draw hope number so FUN_1001e880 quotes after EFWData. */
-		float hopeF = EFW_HopeForDraw();
-		EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40,
-			(int)( hopeF + 0.5f ), 200, 0, 0 );
 		if( !g_iconFlyOn )
 			EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 		EFW_DrawIconFly();
@@ -2494,20 +2474,16 @@ int CHudEfw::Draw( float flTime )
 		float hopeF = EFW_HopeForDraw();
 		hope = (int)( hopeF + 0.5f );
 		{
-			/* FUN_10047660(1) hope float, __ftol to ticks. 10 ticks → /10. */
+			/* 0x1001e1ab: FUN_10047660(1), ftol, *0.1, ftol, then
+			   FUN_1001daa0(0x14, 0x78, ticks). No HOPE word, no digits,
+			   and no TALK label beside the bars. */
 			EFW_DrawHopeTicks( hope / 10 );
-			gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 - 12, 0x14 + 0x1c + 6 + 40, "HOPE", 200, 0, 0 );
-			EFW_DrawHudNumberRight( 0x14 + 0x1c + 6 + 72, 0x78 - 12, 0x14 + 0x1c + 6 + 40, hope, 200, 0, 0 );
 			{
 				static int s_hopeDraw;
 				s_hopeDraw++;
 				if( s_hopeDraw == 1 || ( s_hopeDraw % 60 ) == 0 )
 					gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
 			}
-			if( g_talkPrompt )
-				gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 4, ScreenWidth - 8, "TALK", r, g, b );
-			if( g_diaryOpen )
-				gHUD.DrawHudString( 0x14 + 0x1c + 6, 0x78 + 20, ScreenWidth - 8, "DIARY", r, g, b );
 		}
 	}
 

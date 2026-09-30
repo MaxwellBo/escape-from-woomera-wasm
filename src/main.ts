@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll191`;
+    return `${url}?v=efw-dll192`;
   return url;
 }
 
@@ -552,7 +552,8 @@ function setHopeHud(n: number): void {
   const el = document.getElementById('efw-hope');
   const label = document.getElementById('efw-hope-label');
   const row = document.getElementById('efw-hope-ticks');
-  if (el) el.hidden = false;
+  /* The GL redraw draws FUN_1001daa0. This DOM copy sat on those bars. */
+  if (el) el.hidden = true;
   if (label) label.textContent = `HOPE  ${hope}`;
   if (!row) return;
   if (row.childElementCount !== 10) {
