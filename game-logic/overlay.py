@@ -89,6 +89,43 @@ def main() -> None:
     for src_name, dest in copies.items():
         shutil.copy2(ROOT / src_name, dest)
 
+    # SetPaintOffset calls back into pushMakeCurrent. The paint stack grows
+    # until the frame aborts, and the canvas stays on the first view.
+    once(
+        sdk / "freevgui/platform/xash3d-fwgs/surface.cpp",
+        "void XashSurface::pushMakeCurrent( Panel *panel, bool useInsets )\n"
+        "{\n"
+        "	if( paintStackPos >= MAX_PAINT_STACK )\n"
+        "	{\n"
+        "		vgui_dprintf( \"vgui: paint state stack overflow, broken panel tree?\\n\" );\n"
+        "		return;\n"
+        "	}\n",
+        "void XashSurface::pushMakeCurrent( Panel *panel, bool useInsets )\n"
+        "{\n"
+        "	static int s_reenter;\n"
+        "	if( s_reenter )\n"
+        "		return;\n"
+        "	s_reenter = 1;\n"
+        "	if( paintStackPos >= MAX_PAINT_STACK )\n"
+        "	{\n"
+        "		vgui_dprintf( \"vgui: paint state stack overflow, broken panel tree?\\n\" );\n"
+        "		s_reenter = 0;\n"
+        "		return;\n"
+        "	}\n",
+    )
+    once(
+        sdk / "freevgui/platform/xash3d-fwgs/surface.cpp",
+        "	memcpy( ps->clip, clip, sizeof( ps->clip ));\n"
+        "\n"
+        "	makeCurrent( ps );\n"
+        "}\n",
+        "	memcpy( ps->clip, clip, sizeof( ps->clip ));\n"
+        "\n"
+        "	makeCurrent( ps );\n"
+        "	s_reenter = 0;\n"
+        "}\n",
+    )
+
     cmake_dlls = dlls / "CMakeLists.txt"
     once(
         cmake_dlls,
