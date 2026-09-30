@@ -1258,6 +1258,16 @@ int EFW_ClientKey( int down, int keynum )
 	return 1;
 }
 
+/* VGUI storyboard InputSignal is a panel key. Browser keys reach the page
+   before HUD_Key_Event, so the page sends this and the panel dismisses. */
+static void EFW_StoryKey_f( void )
+{
+	if( g_storyCode )
+		EFW_DismissStoryboard();
+	else if( g_captionLen )
+		EFW_DismissCaption();
+}
+
 int CHudEfw::Init( void )
 {
 	g_hope = 80.0f;
@@ -1294,6 +1304,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnHookUserMsg( "EFW_Cntxt", __MsgFunc_EFW_Cntxt );
 	EFW_HookUserMsgs();
 	EFW_HookMenuSlots();
+	gEngfuncs.pfnAddCommand( "efw_story_key", EFW_StoryKey_f );
 	gEngfuncs.pfnAddCommand( "efw_pmove", EFW_PMove_f );
 	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
 	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );

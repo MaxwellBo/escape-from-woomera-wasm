@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll209`;
+    return `${url}?v=efw-dll210`;
   return url;
 }
 
@@ -1908,6 +1908,8 @@ canvas.addEventListener('click', () => void captureInput());
 let promptContext = false;
 canvas.addEventListener('pointerdown', (ev) => {
   canvas.focus();
+  if (ev.button === 0)
+    runGameCmd('efw_story_key');
   if (ev.button !== 0 || document.pointerLockElement !== canvas) return;
   promptContext = !promptContext;
   runGameCmd(promptContext ? 'efw_context 1' : 'efw_context 0');
@@ -2049,6 +2051,8 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  if (!e.repeat)
+    runGameCmd('efw_story_key');
   if (e.code === 'Space') {
     e.preventDefault();
     if (e.repeat) return;
