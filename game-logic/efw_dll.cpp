@@ -2823,6 +2823,92 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	return 1;
 }
 
+/* Quake SV_SetIdealPitch. Six point traces, 12 units apart, from 36
+   units ahead, down 160 from the eye. A consistent grade becomes
+   -dir * cl_idealpitchscale. A drop or a mixed grade leaves the old
+   value. The engine sample stays 0 because prediction does not move
+   this hull, so the result is sent to the client drift. */
+static void EFW_IdealPitch( CBasePlayer *pPlayer )
+{
+	float angle;
+	float sinval;
+	float cosval;
+	float eye;
+	float z[6];
+	float scale;
+	float ideal;
+	int i;
+	int j;
+	int step;
+	int dir;
+	int steps;
+	TraceResult tr;
+	Vector top;
+	Vector bot;
+	static float s_sent;
+	static int s_log;
+
+	if( !pPlayer || !( pPlayer->pev->flags & FL_ONGROUND ) )
+		return;
+	eye = pPlayer->pev->view_ofs.z;
+	if( eye < 1.0f )
+		eye = 28.0f;
+	angle = pPlayer->pev->v_angle.y * 3.14159265f / 180.0f;
+	sinval = sinf( angle );
+	cosval = cosf( angle );
+	for( i = 0; i < 6; i++ )
+	{
+		float dist = (float)( i + 3 ) * 12.0f;
+		top.x = pPlayer->pev->origin.x + cosval * dist;
+		top.y = pPlayer->pev->origin.y + sinval * dist;
+		top.z = pPlayer->pev->origin.z + eye;
+		bot = top;
+		bot.z -= 160.0f;
+		UTIL_TraceLine( top, bot, ignore_monsters, pPlayer->edict(), &tr );
+		if( tr.fStartSolid || tr.flFraction >= 1.0f )
+			return;
+		z[i] = top.z + tr.flFraction * ( bot.z - top.z );
+	}
+	dir = 0;
+	steps = 0;
+	for( j = 1; j < 6; j++ )
+	{
+		step = (int)( z[j] - z[j - 1] );
+		if( step > -1 && step < 1 )
+			continue;
+		if( dir && ( step - dir > 0 || step - dir < 0 ) )
+			return;
+		steps++;
+		dir = step;
+	}
+	if( !dir )
+		ideal = 0.0f;
+	else if( steps < 2 )
+		return;
+	else
+	{
+		scale = CVAR_GET_FLOAT( "cl_idealpitchscale" );
+		if( scale < 0.05f )
+			scale = 0.8f;
+		ideal = -(float)dir * scale;
+	}
+	if( ideal > s_sent + 0.4f || ideal < s_sent - 0.4f )
+	{
+		char line[96];
+		s_sent = ideal;
+		CLIENT_COMMAND( pPlayer->edict(), "efw_ipitch %.1f\n", ideal );
+		if( s_log < 8 )
+		{
+			s_log++;
+			snprintf( line, sizeof( line ),
+				"efw: ideal %.1f at %.0f %.0f z=%.1f\n",
+				ideal, pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+				pPlayer->pev->origin.z );
+			EFW_LogLine( line );
+		}
+	}
+}
+
 static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 {
 	float dt;
@@ -3058,6 +3144,8 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 	pPlayer->pev->origin = dest;
 	UTIL_SetOrigin( pPlayer->pev, dest );
+	if( pPlayer->pev->flags & FL_ONGROUND )
+		EFW_IdealPitch( pPlayer );
 	s_moveN++;
 	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
 	{

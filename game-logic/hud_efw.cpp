@@ -452,6 +452,15 @@ static void EFW_PDuck_f( void )
 }
 
 static float s_viewRoll;
+static float s_idealPitch;
+
+/* CL_SetIdealPitch result. The engine copy stays 0 while prediction
+   does not walk this hull, so the drift uses the server sample. */
+static void EFW_IPitch_f( void )
+{
+	s_idealPitch = ( gEngfuncs.Cmd_Argc() > 1 ) ? (float)atof( gEngfuncs.Cmd_Argv( 1 ) ) : 0.0f;
+	gEngfuncs.Con_Printf( "efw: ipitch cmd %.1f\n", s_idealPitch );
+}
 
 /* V_DriftPitch 0x1003fe00. nodrift starts clear, so a pitch that is not
    idealpitch moves. Mouse look calls V_StopPitchDrift; walking forward
@@ -541,7 +550,12 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 			EFW_StartPitchDrift();
 		return;
 	}
-	delta = pparams->idealpitch - pparams->cl_viewangles[0];
+	{
+		float ideal = pparams->idealpitch;
+		if( ideal > -0.05f && ideal < 0.05f )
+			ideal = s_idealPitch;
+		delta = ideal - pparams->cl_viewangles[0];
+	}
 	if( delta == 0.0f )
 	{
 		s_pitchVel = 0.0f;
@@ -580,8 +594,11 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 		|| pparams->cl_viewangles[0] < s_logged - 0.5f ) )
 	{
 		s_log++;
-		gEngfuncs.Con_Printf( "efw: drift pitch %.1f -> %.1f ideal=%.1f\n",
-			s_logged, pparams->cl_viewangles[0], pparams->idealpitch );
+		gEngfuncs.Con_Printf( "efw: drift pitch %.1f -> %.1f ideal=%.1f eng=%.1f\n",
+			s_logged, pparams->cl_viewangles[0],
+			( pparams->idealpitch > -0.05f && pparams->idealpitch < 0.05f )
+				? s_idealPitch : pparams->idealpitch,
+			pparams->idealpitch );
 	}
 }
 
@@ -1539,6 +1556,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );
 	gEngfuncs.pfnAddCommand( "efw_pduck", EFW_PDuck_f );
 	gEngfuncs.pfnAddCommand( "efw_vroll", EFW_VRoll_f );
+	gEngfuncs.pfnAddCommand( "efw_ipitch", EFW_IPitch_f );
 	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
