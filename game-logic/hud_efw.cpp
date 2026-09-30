@@ -2192,14 +2192,14 @@ static void EFW_DrawStoryboardTiles( HSPRITE spr )
 }
 
 /* FUN_1001d750: TRIAPI textured quad. param_9!=0 uses SpriteTexture of that
-   SPR; param_9==0 SPR_Loads sprites/ascale.spr (RenderMode 4, CullFace
-   TRI_NONE). Vertex3f z=0.5, UV (0,v)/(1,v)/(1,v)/(0,v) for ascale, or
-   full 0..1 when spr!=0. Software present uses FillRGBA / SPR_DrawHoles
-   of the same screen rect (RGB floats * 255). */
+   SPR (RenderMode normal, UV 0..1). param_9==0 loads sprites/ascale.spr,
+   RenderMode kRenderTransAlpha, CullFace TRI_NONE, Color4f alpha 1, and
+   every vertex at UV (u, v). ascale is index-alpha: row 0 is clear and
+   row 255 (v=1) is opaque, and the RGB is the vertex color. */
 static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	float r, float g, float b, float v, HSPRITE spr )
 {
-	int ir, ig, ib, x, y, w, h;
+	int ir, ig, ib, ia, x, y, w, h;
 	static int s_logged = -2;
 	int key;
 
@@ -2245,10 +2245,29 @@ static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 		return;
 	}
 
-	/* PE uses TRIAPI Vertex3f z=0.5 + SpriteTexture(ascale). Software
-	   present hangs on mass SPR_DrawHoles; FillRGBA is the 2D stand-in
-	   of the same RGB rect. */
-	FillRGBA( x, y, w, h, ir, ig, ib, 255 );
+	/* v selects the ascale row. v=1 is index 255. pfnFillRGBA adds the
+	   color, so a (0, 0, 0.2) panel only tints the floor. The tri call
+	   sticks on this renderer. pfnFillRGBABlend is that opaque row. */
+	ia = (int)( v * 255.0f + 0.5f );
+	if( ia < 0 )
+		ia = 0;
+	if( ia > 255 )
+		ia = 255;
+	if( ia < 1 )
+		return;
+	{
+		static int s_blend;
+		if( !s_blend )
+		{
+			s_blend = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d rgb=%d,%d,%d a=%d\n",
+				x, y, w, h, ir, ig, ib, ia );
+		}
+	}
+	if( gEngfuncs.pfnFillRGBABlend )
+		gEngfuncs.pfnFillRGBABlend( x, y, w, h, ir, ig, ib, ia );
+	else
+		FillRGBA( x, y, w, h, ir, ig, ib, ia );
 }
 
 /* FUN_1001e7d0: width is the console glyph at 0x100a4ddc. Soft wrap when
@@ -2505,8 +2524,9 @@ static void EFW_DrawMenuVeil( void )
 	vw = (float)ScreenWidth * g_menuVeil * 1.1f;
 	if( vw < 1.0f )
 		return;
-	/* FUN_1001db00: 2px rule at the veil top, RGB 100,100,150, then
-	   FUN_1001d750(0, height-0x140, width*veil*1.1, height, 0, 0, 0.2, 1, 0). */
+	/* FUN_1001db00: FillRGBA 2px rule at the veil top, RGB 100,100,150,
+	   then FUN_1001d750(0, height-0x140, width*veil*1.1, height, 0, 0, 0.2, 1, 0).
+	   v=1 is the opaque ascale row, so the panel covers that rule. */
 	FillRGBA( 0, ScreenHeight - 0x140, (int)vw, 2, 100, 100, 150, 255 );
 	EFW_DrawTriQuad( 0.0f, (float)( ScreenHeight - 0x140 ), vw, (float)ScreenHeight,
 		0.0f, 0.0f, 0.2f, 1.0f, 0 );
