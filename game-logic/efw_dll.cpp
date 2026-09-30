@@ -2511,13 +2511,47 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		else
 			dest = tr.vecEndPos;
 	}
-	pPlayer->pev->origin = dest;
 	pPlayer->pev->velocity = delta * ( 1.0f / dt );
 	pPlayer->pev->velocity.z = s_vz;
 	if( s_airborne )
 		pPlayer->pev->flags &= ~FL_ONGROUND;
 	else
-		pPlayer->pev->flags |= FL_ONGROUND;
+	{
+		/* PM_CatagorizePosition: a 2-unit floor trace. A miss means the
+		   step left the ledge, and forcing FL_ONGROUND kept the pawn at
+		   the old height over the drop. */
+		TraceResult down;
+		Vector floorEnd;
+		static int s_ledgeLog;
+
+		floorEnd = dest;
+		floorEnd.z -= 2.0f;
+		UTIL_TraceHull( dest, floorEnd, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
+		if( down.fStartSolid )
+			pPlayer->pev->flags |= FL_ONGROUND;
+		else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+		{
+			if( dest.z - down.vecEndPos.z >= 0.5f )
+				dest = down.vecEndPos;
+			pPlayer->pev->flags |= FL_ONGROUND;
+			s_vz = 0.0f;
+			pPlayer->pev->velocity.z = 0.0f;
+		}
+		else
+		{
+			pPlayer->pev->flags &= ~FL_ONGROUND;
+			if( s_ledgeLog < 8 )
+			{
+				char line[96];
+				s_ledgeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: ledge z=%.1f at %.0f %.0f\n",
+					dest.z, dest.x, dest.y );
+				EFW_LogLine( line );
+			}
+		}
+	}
+	pPlayer->pev->origin = dest;
 	UTIL_SetOrigin( pPlayer->pev, dest );
 	s_moveN++;
 	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
