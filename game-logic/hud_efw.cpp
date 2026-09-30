@@ -1032,8 +1032,10 @@ static int EFW_HitOrbitButton( int cx, int cy, float *ox, float *oy )
 		float angle = 3.14159265f * ( 1.0f + ( 2.0f * (float)i ) / (float)n );
 		float rx = 130.0f * (float)ScreenWidth / 640.0f;
 		float ry = 130.0f * (float)ScreenHeight / 480.0f;
-		float x = (float)b->x + sinf( angle ) * rx;
-		float y = (float)b->y + cosf( angle ) * ry;
+		/* Same anchor layoutPromptColumn stores: projected point, which is
+		   the VGUI box center-x and the box bottom. */
+		float x = (float)( b->x + b->w / 2 ) + sinf( angle ) * rx;
+		float y = (float)( b->y + b->h ) + cosf( angle ) * ry;
 		if( (float)cx >= x - hx && (float)cx <= x + hx
 			&& (float)cy >= y - hy && (float)cy <= y + hy )
 		{
