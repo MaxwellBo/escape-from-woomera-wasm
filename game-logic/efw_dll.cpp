@@ -906,20 +906,35 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		strncpy( st->menuTitle, title, sizeof( st->menuTitle ) - 1 );
 	st->menuTitle[sizeof( st->menuTitle ) - 1] = '\0';
 	{
-		char body[512];
-		body[0] = '\0';
+		char raw[512];
+		char body[640];
+		const char *sent;
+		raw[0] = '\0';
 		if( title && title[0] )
-			strncpy( body, title, sizeof( body ) - 1 );
+			strncpy( raw, title, sizeof( raw ) - 1 );
+		raw[sizeof( raw ) - 1] = '\0';
 		/* FUN_100c6e60: if DAT_10134480 is set, append
 		   "@@@@PREVIOUS_QUESTION:" + that line onto the EFWShow body.
 		   The client splits on that marker. */
 		if( st->prevQuestion[0] )
 		{
-			strncat( body, "@@@@PREVIOUS_QUESTION:", sizeof( body ) - strlen( body ) - 1 );
-			strncat( body, st->prevQuestion, sizeof( body ) - strlen( body ) - 1 );
+			strncat( raw, "@@@@PREVIOUS_QUESTION:", sizeof( raw ) - strlen( raw ) - 1 );
+			strncat( raw, st->prevQuestion, sizeof( raw ) - strlen( raw ) - 1 );
 			EFW_DebugPrint( ">>> prevq %s", st->prevQuestion );
 		}
-		EFW_SendEfwShowChunks( pPlayer, 0, body );
+		sent = raw;
+		/* Partner targetname (pev+0x1cc) is non-empty: sprintf "%s:\n    %s". */
+		if( raw[0] && st->talkNpc )
+		{
+			const char *speaker = EFW_MenuSpeakerName( st->talkNpc );
+			if( speaker && speaker[0] )
+			{
+				snprintf( body, sizeof( body ), "%s:\n    %s", speaker, raw );
+				sent = body;
+				EFW_DebugPrint( ">>> FUN_100c6e60 speaker=%s", speaker );
+			}
+		}
+		EFW_SendEfwShowChunks( pPlayer, 0, sent );
 	}
 	if( nLines < 0 )
 		nLines = 0;

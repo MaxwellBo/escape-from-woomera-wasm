@@ -295,6 +295,32 @@ static const char *EFW_DisplayName( const char *targetname )
 	return targetname;
 }
 
+/* FUN_100b89a0 miss path: the ShowMenu speaker is the display name with
+   underscores turned into spaces. A map hit already has the spaced name. */
+const char *EFW_MenuSpeakerName( CBaseEntity *pNpc )
+{
+	static char buf[64];
+	const char *tn;
+	const char *name;
+	int i;
+	int j;
+
+	buf[0] = '\0';
+	if( !pNpc )
+		return buf;
+	tn = STRING( pNpc->pev->targetname );
+	if( !tn || !tn[0] )
+		return buf;
+	name = EFW_DisplayName( tn );
+	if( !name )
+		return buf;
+	j = 0;
+	for( i = 0; name[i] && j < (int)sizeof( buf ) - 1; i++ )
+		buf[j++] = ( name[i] == '_' ) ? ' ' : name[i];
+	buf[j] = '\0';
+	return buf;
+}
+
 static void EFW_RegisterDefaults( void )
 {
 	int n;
