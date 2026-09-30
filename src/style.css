@@ -312,22 +312,28 @@ canvas#canvas {
   pointer-events: auto;
 }
 
-/* Storyboard codes draw the original SPR on the canvas. The HTML layer
-   only keeps the Continue click, so the sprite is the picture. */
+/* FUN_100484b0: full-screen Panel, InputSignal, no caption control.
+   The narrative is in the SPR (FUN_10043750). A visible Continue covered
+   that text, and orbit CommandButtons showed through this layer. */
 .efw-story.efw-story-spr {
   background: transparent;
-  align-items: flex-end;
-  padding-bottom: 24px;
+  cursor: pointer;
 }
 
 .efw-story.efw-story-spr .efw-story-card {
   background: transparent;
   border: none;
   padding: 0;
+  pointer-events: none;
 }
 
+.efw-story.efw-story-spr #efw-story-dismiss,
 .efw-story.efw-story-spr .efw-story-card p {
   display: none;
+}
+
+.canvas-wrap:has(#efw-story.efw-story-spr:not([hidden])) #efw-vgui {
+  visibility: hidden;
 }
 
 .efw-story-card {
