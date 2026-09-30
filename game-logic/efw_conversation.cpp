@@ -666,19 +666,16 @@ static Vector EFW_AbsCenter( CBaseEntity *pEnt )
 	return c;
 }
 
-static int EFW_FacingDot( CBasePlayer *pPlayer, const Vector &target, float minDot )
+/* 0x100afc60 from the eye. fcomp 0x100f9158: keep when fraction >= 0.97. */
+static int EFW_TraceClear( CBasePlayer *pPlayer, const Vector &target )
 {
-	Vector dir;
-	float len;
+	TraceResult tr;
+	Vector eye;
 	if( !pPlayer )
 		return 0;
-	dir = target - ( pPlayer->pev->origin + pPlayer->pev->view_ofs );
-	len = dir.Length();
-	if( len < 1.0f )
-		return 1;
-	dir = dir * ( 1.0f / len );
-	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	return DotProduct( gpGlobals->v_forward, dir ) >= minDot;
+	eye = pPlayer->EyePosition();
+	UTIL_TraceLine( eye, target, dont_ignore_monsters, pPlayer->edict(), &tr );
+	return tr.flFraction >= 0.97f;
 }
 
 static void EFW_FillScan( int type, const char *name, const Vector &pos )
@@ -990,8 +987,10 @@ void EFW_TalkScan( void )
 		}
 		if( !strcmp( cn, "efw_Marker" ) )
 		{
+			/* 0x100c78f0: hiding place needs the 0.97 trace. Other markers
+			   in the 123 sphere are added with no view test. */
 			pos = EFW_AbsCenter( pScan );
-			if( !EFW_FStrEq( tn, "efw_hiding_place" ) && !EFW_FacingDot( pPlayer, pos, 0.97f ) )
+			if( EFW_FStrEq( tn, "efw_hiding_place" ) && !EFW_TraceClear( pPlayer, pos ) )
 				continue;
 			if( EFW_FStrEq( tn, "efw_PliersMarker" ) && EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
 				continue;
@@ -1006,7 +1005,7 @@ void EFW_TalkScan( void )
 		}
 		if( !strncmp( cn, "weapon_efw", 10 ) )
 		{
-			if( EFW_FStrEq( cn, "weapon_efw_Pliers" ) && !EFW_FacingDot( pPlayer, pScan->pev->origin, 0.97f ) )
+			if( EFW_FStrEq( cn, "weapon_efw_Pliers" ) && !EFW_TraceClear( pPlayer, pScan->pev->origin ) )
 				continue;
 			if( pScan->pev->owner )
 				continue;
