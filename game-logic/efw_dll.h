@@ -133,6 +133,7 @@ void EFW_PollMenuKeys( void ); /* FUN_100c6a60 → FUN_100c69a0 GetAsyncKeyState
 void EFW_LatchInUse( void ); /* HostFwd +use when usercmds do not flush */
 void EFW_LatchMove( int fwd, int side ); /* HostFwd WASD when usercmds do not flush */
 void EFW_LatchSpeed( int on ); /* HostFwd +speed; cl_movespeedkey on the wish */
+void EFW_LatchUseHold( int on ); /* HostFwd +use held; maxspeed / 3 on the ground */
 void EFW_LatchTurn( float yawDelta, float pitchDelta = 0.0f ); /* HostFwd look when usercmds do not flush */
 void EFW_LatchMenuKey( int slot ); /* FUN_100c6a50 */
 void EFW_SendCntxt( void ); /* 0x100c7d30 */

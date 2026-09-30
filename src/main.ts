@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll242`;
+    return `${url}?v=efw-dll243`;
   return url;
 }
 
@@ -2034,6 +2034,11 @@ function syncSpeed(on: boolean) {
      cl_forwardspeed, so the key has to reach the server as efw_pspeed. */
   runGameCmd(`efw_pspeed ${on ? 1 : 0}`);
 }
+function syncUseHold(on: boolean) {
+  /* +use on the ground cuts maxspeed to a third. The pump does not read
+     the usercmd magnitude, so the hold has to reach the server. */
+  runGameCmd(`efw_puse ${on ? 1 : 0}`);
+}
 
 /* Coalesce pointer deltas to one usercmd look per frame. The client DLL
    adds them to cmd->viewangles; PM_Move turns. efw_turn remains the
@@ -2117,6 +2122,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'e' || e.key === 'E') {
     log('> E (IN_USE)');
     runEngineCmd('pausable 0');
+    syncUseHold(true);
     runGameCmd('efw_inuse');
     runGameCmd('use');
   } else if (e.key === 'i' || e.key === 'I') {
@@ -2136,6 +2142,10 @@ document.addEventListener('keyup', (e) => {
   }
   if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
     syncSpeed(false);
+    return;
+  }
+  if (e.key === 'e' || e.key === 'E') {
+    syncUseHold(false);
     return;
   }
   const walk = walkSlot(e.key);

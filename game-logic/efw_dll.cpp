@@ -1584,6 +1584,13 @@ static void EFW_HostFwd( void )
 		EFW_DebugPrint( ">>> efw_pspeed %d", on ? 1 : 0 );
 		return;
 	}
+	if( pcmd && !strcmp( pcmd, "efw_puse" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		EFW_LatchUseHold( on );
+		EFW_DebugPrint( ">>> efw_puse %d", on ? 1 : 0 );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_clook" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
@@ -1864,7 +1871,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_pause", "efw_context", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
 		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
-		"efw_cjump", "efw_cduck", "efw_pspeed",
+		"efw_cjump", "efw_cduck", "efw_pspeed", "efw_puse",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -2008,6 +2015,7 @@ static int s_bindDone; /* all deferred studios have a MODEL_INDEX */
 static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
 static int s_moveSide;
 static int s_speedKey; /* HostFwd efw_pspeed, or pev->button IN_RUN */
+static int s_useHeld; /* HostFwd efw_puse, or pev->button IN_USE */
 static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
@@ -2032,6 +2040,11 @@ void EFW_LatchMove( int fwd, int side )
 void EFW_LatchSpeed( int on )
 {
 	s_speedKey = on ? 1 : 0;
+}
+
+void EFW_LatchUseHold( int on )
+{
+	s_useHeld = on ? 1 : 0;
 }
 
 void EFW_LatchTurn( float yawDelta, float pitchDelta )
@@ -2476,7 +2489,9 @@ static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, flo
    +speed multiplies by cl_movespeedkey (0.3) before the clamp, so one axis
    is 120. PM_CheckParameters then clamps the cmd to sv_maxspeed 320.
    PM_Duck multiplies that clamped cmd by 0.333, so a crouch wishes 107,
-   not 400*0.333. A full axis without the key stays 320. Looking up zeroes
+   not 400*0.333. Holding use on the ground cuts the cap to 320/3 before
+   that clamp, so a walk while using also wishes 107. A full axis without
+   either key stays 320. Looking up zeroes
    the vertical part of the basis and renormalizes, so the planar wish
    keeps the cmd speed. */
 static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
@@ -2531,6 +2546,11 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 	maxspd = CVAR_GET_FLOAT( "sv_maxspeed" );
 	if( maxspd < 1.0f )
 		maxspd = 320.0f;
+	/* PM_CheckParameters: holding use on the ground cuts maxspeed to a third
+	   before the cmd is clamped. PM_Duck still multiplies after that. */
+	if( ( pPlayer->pev->flags & FL_ONGROUND )
+		&& ( s_useHeld || ( pPlayer->pev->button & IN_USE ) ) )
+		maxspd *= ( 1.0f / 3.0f );
 	if( len > maxspd )
 	{
 		wish = wish * ( maxspd / len );
@@ -2807,16 +2827,17 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		static int s_runLog;
 		static int s_duckRun;
 		static int s_coastLog;
-		char line[160];
+		char line[192];
 		int ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
 		int slow = ( s_speedKey || ( pPlayer->pev->button & IN_RUN ) ) ? 1 : 0;
+		int useHold = ( s_useHeld || ( pPlayer->pev->button & IN_USE ) ) ? 1 : 0;
 		if( wishspeed > 0.0f && s_runLog < 8 )
 		{
 			s_runLog++;
 			snprintf( line, sizeof( line ),
-				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f duck=%d spd=%d\n",
+				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f z=%.1f duck=%d spd=%d use=%d\n",
 				s_hvx, s_hvy, wishspeed, moved, dt,
-				dest.x, dest.y, ducked, slow );
+				dest.x, dest.y, dest.z, ducked, slow, useHold );
 			EFW_LogLine( line );
 		}
 		else if( wishspeed > 0.0f && ducked && s_duckRun < 4 )
@@ -3440,6 +3461,7 @@ void EFW_OnServerActivate( void )
 	s_moveFwd = 0;
 	s_moveSide = 0;
 	s_speedKey = 0;
+	s_useHeld = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -3470,6 +3492,7 @@ void EFW_OnServerDeactivate( void )
 	s_moveFwd = 0;
 	s_moveSide = 0;
 	s_speedKey = 0;
+	s_useHeld = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
