@@ -2481,30 +2481,19 @@ static void EFW_DrawHopeTicks( int ticks )
 	}
 }
 
-/* FUN_1001db00 tail: %2d.%02d am/pm from gpGlobals time, then
-   sprites/efw_artslogo.spr at (width-sprW-5, 5) with fade*100 SPR_Set. */
+/* FUN_1001db00 tail: sprintf "%2d.%02d %s" into a stack buffer and drop it.
+   sprites/efw_artslogo.spr is SPR_DrawAdditive at (width-sprW-5, 5),
+   SPR_Set to fade*100. Index 0 in that sprite is black, so holes kept a box. */
 static void EFW_DrawArtsClock( float flTime )
 {
-	int secs;
-	int t15;
-	int hour;
-	int mins;
 	int rgb;
 	int dw;
 	int x;
 	float t0;
 	float fade;
-	char clock[32];
-	wrect_t rc;
 
 	if( flTime < 0.0f )
 		flTime = 0.0f;
-	secs = (int)flTime;
-	t15 = secs / 15;
-	hour = ( EFW_GetClientHudInt( 3 ) == 1 ? 5 : 7 ) + t15 / 15;
-	mins = t15 % 60;
-	snprintf( clock, sizeof( clock ), "%2d.%02d %s", hour, mins,
-		EFW_GetClientHudInt( 3 ) == 1 ? "pm" : "am" );
 	t0 = 5.0f;
 	fade = 1.0f - ( flTime - t0 ) * 0.2f;
 	if( fade < 0.0f )
@@ -2516,28 +2505,14 @@ static void EFW_DrawArtsClock( float flTime )
 		rgb = 0;
 	if( fade > 0.0f && !g_hLogo )
 		g_hLogo = EFW_LoadSpr( "sprites/efw_artslogo.spr" );
-	if( fade <= 0.0f )
+	if( fade <= 0.0f || !g_hLogo )
 		return;
-	dw = 64;
-	if( g_hLogo )
-	{
-		dw = SPR_Width( g_hLogo, 0 );
-		if( dw < 1 )
-			dw = 64;
-	}
+	dw = SPR_Width( g_hLogo, 0 );
+	if( dw < 1 )
+		dw = 64;
 	x = ScreenWidth - dw - 5;
-	/* FUN_1001e8d0 right-align at logo left (PE clock sprintf was unused). */
-	EFW_DrawHudStringRight( x - 4, 5, 8, clock, rgb, rgb, rgb );
-	if( !g_hLogo )
-		return;
-	rc.left = 0;
-	rc.top = 0;
-	rc.right = dw;
-	rc.bottom = SPR_Height( g_hLogo, 0 );
-	if( rc.bottom < 1 )
-		rc.bottom = 64;
 	SPR_Set( g_hLogo, rgb, rgb, rgb );
-	SPR_DrawHoles( 0, x, 5, &rc );
+	SPR_DrawAdditive( 0, x, 5, NULL );
 }
 
 int CHudEfw::Draw( float flTime )
