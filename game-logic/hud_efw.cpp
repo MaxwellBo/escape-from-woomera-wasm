@@ -1962,6 +1962,51 @@ static void EFW_DrawIconFly( void )
 
 /* FUN_10046590: idle bar while DAT_100bc338==0 and DAT_100bc490!=0.
    DAT_100bc490 is the Cntxt scan count; DAT_100bc38c is the nearest name. */
+/* FUN_1001d750 when the sprite argument is 0: SPR_Load sprites/ascale.spr,
+   RenderMode kRenderTransAlpha, CullFace TRI_NONE, UV (0,v)..(1,v).
+   v=1 samples the opaque row, so RGB 0,0,0 is a solid black panel.
+   pfnFillRGBA is additive, and adding black leaves the floor showing. */
+static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v )
+{
+	struct model_s *model;
+	static int s_tri = -1;
+
+	if( !g_hAscale )
+	{
+		g_hAscale = EFW_LoadSpr( "sprites/ascale.spr" );
+		gEngfuncs.Con_Printf( ">>> FUN_10044e30 ascale=%d\n", g_hAscale != 0 );
+	}
+	model = g_hAscale ? (struct model_s *)gEngfuncs.GetSpritePointer( g_hAscale ) : NULL;
+	if( gEngfuncs.pTriAPI && model && gEngfuncs.pTriAPI->SpriteTexture( model, 0 ) )
+	{
+		if( s_tri != 1 )
+		{
+			s_tri = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_1001d750 ascale v=%.2f\n", v );
+		}
+		gEngfuncs.pTriAPI->RenderMode( kRenderTransAlpha );
+		gEngfuncs.pTriAPI->CullFace( TRI_NONE );
+		gEngfuncs.pTriAPI->Color4f( 0.0f, 0.0f, 0.0f, 1.0f );
+		gEngfuncs.pTriAPI->Begin( TRI_QUADS );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, v );
+		gEngfuncs.pTriAPI->Vertex3f( x1, y1, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, v );
+		gEngfuncs.pTriAPI->Vertex3f( x2, y1, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, v );
+		gEngfuncs.pTriAPI->Vertex3f( x2, y2, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, v );
+		gEngfuncs.pTriAPI->Vertex3f( x1, y2, 0.5f );
+		gEngfuncs.pTriAPI->End();
+		return;
+	}
+	if( s_tri != 0 )
+	{
+		s_tri = 0;
+		gEngfuncs.Con_Printf( ">>> FUN_1001d750 ascale fill\n" );
+	}
+	FillRGBA( (int)x1, (int)y1, (int)( x2 - x1 ), (int)( y2 - y1 ), 0, 0, 0, 255 );
+}
+
 static void EFW_DrawInteractPrompt( void )
 {
 	int x;
@@ -2046,14 +2091,22 @@ static void EFW_DrawInteractPrompt( void )
 	w = 240;
 	x = ScreenWidth / 2 - 120;
 	y = ScreenHeight - 25;
-	FillRGBA( x, y, w, 25, 0, 0, 0, 255 );
+	/* FUN_10046590: FUN_1001d750 from (width/2-120, height-25) to
+	   (width/2+120, height), then the click line at height-20. */
+	EFW_DrawAscaleQuad( (float)x, (float)y, (float)( x + w ), (float)ScreenHeight, 1.0f );
 	gHUD.DrawHudString( ScreenWidth / 2 - 115, ScreenHeight - 20, ScreenWidth,
 		"Click left mouse button to interact", 255, 255, 255 );
 	if( name[0] )
 	{
 		nameW = (int)strlen( name ) * 7;
-		FillRGBA( ( ScreenWidth - nameW ) / 2 - 5, ScreenHeight - 45,
-			nameW + 10, 20, 0, 0, 0, 255 );
+		/* Name panel: x from (width±nameW)/2 ∓ 5, y from height-45 to height-25.
+		   nameW is strlen*7, the same width the PE computes before the quad. */
+		EFW_DrawAscaleQuad(
+			(float)( ( ScreenWidth - nameW ) / 2 - 5 ),
+			(float)( ScreenHeight - 45 ),
+			(float)( ( ScreenWidth + nameW ) / 2 + 5 ),
+			(float)( ScreenHeight - 25 ),
+			1.0f );
 		gHUD.DrawHudString( ( ScreenWidth - nameW ) / 2, ScreenHeight - 40,
 			ScreenWidth, name, 255, 255, 255 );
 	}
