@@ -2409,6 +2409,55 @@ static void EFW_AirAccelerate( float wishx, float wishy, float wishspeed, float 
 	s_hvy += accelspeed * wishy;
 }
 
+/* PM_Friction on the ground. sv_friction 4, sv_stopspeed 100, player
+   friction 1. Releasing the keys used to zero s_hv in one pump. */
+static void EFW_GroundFriction( float dt )
+{
+	float speed;
+	float control;
+	float drop;
+	float newspeed;
+
+	speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+	if( speed < 0.1f )
+		return;
+	control = ( speed < 100.0f ) ? 100.0f : speed;
+	drop = control * 4.0f * dt;
+	newspeed = speed - drop;
+	if( newspeed < 0.0f )
+		newspeed = 0.0f;
+	newspeed /= speed;
+	s_hvx *= newspeed;
+	s_hvy *= newspeed;
+}
+
+/* PM_Accelerate. accel 10, and pmove->friction is the player value 1,
+   so a 0.12s pump still reaches 270 in one step from a stand. */
+static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, float dt )
+{
+	float current;
+	float addspeed;
+	float accelspeed;
+	float len;
+
+	if( wishspeed <= 0.0f )
+		return;
+	len = sqrtf( wishx * wishx + wishy * wishy );
+	if( len < 0.01f )
+		return;
+	wishx /= len;
+	wishy /= len;
+	current = s_hvx * wishx + s_hvy * wishy;
+	addspeed = wishspeed - current;
+	if( addspeed <= 0.0f )
+		return;
+	accelspeed = 10.0f * dt * wishspeed;
+	if( accelspeed > addspeed )
+		accelspeed = addspeed;
+	s_hvx += accelspeed * wishx;
+	s_hvy += accelspeed * wishy;
+}
+
 static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int side )
 {
 	Vector wish;
@@ -2537,9 +2586,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 	if( !fwd && !side && !inAir )
 	{
-		s_hvx = 0.0f;
-		s_hvy = 0.0f;
-		return;
+		float spd = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		if( spd < 1.0f )
+		{
+			s_hvx = 0.0f;
+			s_hvy = 0.0f;
+			return;
+		}
 	}
 	dt = g_efw.dt;
 	if( dt <= 0.0f )
@@ -2550,21 +2603,53 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		dest = EFW_AirHorizontal( pPlayer, dt, fwd, side );
 	else
 	{
+	Vector wish;
+	float wishspeed;
 	UTIL_MakeVectors( pPlayer->pev->v_angle );
 	delta = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
 	delta.z = 0.0f;
+	wish = Vector( 0, 0, 0 );
+	wishspeed = 0.0f;
 	{
 		float len = delta.Length();
-		if( len < 0.01f )
-			return;
-		/* GoldSrc sv_maxspeed. The paused listen server does not run
-		   PM_Move, so this hull step spends the usercmd at that speed.
-		   PM_Duck scales the cmd by 0.333 once the crouch finishes. */
-		speed = 270.0f;
-		if( pPlayer->pev->flags & FL_DUCKING )
-			speed *= 0.333f;
-		delta = delta * ( ( speed * dt ) / len );
+		if( len >= 0.01f )
+		{
+			/* GoldSrc sv_maxspeed. PM_Duck scales the cmd by 0.333 once
+			   the crouch finishes. Friction runs before that add, so a
+			   release keeps the speed PM_Friction has not bled off. */
+			wishspeed = 270.0f;
+			if( pPlayer->pev->flags & FL_DUCKING )
+				wishspeed *= 0.333f;
+			wish = delta * ( 1.0f / len );
+		}
 	}
+	EFW_GroundFriction( dt );
+	if( wishspeed > 0.0f )
+		EFW_GroundAccelerate( wish.x, wish.y, wishspeed, dt );
+	speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+	if( speed < 1.0f )
+	{
+		s_hvx = 0.0f;
+		s_hvy = 0.0f;
+		return;
+	}
+	{
+		int ax = (int)fabsf( s_hvx );
+		int ay = (int)fabsf( s_hvy );
+		int steady = ( ay < 15 && ax > 200 ) || ( ax < 15 && ay > 200 );
+		static int s_groundLog;
+		if( !steady && s_groundLog < 48 )
+		{
+			char line[128];
+			s_groundLog++;
+			snprintf( line, sizeof( line ),
+				"efw: ground hv=%.0f %.0f wish=%d %d at %.0f %.0f\n",
+				s_hvx, s_hvy, fwd, side,
+				pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+			EFW_LogLine( line );
+		}
+	}
+	delta = Vector( s_hvx * dt, s_hvy * dt, 0 );
 	dest = pPlayer->pev->origin + delta;
 	{
 		/* Clip the player hull, step onto low ledges, and slide along
