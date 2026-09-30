@@ -1515,6 +1515,8 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 		EFW_GetHudFloat( 1 ), g_efw.items, g_efw.keywordCount, resetHope, level, g_efw.persistLatch );
 }
 
+static void EFW_LogLine( const char *line );
+
 static void EFW_HostFwd( void )
 {
 	CBasePlayer *pPlayer;
@@ -1529,6 +1531,21 @@ static void EFW_HostFwd( void )
 	ALERT( at_error, "%s", line );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( line );
+	if( pcmd && !strcmp( pcmd, "efw_trace" ) && CMD_ARGC() > 6 && pPlayer )
+	{
+		Vector start( (float)atof( CMD_ARGV( 1 ) ), (float)atof( CMD_ARGV( 2 ) ), (float)atof( CMD_ARGV( 3 ) ) );
+		Vector end = start + Vector( (float)atof( CMD_ARGV( 4 ) ), (float)atof( CMD_ARGV( 5 ) ), (float)atof( CMD_ARGV( 6 ) ) );
+		TraceResult tr;
+		char tline[192];
+		UTIL_TraceHull( start, end, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		snprintf( tline, sizeof( tline ),
+			"efw: trace solid=%d frac=%.3f end=%.1f %.1f %.1f n=%.2f %.2f %.2f\n",
+			tr.fStartSolid ? 1 : 0, tr.flFraction,
+			tr.vecEndPos.x, tr.vecEndPos.y, tr.vecEndPos.z,
+			tr.vecPlaneNormal.x, tr.vecPlaneNormal.y, tr.vecPlaneNormal.z );
+		EFW_LogLine( tline );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_inuse" ) )
 	{
 		int hit = 0;
@@ -1870,7 +1887,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
 		"efw_pause", "efw_context", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
-		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
+		"efw_move", "efw_clmove", "efw_clook", "efw_turn", "efw_trace",
 		"efw_cjump", "efw_cduck", "efw_pspeed", "efw_puse",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
@@ -2680,6 +2697,52 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 		if( tr.fStartSolid )
 			return 0;
 	}
+	/* A walkable plane (normal.z >= 0.7) is a ramp. Step-up treats that
+	   hit as a wall and the hull stays at the old height. Clip the rest
+	   of the slice onto the plane so origin.z follows it. */
+	if( tr.flFraction < 1.0f && tr.vecPlaneNormal.z >= 0.7f )
+	{
+		Vector hit = tr.vecEndPos;
+		Vector n = tr.vecPlaneNormal;
+		float remain;
+		float vx;
+		float vy;
+		float vz;
+		float backoff;
+		TraceResult slide;
+
+		remain = ( 1.0f - tr.flFraction ) * slice;
+		vx = s_hvx;
+		vy = s_hvy;
+		vz = 0.0f;
+		backoff = vx * n.x + vy * n.y;
+		if( backoff < 0.0f )
+		{
+			vx -= backoff * n.x;
+			vy -= backoff * n.y;
+			vz -= backoff * n.z;
+		}
+		UTIL_TraceHull( hit, hit + Vector( vx, vy, vz ) * remain,
+			dont_ignore_monsters, hull, pPlayer->edict(), &slide );
+		dest = slide.fStartSolid ? hit : slide.vecEndPos;
+		if( dest.z > start.z + 0.25f || dest.z < start.z - 0.25f )
+		{
+			static int s_slopeLog;
+			char line[160];
+			if( s_slopeLog < 8 )
+			{
+				s_slopeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: slope z=%.1f -> %.1f n=%.2f %.2f %.2f at %.0f %.0f\n",
+					start.z, dest.z, n.x, n.y, n.z, dest.x, dest.y );
+				EFW_LogLine( line );
+			}
+		}
+		s_hvx = ( dest.x - start.x ) / slice;
+		s_hvy = ( dest.y - start.y ) / slice;
+		*out = dest;
+		return 1;
+	}
 	if( tr.flFraction < 1.0f )
 	{
 		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
@@ -2854,6 +2917,39 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		}
 		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
 			break;
+		/* Downhill the horizontal slice is clear and the floor falls
+		   away. A 45-degree ramp drops about as far as the hull moved.
+		   Snap that far, not a whole pump, so a ledge still misses. */
+		{
+			float hx = dest.x - pPlayer->pev->origin.x;
+			float hy = dest.y - pPlayer->pev->origin.y;
+			float horiz = sqrtf( hx * hx + hy * hy );
+			float drop = horiz + 2.0f;
+			TraceResult floor;
+			Vector bot;
+
+			bot = dest;
+			bot.z -= drop;
+			UTIL_TraceHull( dest, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &floor );
+			if( !floor.fStartSolid && floor.flFraction < 1.0f
+				&& floor.vecPlaneNormal.z >= 0.7f
+				&& dest.z - floor.vecEndPos.z >= 0.5f )
+			{
+				static int s_downLog;
+				if( s_downLog < 8 )
+				{
+					char line[160];
+					s_downLog++;
+					snprintf( line, sizeof( line ),
+						"efw: slope z=%.1f -> %.1f n=%.2f %.2f %.2f at %.0f %.0f\n",
+						dest.z, floor.vecEndPos.z,
+						floor.vecPlaneNormal.x, floor.vecPlaneNormal.y, floor.vecPlaneNormal.z,
+						floor.vecEndPos.x, floor.vecEndPos.y );
+					EFW_LogLine( line );
+				}
+				dest = floor.vecEndPos;
+			}
+		}
 		pPlayer->pev->origin = dest;
 		UTIL_SetOrigin( pPlayer->pev, dest );
 		left -= slice;
