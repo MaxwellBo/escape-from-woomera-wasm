@@ -1577,6 +1577,13 @@ static void EFW_HostFwd( void )
 		EFW_DebugPrint( ">>> efw_cduck stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
 		return;
 	}
+	if( pcmd && !strcmp( pcmd, "efw_pspeed" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		EFW_LatchSpeed( on );
+		EFW_DebugPrint( ">>> efw_pspeed %d", on ? 1 : 0 );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_clook" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
@@ -1857,7 +1864,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_pause", "efw_context", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
 		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
-		"efw_cjump", "efw_cduck",
+		"efw_cjump", "efw_cduck", "efw_pspeed",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -2000,6 +2007,7 @@ static int s_walkOn; /* DROP_TO_FLOOR succeeded; stop forcing noclip */
 static int s_bindDone; /* all deferred studios have a MODEL_INDEX */
 static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
 static int s_moveSide;
+static int s_speedKey; /* HostFwd efw_pspeed, or pev->button IN_RUN */
 static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
@@ -2019,6 +2027,11 @@ void EFW_LatchMove( int fwd, int side )
 		side = -1;
 	s_moveFwd = fwd;
 	s_moveSide = side;
+}
+
+void EFW_LatchSpeed( int on )
+{
+	s_speedKey = on ? 1 : 0;
 }
 
 void EFW_LatchTurn( float yawDelta, float pitchDelta )
@@ -2460,8 +2473,9 @@ static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, flo
 }
 
 /* PM_WalkMove / PM_AirMove wish. cl_forwardspeed and cl_sidespeed are 400.
-   sv_maxspeed is 320, so a full axis clamps to 320. PM_Duck scales the cmd
-   by 0.333 once FL_DUCKING is set, and that product (133) stays under the cap.
+   +speed multiplies by cl_movespeedkey (0.3) before the clamp, so one axis
+   is 120 and never hits sv_maxspeed 320. PM_Duck then scales by 0.333, so
+   shift-crouch is about 40. A full axis without the key clamps to 320.
    Looking up zeroes the vertical part of the basis and renormalizes, so the
    planar wish keeps the cmd speed. */
 static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
@@ -2488,6 +2502,14 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 		cmdSide = 400.0f;
 	fmove = cmdFwd * (float)fwd;
 	smove = cmdSide * (float)side;
+	if( s_speedKey || ( pPlayer->pev->button & IN_RUN ) )
+	{
+		float key = CVAR_GET_FLOAT( "cl_movespeedkey" );
+		if( key < 0.01f )
+			key = 0.3f;
+		fmove *= key;
+		smove *= key;
+	}
 	if( pPlayer->pev->flags & FL_DUCKING )
 	{
 		fmove *= 0.333f;
@@ -2785,13 +2807,14 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		static int s_coastLog;
 		char line[160];
 		int ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
+		int slow = ( s_speedKey || ( pPlayer->pev->button & IN_RUN ) ) ? 1 : 0;
 		if( wishspeed > 0.0f && s_runLog < 8 )
 		{
 			s_runLog++;
 			snprintf( line, sizeof( line ),
-				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f duck=%d\n",
+				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f duck=%d spd=%d\n",
 				s_hvx, s_hvy, wishspeed, moved, dt,
-				dest.x, dest.y, ducked );
+				dest.x, dest.y, ducked, slow );
 			EFW_LogLine( line );
 		}
 		else if( wishspeed > 0.0f && ducked && s_duckRun < 4 )
@@ -3414,6 +3437,7 @@ void EFW_OnServerActivate( void )
 	s_presentOn = 0;
 	s_moveFwd = 0;
 	s_moveSide = 0;
+	s_speedKey = 0;
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -3443,6 +3467,7 @@ void EFW_OnServerDeactivate( void )
 	s_presentOn = 0;
 	s_moveFwd = 0;
 	s_moveSide = 0;
+	s_speedKey = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );

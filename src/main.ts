@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll240`;
+    return `${url}?v=efw-dll241`;
   return url;
 }
 
@@ -2029,6 +2029,11 @@ function syncJump(on: boolean) {
 function syncDuck(on: boolean) {
   runGameCmd(`efw_pduck ${on ? 1 : 0}`);
 }
+function syncSpeed(on: boolean) {
+  /* +speed is SHIFT in config.cfg. The pump rebuilds the wish from
+     cl_forwardspeed, so the key has to reach the server as efw_pspeed. */
+  runGameCmd(`efw_pspeed ${on ? 1 : 0}`);
+}
 
 /* Coalesce pointer deltas to one usercmd look per frame. The client DLL
    adds them to cmd->viewangles; PM_Move turns. efw_turn remains the
@@ -2077,6 +2082,12 @@ document.addEventListener('keydown', (e) => {
     syncDuck(true);
     return;
   }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncSpeed(true);
+    return;
+  }
   const walk = walkSlot(e.key);
   if (walk) {
     if (e.repeat) return;
@@ -2121,6 +2132,10 @@ document.addEventListener('keyup', (e) => {
   }
   if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
     syncDuck(false);
+    return;
+  }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+    syncSpeed(false);
     return;
   }
   const walk = walkSlot(e.key);

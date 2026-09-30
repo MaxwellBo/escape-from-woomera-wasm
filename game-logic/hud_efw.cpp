@@ -6,6 +6,7 @@
 #include "shake.h"
 #include "const.h"
 #include "usercmd.h"
+#include "kbutton.h"
 
 #include <math.h>
 #include <string.h>
@@ -395,6 +396,8 @@ static int EFW_ContextOn( void )
 /* Stuffed by the server as `efw_pmove` / `efw_plook` (CLIENT_COMMAND).
    CL_CreateMove copies this into the usercmd so PM_Move walks and looks.
    The origin latch stays at zero. */
+extern kbutton_t in_speed;
+
 static int s_pmFwd;
 static int s_pmSide;
 static int s_pmJump;
@@ -485,11 +488,26 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		spd = CVAR_GET_FLOAT( "cl_forwardspeed" );
 		if( spd < 1.0f )
 			spd = 400.0f;
-		cmd->forwardmove += spd * (float)s_pmFwd;
-		spd = CVAR_GET_FLOAT( "cl_sidespeed" );
-		if( spd < 1.0f )
-			spd = 400.0f;
-		cmd->sidemove += spd * (float)s_pmSide;
+		/* CL_CreateMove already multiplied the keyboard cmd by
+		   cl_movespeedkey. Scale only this stuffed add. */
+		{
+			float addFwd = spd * (float)s_pmFwd;
+			float addSide;
+			spd = CVAR_GET_FLOAT( "cl_sidespeed" );
+			if( spd < 1.0f )
+				spd = 400.0f;
+			addSide = spd * (float)s_pmSide;
+			if( in_speed.state & 1 )
+			{
+				float key = CVAR_GET_FLOAT( "cl_movespeedkey" );
+				if( key < 0.01f )
+					key = 0.3f;
+				addFwd *= key;
+				addSide *= key;
+			}
+			cmd->forwardmove += addFwd;
+			cmd->sidemove += addSide;
+		}
 		if( s_pmFwd > 0 )
 			cmd->buttons |= IN_FORWARD;
 		else if( s_pmFwd < 0 )
@@ -503,6 +521,8 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		cmd->buttons |= IN_JUMP;
 	if( s_pmDuck )
 		cmd->buttons |= IN_DUCK;
+	if( in_speed.state & 1 )
+		cmd->buttons |= IN_RUN;
 	if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f || s_lookOn )
 	{
 		if( !s_lookOn )
