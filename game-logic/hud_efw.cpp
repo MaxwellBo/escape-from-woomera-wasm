@@ -772,8 +772,11 @@ static int __MsgFunc_EFWShow( const char *pszName, int iSize, void *pbuf )
 	code = READ_BYTE();
 	if( code == 0xff )
 	{
+		/* FUN_10041930: count = 0 and DAT_100baedc = DAT_100baed8.
+		   The title then reveals depth*3 characters per redraw. */
 		memset( g_menuLine, 0, sizeof( g_menuLine ) );
 		g_menuOn = 0;
+		g_hudMsgBase = g_hudMsgCount;
 		return 1;
 	}
 	if( code < 0 || code > 6 )
@@ -2197,7 +2200,8 @@ static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 }
 
 /* FUN_1001e7d0: wrap at xmax-100 on space, hard wrap at xmax, 15px lines. */
-static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b )
+/* Returns the y FUN_1001e7d0 stores (one 15px line past the last drawn row). */
+static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b )
 {
 	char line[256];
 	int n = 0;
@@ -2208,8 +2212,8 @@ static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, in
 	int w;
 	static int s_logged;
 
-	if( !text )
-		return;
+	if( !text || !text[0] )
+		return y + 15;
 	if( !s_logged && text[0] )
 	{
 		s_logged = 1;
@@ -2241,6 +2245,7 @@ static void EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, in
 	line[n] = '\0';
 	if( n )
 		gHUD.DrawHudString( x, cy, xmax, line, r, g, b );
+	return cy + 15;
 }
 
 /* FUN_10043bb0: growing center veil (FUN_1001d750 RGB 0,0,0.2 / 0,0,0.6),
@@ -2397,8 +2402,9 @@ static void EFW_DrawMenuVeil( void )
 	vw = (float)ScreenWidth * g_menuVeil * 1.1f;
 	if( vw < 1.0f )
 		return;
-	/* FUN_1001db00: FUN_1001d750(0, height-0x140, width*veil*1.1, height,
-	   0, 0, 0.2, 1, 0) — RGB 0,0,0.2 with ascale. */
+	/* FUN_1001db00: 2px rule at the veil top, RGB 100,100,150, then
+	   FUN_1001d750(0, height-0x140, width*veil*1.1, height, 0, 0, 0.2, 1, 0). */
+	FillRGBA( 0, ScreenHeight - 0x140, (int)vw, 2, 100, 100, 150, 255 );
 	EFW_DrawTriQuad( 0.0f, (float)( ScreenHeight - 0x140 ), vw, (float)ScreenHeight,
 		0.0f, 0.0f, 0.2f, 1.0f, 0 );
 }
@@ -2626,35 +2632,79 @@ int CHudEfw::Draw( float flTime )
 
 	if( g_menuOn )
 	{
-		int row = 48;
+		/* FUN_1001db00: title starts at (ScreenHeight-320)+25, x=0x19,
+		   xmax = ScreenWidth*0.75. The body reveals depth*3 characters.
+		   Choices use "Press [%d]     %s" once that count covers line 0.
+		   Previous text is the part after @@@@PREVIOUS_QUESTION:. */
+		static const char kPrevMark[] = "@@@@PREVIOUS_QUESTION:";
+		char body[256];
+		char prev[256];
+		const char *hit;
+		int reveal;
+		int fullLen;
+		int x;
+		int y;
+		int xmax;
 		int li;
-		if( g_menuLine[0][0] )
+		int choices;
+		static int s_menuLog = -1;
+
+		reveal = EFW_MenuDepth() * 3;
+		if( reveal < 0 )
+			reveal = 0;
+		fullLen = (int)strlen( g_menuLine[0] );
+		x = 0x19;
+		y = ScreenHeight - 320 + 25;
+		xmax = (int)( (float)ScreenWidth * 0.75f );
+		body[0] = '\0';
+		prev[0] = '\0';
+		hit = strstr( g_menuLine[0], kPrevMark );
+		if( hit )
 		{
-			const char *prev = strstr( g_menuLine[0], " ... PREVIOUS QUESTION: " );
-			if( prev )
-			{
-				char body[256];
-				int n = (int)( prev - g_menuLine[0] );
-				if( n >= (int)sizeof( body ) )
-					n = (int)sizeof( body ) - 1;
-				memcpy( body, g_menuLine[0], (size_t)n );
-				body[n] = '\0';
-				gHUD.DrawHudString( 16, row, ScreenWidth - 16, prev + 24, 100, 200, 100 );
-				row += 16;
-				gHUD.DrawHudString( 16, row, ScreenWidth - 16, body, 200, 200, 0 );
-			}
-			else
-				gHUD.DrawHudString( 16, row, ScreenWidth - 16, g_menuLine[0], r, g, b );
-			row += 16;
+			int n = (int)( hit - g_menuLine[0] );
+			if( n >= (int)sizeof( body ) )
+				n = (int)sizeof( body ) - 1;
+			memcpy( body, g_menuLine[0], (size_t)n );
+			body[n] = '\0';
+			strncpy( prev, hit + sizeof( kPrevMark ) - 1, sizeof( prev ) - 1 );
+			prev[sizeof( prev ) - 1] = '\0';
 		}
-		for( li = 1; li <= 6; li++ )
+		else
 		{
-			char press[280];
-			if( !g_menuLine[li][0] )
-				continue;
-			snprintf( press, sizeof( press ), "Press %d  %s", li, g_menuLine[li] );
-			gHUD.DrawHudString( 16, row, ScreenWidth - 16, press, r, g, b );
-			row += 16;
+			strncpy( body, g_menuLine[0], sizeof( body ) - 1 );
+			body[sizeof( body ) - 1] = '\0';
+		}
+		if( reveal < (int)strlen( body ) )
+			body[reveal] = '\0';
+		if( prev[0] )
+		{
+			EFW_DrawWrapped( x, y, xmax, prev, 100, 200, 100 );
+			y += 0x23;
+		}
+		y = EFW_DrawWrapped( x, y, xmax, body, 0, 200, 200 ) + 0x23;
+		choices = ( reveal >= fullLen ) ? 1 : 0;
+		if( choices )
+		{
+			for( li = 1; li <= 6; li++ )
+			{
+				char press[320];
+				if( !g_menuLine[li][0] )
+					continue;
+				snprintf( press, sizeof( press ), "Press [%d]     %s", li, g_menuLine[li] );
+				y = EFW_DrawWrapped( x, y, xmax, press, 100, 200, 100 ) + 0x0a;
+			}
+		}
+		{
+			int key = choices ? ( 100000 + fullLen ) : reveal;
+			if( s_menuLog >= 100000 && reveal <= 3 )
+				s_menuLog = -1;
+			if( key != s_menuLog && ( reveal <= 9 || choices ) )
+			{
+				s_menuLog = key;
+				gEngfuncs.Con_Printf(
+					">>> FUN_1001db00 menu reveal=%d/%d choices=%d y0=%d\n",
+					reveal, fullLen, choices, ScreenHeight - 295 );
+			}
 		}
 	}
 

@@ -911,10 +911,11 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		if( title && title[0] )
 			strncpy( body, title, sizeof( body ) - 1 );
 		/* FUN_100c6e60: if DAT_10134480 is set, append
-		   " ... PREVIOUS QUESTION: " + that line onto the EFWShow body. */
+		   "@@@@PREVIOUS_QUESTION:" + that line onto the EFWShow body.
+		   The client splits on that marker. */
 		if( st->prevQuestion[0] )
 		{
-			strncat( body, " ... PREVIOUS QUESTION: ", sizeof( body ) - strlen( body ) - 1 );
+			strncat( body, "@@@@PREVIOUS_QUESTION:", sizeof( body ) - strlen( body ) - 1 );
 			strncat( body, st->prevQuestion, sizeof( body ) - strlen( body ) - 1 );
 			EFW_DebugPrint( ">>> prevq %s", st->prevQuestion );
 		}

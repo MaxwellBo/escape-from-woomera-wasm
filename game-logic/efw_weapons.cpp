@@ -242,6 +242,7 @@ BOOL CEfwWeapon::Deploy()
 {
 	/* 0x100c4630 returns 1. The v_ model is precached and never assigned
 	   to pev->viewmodel, so the hands stay empty. */
+#ifndef CLIENT_DLL
 	{
 		static int s_dep;
 		if( !s_dep )
@@ -250,6 +251,7 @@ BOOL CEfwWeapon::Deploy()
 			EFW_DebugPrint( ">>> FUN_100c4630" );
 		}
 	}
+#endif
 	return TRUE;
 }
 
