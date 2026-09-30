@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll215`;
+    return `${url}?v=efw-dll216`;
   return url;
 }
 
@@ -749,8 +749,8 @@ function log(text: string) {
     const n = /efw: HUD_Draw n=(\d+)/.exec(normalized);
     if (!n || Number(n[1]) > 8) {
       setTimeout(() => {
-        runEngineCmd('con_notifytime 0');
-        log('listen: con_notifytime 0');
+        runEngineCmd('con_notifytime -1');
+        log('listen: con_notifytime -1');
       }, 400);
     }
   }
@@ -964,10 +964,10 @@ function resumeAfterFirstClientFrame() {
      aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
   setTimeout(() => {
     if (changeWatch) return;
-    /* Client cvars register after ServerActivate. An earlier
-       con_notifytime 0 is replaced by the default, so hopehud stays
-       painted on the storyboard. Set it once HUD_Redraw has run. */
-    runEngineCmd('con_notifytime 0');
+    /* Client cvars register after ServerActivate, which puts the
+       default back. 0 does not expire a notify line while the client
+       clock is frozen (the test is cl.time - stamp > cvar). -1 does. */
+    runEngineCmd('con_notifytime -1');
     dismissMenuAfterHud();
   }, 80);
 }
@@ -1145,7 +1145,7 @@ function onServerActivateSeen() {
   runEngineCmd('ui_renderworld 1');
   setTimeout(() => {
     runEngineCmd('developer 0');
-    runEngineCmd('con_notifytime 0');
+    runEngineCmd('con_notifytime -1');
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
     runEngineCmd('ui_renderworld 1');
@@ -1184,7 +1184,7 @@ function onServerActivateSeen() {
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
-    runEngineCmd('con_notifytime 0');
+    runEngineCmd('con_notifytime -1');
     finishListenSpawn();
     runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
@@ -1195,7 +1195,7 @@ function onServerActivateSeen() {
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
       runEngineCmd('pausable 0');
-      runEngineCmd('con_notifytime 0');
+      runEngineCmd('con_notifytime -1');
     }, 4000);
   }
 }

@@ -2553,8 +2553,10 @@ static void EFW_DrawArtsClock( float flTime )
 }
 
 /* -dev 1 paints every client Con_Printf on the view. Cvar_SetValue
-   does not move this cvar; the console command does, and it also drops
-   lines already queued. One ClientCmd after drawing has started. */
+   does not move this cvar; the console command does. A frozen client
+   clock keeps a line while cl.time - stamp is not greater than
+   con_notifytime, so 0 never expires the line stamped at that clock.
+   -1 does. One ClientCmd after drawing has started. */
 static void EFW_SilenceNotify( void )
 {
 	static int s_sent;
@@ -2562,7 +2564,7 @@ static void EFW_SilenceNotify( void )
 		return;
 	s_sent = 1;
 	{
-		static char cmd[] = "con_notifytime 0\n";
+		static char cmd[] = "con_notifytime -1\n";
 		gEngfuncs.pfnClientCmd( cmd );
 	}
 }
