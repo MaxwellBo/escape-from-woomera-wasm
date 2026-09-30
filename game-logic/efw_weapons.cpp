@@ -240,8 +240,17 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 
 BOOL CEfwWeapon::Deploy()
 {
-	const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
-	return DefaultDeploy( def->vmodel, def->pmodel, 0, "crowbar" );
+	/* 0x100c4630 returns 1. The v_ model is precached and never assigned
+	   to pev->viewmodel, so the hands stay empty. */
+	{
+		static int s_dep;
+		if( !s_dep )
+		{
+			s_dep = 1;
+			EFW_DebugPrint( ">>> FUN_100c4630" );
+		}
+	}
+	return TRUE;
 }
 
 void CEfwWeapon::Holster( int skiplocal )
