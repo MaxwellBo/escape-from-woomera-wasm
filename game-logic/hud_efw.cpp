@@ -2357,8 +2357,6 @@ static void EFW_DrawArtsClock( float flTime )
 	float fade;
 	char clock[32];
 	wrect_t rc;
-	static int s_pack = -1;
-	int pack;
 
 	if( flTime < 0.0f )
 		flTime = 0.0f;
@@ -2379,14 +2377,6 @@ static void EFW_DrawArtsClock( float flTime )
 		rgb = 0;
 	if( fade > 0.0f && !g_hLogo )
 		g_hLogo = EFW_LoadSpr( "sprites/efw_artslogo.spr" );
-	pack = ( fade >= 1.0f ? 11 : (int)( fade * 10.0f + 0.5f ) ) * 10000
-		+ hour * 100 + mins;
-	if( pack != s_pack )
-	{
-		s_pack = pack;
-		gEngfuncs.Con_Printf( ">>> FUN_1001db00 clock=%s fade=%.2f logo=%d\n",
-			clock, fade, g_hLogo != 0 );
-	}
 	if( fade <= 0.0f )
 		return;
 	dw = 64;
