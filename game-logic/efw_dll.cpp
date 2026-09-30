@@ -2588,9 +2588,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		dt = 0.2f;
 	buttons = pPlayer->pev->button;
 	pressed = buttons & ~s_oldAirButtons;
-	/* The view reads view_ofs. A server origin change alone leaves the
-	   camera on the floor, so the eye tracks the jump off the last
-	   grounded origin. */
+	/* PM_Jump moves the hull and leaves the standing eye at 28. The
+	   camera follows origin, so adding the hop onto view_ofs put the
+	   eye a second storey above the pawn. */
 	if( !s_floorSet && !s_airborne )
 	{
 		s_floorSet = 1;
@@ -2689,17 +2689,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		UTIL_SetOrigin( pPlayer->pev, dest );
 	}
 
-	if( s_floorSet )
-	{
-		float lift = pPlayer->pev->origin.z - s_floorZ;
-		if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
-		{
-			if( lift > 1.0f || s_airborne )
-				pPlayer->pev->view_ofs.z = 28.0f + lift;
-			else
-				pPlayer->pev->view_ofs.z = 28.0f;
-		}
-	}
+	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
+		pPlayer->pev->view_ofs.z = 28.0f;
 	if( !s_airborne && !( buttons & IN_JUMP ) )
 	{
 		s_floorZ = pPlayer->pev->origin.z;
