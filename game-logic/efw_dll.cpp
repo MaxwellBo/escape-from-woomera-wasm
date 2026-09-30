@@ -2657,6 +2657,8 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	Vector dest;
 	int hull;
 	int stepped;
+	int wallClip;
+	Vector wallN;
 
 	if( !pPlayer || !out || slice < 0.001f )
 		return 0;
@@ -2664,6 +2666,8 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	dest = start + Vector( s_hvx * slice, s_hvy * slice, 0 );
 	hull = EFW_PlayerHull( pPlayer );
 	stepped = 0;
+	wallClip = 0;
+	wallN = Vector( 0, 0, 0 );
 	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
 	if( tr.fStartSolid )
 	{
@@ -2705,6 +2709,11 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 			if( over.fStartSolid )
 				return 0;
 			dest = over.vecEndPos;
+			/* PM_ClipVelocity overbounce 1. The 4-unit stand-off keeps the
+			   hull out of the plane. Dividing that nudge by the 10ms slice
+			   was storing it as speed and launching the hull off the wall. */
+			wallClip = 1;
+			wallN = tr.vecPlaneNormal;
 			if( tr.vecPlaneNormal.z < 0.5f && tr.vecPlaneNormal.z > -0.5f )
 			{
 				TraceResult gap;
@@ -2717,8 +2726,36 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	}
 	else
 		dest = tr.vecEndPos;
-	s_hvx = ( dest.x - pPlayer->pev->origin.x ) / slice;
-	s_hvy = ( dest.y - pPlayer->pev->origin.y ) / slice;
+	if( wallClip )
+	{
+		float backoff = s_hvx * wallN.x + s_hvy * wallN.y;
+		float before = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		static int s_wallLog;
+		if( backoff < 0.0f )
+		{
+			s_hvx -= backoff * wallN.x;
+			s_hvy -= backoff * wallN.y;
+			if( s_hvx > -0.1f && s_hvx < 0.1f )
+				s_hvx = 0.0f;
+			if( s_hvy > -0.1f && s_hvy < 0.1f )
+				s_hvy = 0.0f;
+		}
+		if( s_wallLog < 6 && before > 50.0f )
+		{
+			char line[160];
+			s_wallLog++;
+			snprintf( line, sizeof( line ),
+				"efw: wall spd=%.0f from=%.0f hv=%.0f %.0f at %.0f %.0f\n",
+				sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ), before,
+				s_hvx, s_hvy, dest.x, dest.y );
+			EFW_LogLine( line );
+		}
+	}
+	else
+	{
+		s_hvx = ( dest.x - pPlayer->pev->origin.x ) / slice;
+		s_hvy = ( dest.y - pPlayer->pev->origin.y ) / slice;
+	}
 	*out = dest;
 	return 1;
 }
