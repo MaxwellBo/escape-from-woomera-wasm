@@ -3461,6 +3461,29 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		}
 	}
 
+	/* PM_AddCorrectGravity still runs after the step that left the floor.
+	   The jump arc is that fall with a zero takeoff speed. Clearing
+	   FL_ONGROUND and leaving origin.z put the hull in the air over the drop. */
+	if( !s_airborne && !( pPlayer->pev->flags & FL_ONGROUND ) )
+	{
+		static int s_dropLog;
+
+		s_floorZ = pPlayer->pev->origin.z;
+		s_floorSet = 1;
+		s_jumpVz0 = 0.0f;
+		s_vz = 0.0f;
+		s_jumpT = 0.0f;
+		s_airborne = 1;
+		if( s_dropLog < 6 )
+		{
+			s_dropLog++;
+			snprintf( line, sizeof( line ),
+				"efw: drop z=%.1f at %.0f %.0f\n",
+				s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+			EFW_LogLine( line );
+		}
+	}
+
 	if( s_airborne )
 	{
 		float z;
