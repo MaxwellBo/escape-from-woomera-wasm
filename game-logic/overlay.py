@@ -538,6 +538,23 @@ def main() -> None:
         "}\n",
     )
 
+    view_cpp = cldll / "view.cpp"
+    once(
+        view_cpp,
+        "\tif( gEngfuncs.IsSpectateOnly() )\n"
+        "\t{\n"
+        "\t\tent = gEngfuncs.GetEntityByIndex( g_iUser2 );\n"
+        "\t}\n",
+        "\t{\n"
+        "\t\textern void EFW_DriftPitch( struct ref_params_s *pparams );\n"
+        "\t\tEFW_DriftPitch( pparams ); /* EFW_OVERLAY */\n"
+        "\t}\n"
+        "\tif( gEngfuncs.IsSpectateOnly() )\n"
+        "\t{\n"
+        "\t\tent = gEngfuncs.GetEntityByIndex( g_iUser2 );\n"
+        "\t}\n",
+    )
+
     input_cpp = cldll / "input.cpp"
     once(
         input_cpp,

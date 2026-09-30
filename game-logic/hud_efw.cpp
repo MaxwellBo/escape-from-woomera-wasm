@@ -7,6 +7,7 @@
 #include "const.h"
 #include "usercmd.h"
 #include "kbutton.h"
+#include "ref_params.h"
 
 #include <math.h>
 #include <string.h>
@@ -397,6 +398,7 @@ static int EFW_ContextOn( void )
    CL_CreateMove copies this into the usercmd so PM_Move walks and looks.
    The origin latch stays at zero. */
 extern kbutton_t in_speed;
+extern kbutton_t in_mlook;
 
 static int s_pmFwd;
 static int s_pmSide;
@@ -450,6 +452,124 @@ static void EFW_PDuck_f( void )
 }
 
 static float s_viewRoll;
+
+/* V_DriftPitch 0x1003fe00. nodrift starts clear, so a pitch that is not
+   idealpitch moves. Mouse look calls V_StopPitchDrift; walking forward
+   at cl_forwardspeed for v_centermove seconds calls V_StartPitchDrift.
+   Xash copies cl_viewangles back onto the client view after CalcRefdef. */
+static float s_pitchVel;
+static int s_noDrift;
+static float s_driftMove;
+static float s_lastStop;
+
+static void EFW_StopPitchDrift( void )
+{
+	s_lastStop = gEngfuncs.GetClientTime();
+	s_noDrift = 1;
+	s_pitchVel = 0.0f;
+}
+
+static void EFW_StartPitchDrift( void )
+{
+	float speed;
+
+	if( s_lastStop == gEngfuncs.GetClientTime() )
+		return;
+	if( s_noDrift || s_pitchVel == 0.0f )
+	{
+		speed = CVAR_GET_FLOAT( "v_centerspeed" );
+		if( speed < 1.0f )
+			speed = 500.0f;
+		s_pitchVel = speed;
+		s_noDrift = 0;
+		s_driftMove = 0.0f;
+	}
+}
+
+void EFW_DriftPitch( struct ref_params_s *pparams )
+{
+	float delta;
+	float move;
+	float fwd;
+	float maxfwd;
+	float center;
+	float ang[3];
+	static int s_log;
+	static float s_logged;
+
+	if( !pparams )
+		return;
+	if( in_mlook.state & 1 )
+		EFW_StopPitchDrift();
+	if( ( gEngfuncs.IsNoClipping && gEngfuncs.IsNoClipping() )
+		|| !pparams->onground || pparams->demoplayback || pparams->spectator )
+	{
+		s_driftMove = 0.0f;
+		s_pitchVel = 0.0f;
+		return;
+	}
+	if( s_noDrift )
+	{
+		fwd = 0.0f;
+		if( pparams->cmd )
+			fwd = pparams->cmd->forwardmove;
+		if( fwd < 0.0f )
+			fwd = -fwd;
+		maxfwd = CVAR_GET_FLOAT( "cl_forwardspeed" );
+		if( maxfwd < 1.0f )
+			maxfwd = 400.0f;
+		if( fwd < maxfwd )
+			s_driftMove = 0.0f;
+		else
+			s_driftMove += pparams->frametime;
+		center = CVAR_GET_FLOAT( "v_centermove" );
+		if( center < 0.01f )
+			center = 0.15f;
+		if( s_driftMove > center )
+			EFW_StartPitchDrift();
+		return;
+	}
+	delta = pparams->idealpitch - pparams->cl_viewangles[0];
+	if( delta == 0.0f )
+	{
+		s_pitchVel = 0.0f;
+		return;
+	}
+	move = pparams->frametime * s_pitchVel;
+	center = CVAR_GET_FLOAT( "v_centerspeed" );
+	if( center < 1.0f )
+		center = 500.0f;
+	s_pitchVel += pparams->frametime * center;
+	if( delta > 0.0f )
+	{
+		if( move > delta )
+		{
+			s_pitchVel = 0.0f;
+			move = delta;
+		}
+		pparams->cl_viewangles[0] += move;
+	}
+	else
+	{
+		if( move > -delta )
+		{
+			s_pitchVel = 0.0f;
+			move = -delta;
+		}
+		pparams->cl_viewangles[0] -= move;
+	}
+	gEngfuncs.GetViewAngles( ang );
+	ang[0] = pparams->cl_viewangles[0];
+	gEngfuncs.SetViewAngles( ang );
+	if( s_log < 8 && ( pparams->cl_viewangles[0] > s_logged + 0.5f
+		|| pparams->cl_viewangles[0] < s_logged - 0.5f ) )
+	{
+		s_log++;
+		s_logged = pparams->cl_viewangles[0];
+		gEngfuncs.Con_Printf( "efw: drift pitch %.1f ideal=%.1f vel=%.0f\n",
+			pparams->cl_viewangles[0], pparams->idealpitch, s_pitchVel );
+	}
+}
 
 /* Server V_CalcRoll. The refdef copies these viewangles, and simvel is 0. */
 static void EFW_VRoll_f( void )
@@ -531,12 +651,21 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		cmd->buttons |= IN_RUN;
 	if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f || s_lookOn )
 	{
+		/* A look delta is the mouse path that calls V_StopPitchDrift.
+		   With no new delta, keep the pitch CalcRefdef drifted. */
+		if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f )
+			EFW_StopPitchDrift();
+		gEngfuncs.GetViewAngles( ang );
 		if( !s_lookOn )
 		{
-			gEngfuncs.GetViewAngles( ang );
 			s_lookYaw = ang[1];
 			s_lookPitch = ang[0];
 			s_lookOn = 1;
+		}
+		else if( s_lookDyaw == 0.0f && s_lookDpitch == 0.0f )
+		{
+			s_lookYaw = ang[1];
+			s_lookPitch = ang[0];
 		}
 		s_lookYaw += s_lookDyaw;
 		s_lookPitch += s_lookDpitch;
