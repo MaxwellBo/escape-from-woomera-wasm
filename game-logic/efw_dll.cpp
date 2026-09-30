@@ -2971,6 +2971,52 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 }
 
+/* V_CalcRoll. sv_rollangle is 0 on this host, and the client simvel stays
+   0 while the pump moves the hull, so V_CalcViewRoll leaves the horizon
+   level. GoldSrc uses 2 degrees at sv_rollspeed 200. The result is the
+   view punch the refdef adds on top of the look angles. */
+static void EFW_ViewRoll( CBasePlayer *pPlayer )
+{
+	float side;
+	float roll;
+	float rollangle;
+	float rollspeed;
+	float sign;
+	Vector right;
+	static int s_log;
+	char line[128];
+
+	if( !pPlayer )
+		return;
+	rollangle = CVAR_GET_FLOAT( "sv_rollangle" );
+	rollspeed = CVAR_GET_FLOAT( "sv_rollspeed" );
+	if( rollangle < 0.05f )
+		rollangle = 2.0f;
+	if( rollspeed < 1.0f )
+		rollspeed = 200.0f;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	right = gpGlobals->v_right;
+	side = s_hvx * right.x + s_hvy * right.y;
+	sign = ( side < 0.0f ) ? -1.0f : 1.0f;
+	if( side < 0.0f )
+		side = -side;
+	if( side < rollspeed )
+		roll = side * rollangle / rollspeed;
+	else
+		roll = rollangle;
+	roll *= sign;
+	pPlayer->pev->punchangle.z = roll;
+	if( s_log < 6 && ( roll > 0.5f || roll < -0.5f ) )
+	{
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: roll %.2f side=%.0f at %.0f %.0f\n",
+			roll, side * sign,
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+		EFW_LogLine( line );
+	}
+}
+
 /* V_CalcBob. cl.time stays near 1, so the client bob freezes after the
    first frame. The same curve runs on the pump clock and adds to the
    eye. cl_bob 0.01, cl_bobcycle 0.8, cl_bobup 0.5. Air keeps the last bob. */
@@ -3023,6 +3069,7 @@ static void EFW_ViewBob( CBasePlayer *pPlayer, float dt )
 		s_bob = bob;
 	}
 	pPlayer->pev->view_ofs.z += s_bob;
+	EFW_ViewRoll( pPlayer );
 	if( onGround && s_log < 6 && sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ) > 100.0f )
 	{
 		s_log++;
