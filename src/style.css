@@ -209,21 +209,44 @@ canvas#canvas {
   padding: 0;
 }
 
+/* FUN_10046040: centered sprite quad, tinted 0.7 until the cursor is on it.
+   The caption is DrawHudString at (center-64, center+48), max width 256,
+   and only while that hover flag is set. */
 .efw-vgui button.efw-prompt {
   background-color: transparent;
   background-repeat: no-repeat;
   background-position: center;
   background-size: 100% 100%;
   border: none;
-  padding: 12% 8% 16%;
-  color: #111;
-  font-size: 11px;
+  padding: 0;
+  overflow: visible;
+  color: transparent;
+  filter: brightness(0.7);
+}
+
+.efw-vgui button.efw-prompt:hover,
+.efw-vgui button.efw-prompt:focus {
+  filter: none;
+  z-index: 2;
+}
+
+.efw-vgui button.efw-prompt .efw-prompt-label {
+  display: none;
+  position: absolute;
+  left: -16%;
+  top: 99%;
+  width: 263%;
+  color: #fff;
+  font-size: 17px;
   line-height: 1.15;
-  text-shadow:
-    -1px -1px 0 #fff,
-    1px -1px 0 #fff,
-    -1px 1px 0 #fff,
-    1px 1px 0 #fff;
+  text-align: left;
+  text-shadow: 1px 1px 0 #000;
+  pointer-events: none;
+}
+
+.efw-vgui button.efw-prompt:hover .efw-prompt-label,
+.efw-vgui button.efw-prompt:focus .efw-prompt-label {
+  display: block;
 }
 
 .efw-hint {

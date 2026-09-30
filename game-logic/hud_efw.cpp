@@ -1403,11 +1403,8 @@ static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRI
 		x = ScreenWidth - 180;
 	if( y > ScreenHeight - 180 )
 		y = ScreenHeight - 180;
-	/* FUN_10044f70 stacks CommandButtons; clamp can collapse several
-	   world prompts onto one pixel, so stagger after the 180px box. */
-	y += g_vguiN * 32;
-	if( y > ScreenHeight - 32 )
-		y = 32 + ( g_vguiN % 10 ) * 32;
+	/* Same projected point on every button. FUN_10045f20 orbits them
+	   (radius 130). Staggering by 32px stacked the centered quads. */
 	b = &g_vgui[g_vguiN++];
 	b->w = w;
 	b->h = h;
@@ -1568,7 +1565,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), s->name[0] ? s->name : "them" );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
-			EFW_VguiAdd( x, y + 30, label, cmd, g_hGive );
+			EFW_VguiAdd( x, y, label, cmd, g_hGive );
 		}
 		return;
 	}

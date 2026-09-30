@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll190`;
+    return `${url}?v=efw-dll191`;
   return url;
 }
 
@@ -200,6 +200,7 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
   const url = promptSpriteFor(cmd);
   if (!url) {
     btn.classList.remove('efw-prompt');
+    btn.querySelector(':scope > .efw-prompt-label')?.remove();
     btn.style.backgroundImage = '';
     delete btn.dataset.ax;
     delete btn.dataset.ay;
@@ -209,40 +210,52 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
     btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
     return;
   }
-  /* Projected point is the sprite hotspot (origin -64, 64 on the 128² frame).
-     The server staggers buttons by 32px, which piles the full frames on top
-     of each other; layoutPromptColumn separates them. */
+  /* Projected point is the orbit center (FUN_10045f20). The label is a
+     separate caption, drawn under the quad only while the cursor is on it. */
   btn.dataset.ax = String(Number(nx) + Number(nw) / 2);
   btn.dataset.ay = String(Number(ny) + Number(nh));
   btn.classList.add('efw-prompt');
   btn.style.backgroundImage = `url("${url}")`;
+  mountPromptLabel(btn);
+}
+
+function mountPromptLabel(btn: HTMLButtonElement) {
+  const label = (btn.textContent || '').trim();
+  btn.setAttribute('aria-label', label);
+  for (const node of [...btn.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE)
+      node.remove();
+  }
+  let cap = btn.querySelector(':scope > .efw-prompt-label');
+  if (!(cap instanceof HTMLSpanElement)) {
+    cap = document.createElement('span');
+    cap.className = 'efw-prompt-label';
+    btn.appendChild(cap);
+  }
+  cap.textContent = label;
 }
 
 function layoutPromptColumn(layer: HTMLElement) {
   const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
   if (!buttons.length)
     return;
-  const screenW = canvas.width || 960;
-  const screenH = canvas.height || 720;
-  /* 128px frames on a short WebGL view cover the character. Cap one icon
-     near a fifth of the height, the same weight 128px has on 640×480. */
-  const px = Math.min(128, Math.max(64, Math.round(screenH * 0.2)));
-  const sprW = px / screenW;
-  const sprH = px / screenH;
-  const ax = Number(buttons[0].dataset.ax || '0.5');
-  const ay = Number(buttons[0].dataset.ay || '0.5');
-  let left = ax + 0.02;
-  if (left + sprW > 0.98)
-    left = Math.max(0.02, ax - sprW - 0.02);
-  let top = ay - (sprH * buttons.length) / 2;
-  const total = sprH * buttons.length;
-  if (top < 0.04)
-    top = 0.04;
-  if (top + total > 0.96)
-    top = Math.max(0.04, 0.96 - total);
+  /* FUN_10045f20 settled pose, in the 640×480 space the server projects into.
+     angle = pi * (1 + 2*index/count); offset = 130 * (sin, cos).
+     FUN_10044bf0 draws a centered quad. Idle side is 1.5225 * 64 ≈ 97
+     (0x10064f80 * 0x1005acb0); the 0.5 in the quad builder is the half-extent. */
+  const n = buttons.length;
+  const sprW = 97.44 / 640;
+  const sprH = 97.44 / 480;
+  const radiusX = 130 / 640;
+  const radiusY = 130 / 480;
   buttons.forEach((b, i) => {
-    b.style.left = `${(left * 100).toFixed(2)}%`;
-    b.style.top = `${((top + i * sprH) * 100).toFixed(2)}%`;
+    const ax = Number(b.dataset.ax || '0.5');
+    const ay = Number(b.dataset.ay || '0.5');
+    const angle = Math.PI * (1 + (2 * i) / n);
+    const cx = ax + Math.sin(angle) * radiusX;
+    const cy = ay + Math.cos(angle) * radiusY;
+    b.style.left = `${((cx - sprW / 2) * 100).toFixed(2)}%`;
+    b.style.top = `${((cy - sprH / 2) * 100).toFixed(2)}%`;
     b.style.width = `${(sprW * 100).toFixed(2)}%`;
     b.style.height = `${(sprH * 100).toFixed(2)}%`;
   });

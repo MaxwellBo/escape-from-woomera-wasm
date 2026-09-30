@@ -741,9 +741,9 @@ static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const ch
 		x = EFW_HTML_SW - 180;
 	if( y > EFW_HTML_SH - 180 )
 		y = EFW_HTML_SH - 180;
-	y += ( *n ) * 32;
-	if( y > EFW_HTML_SH - 32 )
-		y = 32 + ( ( *n ) % 10 ) * 32;
+	/* FUN_10044f70 stores this projected point on every button. The client
+	   spreads them with FUN_10045f20 (radius 130, index/count). A 32px
+	   stagger here piled the 97px quads on top of each other. */
 	b = &out[( *n )++];
 	b->w = w;
 	b->h = h;
@@ -772,7 +772,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), s->name[0] ? s->name : "them" );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
-			EFW_HtmlVguiAdd( out, n, x, y + 30, label, cmd );
+			EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
 		}
 		return;
 	}
