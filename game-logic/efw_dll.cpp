@@ -2420,6 +2420,34 @@ static float s_jumpT;
 static float s_jumpVz0;
 static float s_hvx;
 static float s_hvy;
+/* PM_CheckFalling writes punchangle[2]. The refdef never reads that
+   field here, so the same roll is added in EFW_ViewRoll. */
+static float s_punchRoll;
+
+/* V_DropPunchAngle. Length falls by (10 + len/2) per second. */
+static void EFW_DropPunch( float dt )
+{
+	float len;
+	float sign;
+
+	len = s_punchRoll;
+	if( len < 0.0f )
+		len = -len;
+	if( len < 0.01f )
+	{
+		s_punchRoll = 0.0f;
+		return;
+	}
+	if( dt < 0.001f )
+		dt = 0.1f;
+	if( dt > 0.25f )
+		dt = 0.25f;
+	sign = ( s_punchRoll < 0.0f ) ? -1.0f : 1.0f;
+	len -= ( 10.0f + len * 0.5f ) * dt;
+	if( len < 0.0f )
+		len = 0.0f;
+	s_punchRoll = sign * len;
+}
 
 /* PM_AirAccelerate caps the added speed at 30. Ground speed already on
    s_hv is kept, so a running jump carries, and a standing jump does not
@@ -3231,8 +3259,10 @@ static void EFW_ViewRoll( CBasePlayer *pPlayer )
 	else
 		roll = rollangle;
 	roll *= sign;
-	/* punchangle reaches UpdateClientData and the refdef still stays
-	   level. svc_setangle follows pev->angles, which is what the view uses. */
+	/* PM_CheckFalling sets punchangle[2] = fallSpeed * 0.013. That vector
+	   reaches UpdateClientData and the refdef still stays level.
+	   svc_setangle follows pev->angles, which is what the view uses. */
+	roll += s_punchRoll;
 	pPlayer->pev->v_angle.z = roll;
 	pPlayer->pev->angles.x = pPlayer->pev->v_angle.x;
 	pPlayer->pev->angles.y = pPlayer->pev->v_angle.y;
@@ -3343,6 +3373,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		dt = EFW_HostInterval();
 	if( dt > 0.2f )
 		dt = 0.2f;
+	EFW_DropPunch( dt );
 	buttons = pPlayer->pev->button;
 	pressed = buttons & ~s_oldAirButtons;
 	/* PM_Jump moves the hull and leaves the standing eye at 28. The
@@ -3442,34 +3473,69 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		dest.z = z;
 		if( z <= s_floorZ )
 		{
-			/* The parabola comes back to the takeoff height. The floor
-			   under the hull may be lower once the hop has left a ledge,
-			   so land on that trace instead of snapping back up. */
+			/* The parabola comes back to the takeoff height. A lower floor
+			   used to be a 512-unit snap with vz cleared, so PM_CheckFalling
+			   never saw the impact. Keep the same arc until the hull hits. */
 			TraceResult down;
 			Vector top;
 			Vector bot;
+			float fall;
+			float drop;
 
-			top = dest;
-			top.z = s_floorZ;
+			top = pPlayer->pev->origin;
+			if( top.z > s_floorZ )
+				top.z = s_floorZ;
 			bot = top;
-			bot.z = s_floorZ - 512.0f;
+			bot.z = z;
 			UTIL_TraceHull( top, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
-			s_airborne = 0;
-			s_vz = 0.0f;
-			if( !down.fStartSolid && down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+			if( down.fStartSolid )
 			{
-				dest = down.vecEndPos;
-				pPlayer->pev->flags |= FL_ONGROUND;
-				snprintf( line, sizeof( line ),
-					"efw: jump land z=%.1f from %.1f at %.0f %.0f\n",
-					dest.z, s_floorZ, dest.x, dest.y );
-				EFW_LogLine( line );
-			}
-			else
-			{
-				dest.z = s_floorZ;
+				dest = top;
+				s_airborne = 0;
+				s_vz = 0.0f;
 				pPlayer->pev->flags &= ~FL_ONGROUND;
 			}
+			else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+			{
+				dest = down.vecEndPos;
+				drop = s_floorZ - dest.z;
+				if( drop < 0.0f )
+					drop = 0.0f;
+				fall = sqrtf( s_jumpVz0 * s_jumpVz0 + 2.0f * 800.0f * drop );
+				s_airborne = 0;
+				s_vz = 0.0f;
+				pPlayer->pev->flags |= FL_ONGROUND;
+				/* PLAYER_FALL_PUNCH_THRESHHOLD is 350. A 45-unit hop
+				   lands near 268 and does not punch. The roll axis is
+				   not clamped; the SDK clamp is on punchangle[0]. */
+				if( fall >= 350.0f )
+				{
+					static int s_fallLog;
+
+					s_punchRoll = fall * 0.013f;
+					if( s_fallLog < 6 )
+					{
+						s_fallLog++;
+						snprintf( line, sizeof( line ),
+							"efw: fall vz=%.0f punch=%.2f z=%.1f from %.1f at %.0f %.0f\n",
+							fall, s_punchRoll, dest.z, s_floorZ, dest.x, dest.y );
+						EFW_LogLine( line );
+					}
+				}
+				else
+				{
+					snprintf( line, sizeof( line ),
+						"efw: jump land z=%.1f from %.1f vz=%.0f at %.0f %.0f\n",
+						dest.z, s_floorZ, fall, dest.x, dest.y );
+					EFW_LogLine( line );
+				}
+			}
+			else if( down.flFraction < 1.0f )
+			{
+				dest = down.vecEndPos;
+			}
+			else
+				dest = down.vecEndPos;
 		}
 		else
 		{
