@@ -2374,6 +2374,105 @@ static int s_floorSet;
 static float s_floorZ;
 static float s_jumpT;
 static float s_jumpVz0;
+static float s_hvx;
+static float s_hvy;
+
+/* PM_AirAccelerate caps the added speed at 30. Ground speed already on
+   s_hv is kept, so a running jump carries, and a standing jump does not
+   pick up the 270 walk. */
+static void EFW_AirAccelerate( float wishx, float wishy, float wishspeed, float dt )
+{
+	float wishspd;
+	float current;
+	float addspeed;
+	float accelspeed;
+	float len;
+
+	if( wishspeed <= 0.0f )
+		return;
+	len = sqrtf( wishx * wishx + wishy * wishy );
+	if( len < 0.01f )
+		return;
+	wishx /= len;
+	wishy /= len;
+	wishspd = wishspeed;
+	if( wishspd > 30.0f )
+		wishspd = 30.0f;
+	current = s_hvx * wishx + s_hvy * wishy;
+	addspeed = wishspd - current;
+	if( addspeed <= 0.0f )
+		return;
+	accelspeed = 10.0f * wishspeed * dt;
+	if( accelspeed > addspeed )
+		accelspeed = addspeed;
+	s_hvx += accelspeed * wishx;
+	s_hvy += accelspeed * wishy;
+}
+
+static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int side )
+{
+	Vector wish;
+	Vector dest;
+	Vector start;
+	float speed;
+	float len;
+	TraceResult tr;
+	char line[96];
+	static int s_hvLog;
+
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	wish = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
+	wish.z = 0.0f;
+	speed = 0.0f;
+	len = wish.Length();
+	if( len >= 0.01f )
+	{
+		speed = 270.0f;
+		if( pPlayer->pev->flags & FL_DUCKING )
+			speed *= 0.333f;
+		wish = wish * ( 1.0f / len );
+	}
+	else
+		wish = Vector( 0, 0, 0 );
+	EFW_AirAccelerate( wish.x, wish.y, speed, dt );
+	start = pPlayer->pev->origin;
+	dest = start + Vector( s_hvx * dt, s_hvy * dt, 0 );
+	UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+	if( tr.fStartSolid )
+	{
+		s_hvx = 0.0f;
+		s_hvy = 0.0f;
+		return start;
+	}
+	if( tr.flFraction < 1.0f )
+	{
+		Vector hit = tr.vecEndPos;
+		Vector left = dest - hit;
+		float into = DotProduct( left, tr.vecPlaneNormal );
+		TraceResult slide;
+
+		if( into < 0.0f )
+			left = left - tr.vecPlaneNormal * into;
+		left = left + tr.vecPlaneNormal;
+		UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, human_hull, pPlayer->edict(), &slide );
+		dest = slide.fStartSolid ? hit : slide.vecEndPos;
+	}
+	else
+		dest = tr.vecEndPos;
+	if( dt > 0.0f )
+	{
+		s_hvx = ( dest.x - start.x ) / dt;
+		s_hvy = ( dest.y - start.y ) / dt;
+	}
+	if( s_hvLog < 32 )
+	{
+		s_hvLog++;
+		snprintf( line, sizeof( line ),
+			"efw: airhv hv=%.0f %.0f z=%.1f\n", s_hvx, s_hvy, start.z );
+		EFW_LogLine( line );
+	}
+	return dest;
+}
 
 static float EFW_DuckSpline( float time )
 {
@@ -2398,6 +2497,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	int fwd;
 	int side;
 	int fromCmd;
+	int inAir;
 	static int s_moveN;
 
 	if( !pPlayer || !s_walkOn )
@@ -2423,13 +2523,31 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			side--;
 		fromCmd = ( fwd || side ) ? 1 : 0;
 	}
-	if( !fwd && !side )
+	{
+		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
+		int jumpEdge = !s_airborne
+			&& ( pPlayer->pev->button & IN_JUMP )
+			&& !( s_oldAirButtons & IN_JUMP )
+			&& ( onGround || ( s_floorSet && pPlayer->pev->origin.z > s_floorZ + 1.0f ) );
+		/* Off the ground, or the frame the jump leaves it. PM_AirMove
+		   keeps the velocity already built on the ground. */
+		inAir = ( s_airborne || jumpEdge || !onGround ) ? 1 : 0;
+	}
+	if( !fwd && !side && !inAir )
+	{
+		s_hvx = 0.0f;
+		s_hvy = 0.0f;
 		return;
+	}
 	dt = g_efw.dt;
 	if( dt <= 0.0f )
 		dt = EFW_HostInterval();
 	if( dt > 0.2f )
 		dt = 0.2f;
+	if( inAir )
+		dest = EFW_AirHorizontal( pPlayer, dt, fwd, side );
+	else
+	{
 	UTIL_MakeVectors( pPlayer->pev->v_angle );
 	delta = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
 	delta.z = 0.0f;
@@ -2510,9 +2628,16 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		}
 		else
 			dest = tr.vecEndPos;
+		s_hvx = ( dest.x - pPlayer->pev->origin.x ) / dt;
+		s_hvy = ( dest.y - pPlayer->pev->origin.y ) / dt;
 	}
-	pPlayer->pev->velocity = delta * ( 1.0f / dt );
-	pPlayer->pev->velocity.z = s_vz;
+	}
+	pPlayer->pev->velocity.x = s_hvx;
+	pPlayer->pev->velocity.y = s_hvy;
+	if( s_airborne )
+		pPlayer->pev->velocity.z = s_vz;
+	else if( !inAir )
+		pPlayer->pev->velocity.z = 0.0f;
 	if( s_airborne )
 		pPlayer->pev->flags &= ~FL_ONGROUND;
 	else
