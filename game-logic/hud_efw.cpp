@@ -84,7 +84,8 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 #define K_MOUSE2 108
 #endif
 
-static void EFW_StartIconFly( float x, float y ); /* FUN_100464c0 */
+static void EFW_StartIconFly( float x, float y, HSPRITE spr ); /* FUN_100464c0 */
+static void EFW_FlyDismissedButton( void );
 
 #define EFW_VGUI_MAX 6 /* FUN_100c6d70 DAT_10134894..a8 — six CommandButton slots */
 struct EfwVguiBtn
@@ -667,7 +668,6 @@ static float EFW_HopeForDraw( void )
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
-static void EFW_StartIconFly( float x, float y );
 static int EFW_HasWep( int id );
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
@@ -729,7 +729,8 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 					g_contextMode = 0;
 					g_panel48On = 0;
 					g_contextDismissAt = EFW_ClientTime();
-					EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
+					/* FUN_100463c0 flies the hit button. No button, no quad. */
+					EFW_FlyDismissedButton();
 					gEngfuncs.Con_Printf( ">>> FUN_100463c0 client context=0\n" );
 				}
 				if( g_storyCode )
@@ -853,9 +854,6 @@ static void EFW_OpenCaption( int code )
 		ScreenWidth, ScreenHeight );
 	gEngfuncs.Con_Printf( ">>> FUN_10048430 efw_pause 1\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_10048590 efw_pause 1\n" );
-	/* FUN_100463c0 copies FUN_100464c0 into DAT_100bc360 after a click.
-	   Caption Panel also leaves the interact icon, so start the 2s fly. */
-	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 	if( g_storyPauseSent != code )
 	{
 		g_storyPauseSent = code;
@@ -994,8 +992,13 @@ static void EFW_OpenStoryboard( int code )
 }
 
 /* FUN_100464c0: pack from-pos / to-pos / sizes / now into DAT_100bc360. */
-static void EFW_StartIconFly( float x, float y )
+static HSPRITE g_iconFlySpr; /* DAT_100bc380; button sprite, not a fill */
+
+static void EFW_StartIconFly( float x, float y, HSPRITE spr )
 {
+	if( !spr )
+		return;
+	g_iconFlySpr = spr;
 	g_iconFlyFrom[0] = x;
 	g_iconFlyFrom[1] = y;
 	g_iconFlyFrom[2] = 0.5f;
@@ -1006,6 +1009,40 @@ static void EFW_StartIconFly( float x, float y )
 	g_iconFlySize1 = 10.0f; /* 0x41200000 */
 	g_iconFlyAt = EFW_ClientTime();
 	g_iconFlyOn = 1;
+}
+
+/* FUN_10046900 picks the command button under the cursor. FUN_100463c0
+   copies that button into the fly. A miss leaves DAT_100bc350 clear. */
+static void EFW_FlyDismissedButton( void )
+{
+	int i;
+	int best = -1;
+	int bestD = 80 * 80;
+	int cx = ScreenWidth / 2;
+	int cy = ScreenHeight / 2;
+	EfwVguiBtn *b;
+	HSPRITE spr;
+
+	for( i = 0; i < g_vguiN; i++ )
+	{
+		int mx;
+		int my;
+		int d;
+		b = &g_vgui[i];
+		mx = b->x + b->w / 2;
+		my = b->y + b->h / 2;
+		d = ( mx - cx ) * ( mx - cx ) + ( my - cy ) * ( my - cy );
+		if( d < bestD )
+		{
+			bestD = d;
+			best = i;
+		}
+	}
+	if( best < 0 )
+		return;
+	b = &g_vgui[best];
+	spr = b->icon ? b->icon : g_hBubble;
+	EFW_StartIconFly( (float)( b->x + b->w / 2 ), (float)( b->y + b->h / 2 ), spr );
 }
 
 /* FUN_10043a10 / Panel dtor 0x10045899: DAT_1007ab5c = -1 so tiles stop. */
@@ -1019,7 +1056,7 @@ static void EFW_LeaveContext( void )
 	g_contextDismissAt = EFW_ClientTime();
 	g_storyPauseSent = 0;
 	/* FUN_100463c0: vtable+0x14 then FUN_100464c0 copies 11 dwords to DAT_100bc360. */
-	EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
+	EFW_FlyDismissedButton();
 	gEngfuncs.pfnServerCmd( "efw_pause 0\n" );
 	gEngfuncs.Con_Printf( ">>> FUN_10048740 pause=0 t=%.2f\n", g_contextDismissAt );
 	gEngfuncs.Con_Printf( ">>> FUN_10048460 efw_pause 0\n" );
@@ -1758,28 +1795,37 @@ static void EFW_DrawInventoryStrip( float fade )
 	}
 }
 
-/* FUN_10044bf0: TRIAPI SpriteTexture centered quad. Software FillRGBA stand-in
-   (same hang-risk as FUN_1001d750 Begin). */
+/* FUN_10044bf0: TRIAPI SpriteTexture centered quad of the button sprite. */
 static void EFW_DrawCenteredSpr( float cx, float cy, float w, float h )
 {
-	int x, y, iw, ih;
+	wrect_t rc;
+	int dw, dh, x, y;
 	static int s_logged;
 
-	iw = (int)( w + 0.5f );
-	ih = (int)( h + 0.5f );
-	if( iw < 1 )
-		iw = 1;
-	if( ih < 1 )
-		ih = 1;
-	x = (int)( cx - w * 0.5f );
-	y = (int)( cy - h * 0.5f );
+	(void)w;
+	(void)h;
+	if( !g_iconFlySpr )
+		return;
+	dw = SPR_Width( g_iconFlySpr, 0 );
+	dh = SPR_Height( g_iconFlySpr, 0 );
+	if( dw < 1 )
+		dw = 64;
+	if( dh < 1 )
+		dh = 64;
+	x = (int)( cx - (float)dw * 0.5f );
+	y = (int)( cy - (float)dh * 0.5f );
 	if( !s_logged )
 	{
 		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_10044bf0 x=%.1f y=%.1f w=%.1f h=%.1f\n",
-			cx, cy, w, h );
+		gEngfuncs.Con_Printf( ">>> FUN_10044bf0 x=%.1f y=%.1f spr=%d\n",
+			cx, cy, g_iconFlySpr != 0 );
 	}
-	FillRGBA( x, y, iw, ih, 200, 200, 180, 180 );
+	rc.left = 0;
+	rc.top = 0;
+	rc.right = dw;
+	rc.bottom = dh;
+	SPR_Set( g_iconFlySpr, 255, 255, 255 );
+	SPR_DrawHoles( 0, x, y, &rc );
 }
 
 /* FUN_10046590 tail: 2s cubic ease from DAT_100bc360 to DAT_100bc36c. */
@@ -1801,16 +1847,31 @@ static void EFW_DrawIconFly( void )
 		return;
 	}
 	dt = now - g_iconFlyAt;
-	/* m_flTime sticks across a chapter load, which left the stand-in
-	   quad in the middle of the view for the rest of the map. */
+	/* 0x10059ea0 is 2.0s. A stuck client clock used to pin the quad, so a
+	   run of unchanged timestamps still ends the fly. */
 	{
-		static int s_flyFrames;
-		s_flyFrames++;
-		if( dt > 2.0f || s_flyFrames > 90 )
+		static int s_stuck;
+		static float s_lastDt = -1.0f;
+		if( dt > 2.0f )
 		{
 			g_iconFlyOn = 0;
-			s_flyFrames = 0;
+			s_stuck = 0;
 			return;
+		}
+		if( dt == s_lastDt )
+		{
+			s_stuck++;
+			if( s_stuck > 90 )
+			{
+				g_iconFlyOn = 0;
+				s_stuck = 0;
+				return;
+			}
+		}
+		else
+		{
+			s_stuck = 0;
+			s_lastDt = dt;
 		}
 	}
 	t = dt * 3.3333333f;
@@ -1839,15 +1900,8 @@ static void EFW_DrawInteractPrompt( void )
 	static char s_interact[32];
 	static int s_wasStory;
 	static int s_noneLog;
-	static int s_flyKick;
 
-	/* FUN_10046590 always evaluates the DAT_100bc384 fly after the bar. */
-	if( !s_flyKick )
-	{
-		s_flyKick = 1;
-		if( !g_iconFlyOn )
-			EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
-	}
+	/* FUN_10046590 draws the fly only after FUN_100463c0 has armed it. */
 	EFW_DrawIconFly();
 
 	if( g_contextMode )
@@ -2475,8 +2529,6 @@ int CHudEfw::Draw( float flTime )
 
 	if( gHUD.m_iHideHUDDisplay & HIDEHUD_ALL )
 	{
-		if( !g_iconFlyOn )
-			EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
 		EFW_DrawIconFly();
 		EFW_DrawLetterbox( flTime );
 		return 1;
