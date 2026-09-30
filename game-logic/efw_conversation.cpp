@@ -830,6 +830,27 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 	}
 }
 
+/* client.dll 0x10044f70 fallback: same 90° pinhole as EFW_Project. */
+static int EFW_HtmlProject( CBasePlayer *pPlayer, const Vector &world, int *sx, int *sy )
+{
+	Vector delta;
+	float z, px, py;
+	if( !pPlayer || !sx || !sy )
+		return 0;
+	delta = world - pPlayer->EyePosition();
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	z = DotProduct( delta, gpGlobals->v_forward );
+	if( z < 16.0f )
+		return 0;
+	px = DotProduct( delta, gpGlobals->v_right ) / z;
+	py = DotProduct( delta, gpGlobals->v_up ) / z;
+	*sx = (int)( EFW_HTML_SW * 0.5f + px * EFW_HTML_SW * 0.5f );
+	*sy = (int)( EFW_HTML_SH * 0.5f - py * EFW_HTML_SW * 0.5f );
+	if( *sx <= 90 || *sy <= 90 || *sx >= EFW_HTML_SW - 90 || *sy >= EFW_HTML_SH - 90 )
+		return 0;
+	return 1;
+}
+
 void EFW_HtmlVguiSync( void )
 {
 	static char s_sig[512];
@@ -864,8 +885,8 @@ void EFW_HtmlVguiSync( void )
 	}
 	else if( !st->talkActive )
 	{
-		/* FUN_10044f70 world-space Talk/Give/Hide CommandButtons. HUD_Redraw
-		   never projects these in WASM, so TalkScan writes the same cmds. */
+		/* FUN_10044f70: WorldToScreen, drop the 90px edge band (0x10064f44),
+		   then the caller clamps into the 180px inset. */
 		{
 			static int s_world;
 			if( !s_world )
@@ -875,14 +896,20 @@ void EFW_HtmlVguiSync( void )
 			}
 		}
 		for( i = 0; i < st->scanCount && n < EFW_HTML_VGUI_MAX; i++ )
-			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, 320, 200 );
+		{
+			int sx, sy;
+			Vector world( st->scan[i].x, st->scan[i].y, st->scan[i].z );
+			if( !EFW_HtmlProject( pPlayer, world, &sx, &sy ) )
+				continue;
+			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, sx, sy );
+		}
 	}
 
 	sig[0] = '\0';
 	used = 0;
 	for( i = 0; i < n; i++ )
 	{
-		used += snprintf( sig + used, sizeof( sig ) - used, "%s|", btns[i].cmd );
+		used += snprintf( sig + used, sizeof( sig ) - used, "%s@%d,%d|", btns[i].cmd, btns[i].x, btns[i].y );
 		if( used >= (int)sizeof( sig ) - 1 )
 			break;
 	}
