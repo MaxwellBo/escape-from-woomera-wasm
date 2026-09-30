@@ -696,12 +696,13 @@ static void EFW_FillScan( int type, const char *name, const Vector &pos )
 	st->scanCount++;
 }
 
-/* FUN_100c43b0 table labels — same strings as client EFW_WepLabel. */
+/* FUN_100440b0: same display names the client inventory and Give
+   caption use. Slots 21, 22, and 23 are all "Phone Card". */
 static const char *EFW_HtmlWepLabel( int id )
 {
 	static const char *kNames[] = {
-		"pliers", "lever", "branch", "phone", "ID tag",
-		"red card", "green card", "blue card", "powder"
+		"Pliers", "Lever", "Branch", "SIM Card", "ID Tag",
+		"Phone Card", "Phone Card", "Phone Card", "Washing Powder"
 	};
 	if( id < 16 || id > 24 )
 		return "item";

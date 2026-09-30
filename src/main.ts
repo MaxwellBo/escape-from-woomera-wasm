@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll200`;
+    return `${url}?v=efw-dll201`;
   return url;
 }
 
@@ -632,7 +632,6 @@ function applyDiaryHud(text: string): boolean {
   const fade = text.match(/>>> FUN_1001db00 diaryfade=([\d.]+) inv=([\d.]+) veil=([\d.]+) page=(\d+)/);
   if (fade) {
     const df = Number(fade[1]);
-    const inf = Number(fade[2]);
     const page = fade[4];
     const el = document.getElementById('efw-diary');
     const label = document.getElementById('efw-diary-label');
@@ -642,10 +641,11 @@ function applyDiaryHud(text: string): boolean {
       el.style.setProperty('--efw-diary-fade', String(df));
     }
     if (label) label.textContent = `DIARY  ${page}`;
+    /* FUN_10043dd0 draws the names in the client HUD. The HTML copy
+       sat the two labels on top of each other. */
     if (inv) {
-      inv.hidden = inf <= 0;
-      inv.style.setProperty('--efw-fade', String(inf));
-      inv.classList.toggle('full', inf >= 1);
+      inv.hidden = true;
+      inv.replaceChildren();
     }
     return false;
   }
@@ -713,45 +713,13 @@ function applyLetterHud(text: string): boolean {
 }
 
 function applyInvHud(text: string): boolean {
-  const fadeOnly = text.match(/>>> FUN_10043dd0 fade=([\d.]+)(?: n=(\d+)(?: (.*))?)?$/);
   const el = document.getElementById('efw-inv');
   if (!el) return false;
-  if (fadeOnly) {
-    const fade = Number(fadeOnly[1]);
-    el.hidden = fade <= 0;
-    el.style.setProperty('--efw-fade', String(fade));
-    el.classList.toggle('full', fade >= 1);
-    if (fade >= 1 && fadeOnly[2]) {
-      const n = Number(fadeOnly[2]);
-      const names = (fadeOnly[3] || '').split(',').map((s) => s.trim()).filter(Boolean);
-      el.innerHTML = '';
-      names.forEach((name) => {
-        const i = document.createElement('i');
-        i.textContent = name;
-        el.appendChild(i);
-      });
-      if (n <= 0) el.innerHTML = '';
-    }
-    if (fade < 1) el.classList.remove('full');
-    return false;
-  }
-  const m = text.match(/>>> FUN_10043dd0 n=(\d+)(?: (.*))?$/);
-  if (!m) return false;
-  const n = Number(m[1]);
-  const names = (m[2] || '').split(',').map((s) => s.trim()).filter(Boolean);
-  el.innerHTML = '';
-  if (n <= 0) {
+  /* Names are DrawHudString in FUN_10043dd0, 128px apart. */
+  if (text.includes('>>> FUN_10043dd0')) {
     el.hidden = true;
-    return false;
+    el.replaceChildren();
   }
-  names.forEach((name) => {
-    const i = document.createElement('i');
-    i.textContent = name;
-    el.appendChild(i);
-  });
-  el.hidden = false;
-  el.classList.add('full');
-  el.style.setProperty('--efw-fade', '1');
   return false;
 }
 

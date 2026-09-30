@@ -1440,12 +1440,13 @@ static int EFW_HasWep( int id )
 	return g_weaponId == id;
 }
 
-/* FUN_100c43b0 table 0x100f81e0, ids 16..24 */
+/* FUN_100440b0: display names at 0x10064d2c[id]. Slots 21, 22, and 23
+   all point at the same "Phone Card" string. */
 static const char *EFW_WepLabel( int id )
 {
 	static const char *kNames[] = {
-		"pliers", "lever", "branch", "phone", "ID tag",
-		"red card", "green card", "blue card", "powder"
+		"Pliers", "Lever", "Branch", "SIM Card", "ID Tag",
+		"Phone Card", "Phone Card", "Phone Card", "Washing Powder"
 	};
 	if( id < 16 || id > 24 )
 		return "item";
