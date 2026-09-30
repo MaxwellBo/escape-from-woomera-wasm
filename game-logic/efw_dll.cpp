@@ -2370,6 +2370,7 @@ static float s_vz;
 static int s_oldAirButtons;
 static int s_inDuck;
 static float s_duckTime;
+static float s_duckStandZ;
 static int s_floorSet;
 static float s_floorZ;
 static float s_jumpT;
@@ -2521,6 +2522,16 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 	*wishspeed = len;
 }
 
+/* PM_Duck drops the origin by 18 and switches to the head hull. A standing
+   trace at that origin starts in the floor, and the step returns without
+   moving. */
+static int EFW_PlayerHull( CBasePlayer *pPlayer )
+{
+	if( pPlayer && ( pPlayer->pev->flags & FL_DUCKING ) )
+		return head_hull;
+	return human_hull;
+}
+
 static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int side )
 {
 	Vector wish;
@@ -2529,13 +2540,15 @@ static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int si
 	float speed;
 	TraceResult tr;
 	char line[96];
+	int hull;
 	static int s_hvLog;
 
 	EFW_WishMove( pPlayer, fwd, side, &wish, &speed );
 	EFW_AirAccelerate( wish.x, wish.y, speed, dt );
 	start = pPlayer->pev->origin;
 	dest = start + Vector( s_hvx * dt, s_hvy * dt, 0 );
-	UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+	hull = EFW_PlayerHull( pPlayer );
+	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
 	if( tr.fStartSolid )
 		return start;
 	if( tr.flFraction < 1.0f )
@@ -2559,7 +2572,7 @@ static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int si
 		if( into < 0.0f )
 			left = left - tr.vecPlaneNormal * into;
 		left = left + tr.vecPlaneNormal;
-		UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, human_hull, pPlayer->edict(), &slide );
+		UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &slide );
 		dest = slide.fStartSolid ? hit : slide.vecEndPos;
 	}
 	else
@@ -2685,9 +2698,10 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		{
 			s_duckRun++;
 			snprintf( line, sizeof( line ),
-				"efw: duckrun hv=%.0f %.0f wish=%.0f at %.0f %.0f\n",
+				"efw: duckrun hv=%.0f %.0f wish=%.0f at %.0f %.0f z=%.1f viewz=%.0f\n",
 				s_hvx, s_hvy, wishspeed,
-				pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+				pPlayer->pev->origin.z, pPlayer->pev->view_ofs.z );
 			EFW_LogLine( line );
 		}
 	}
@@ -2717,29 +2731,30 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		TraceResult down;
 		Vector step( 0, 0, 18 );
 		Vector start = pPlayer->pev->origin;
+		int hull = EFW_PlayerHull( pPlayer );
 		int stepped = 0;
-		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
 		if( tr.fStartSolid )
 		{
-			UTIL_TraceHull( start, start + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+			UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
 			if( over.fStartSolid || over.flFraction < 1.0f )
 				return;
 			start = over.vecEndPos;
 			dest = dest + step;
-			UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+			UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
 			if( tr.fStartSolid )
 				return;
 		}
 		if( tr.flFraction < 1.0f )
 		{
-			UTIL_TraceHull( start, start + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+			UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
 			if( !over.fStartSolid && over.flFraction >= 1.0f )
 			{
-				UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
+				UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, hull, pPlayer->edict(), &down );
 				if( !down.fStartSolid && down.flFraction > 0.2f )
 				{
 					TraceResult drop;
-					UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, human_hull, pPlayer->edict(), &drop );
+					UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
 					if( !drop.fStartSolid )
 					{
 						dest = drop.vecEndPos;
@@ -2755,7 +2770,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				if( into < 0.0f )
 					left = left - tr.vecPlaneNormal * into;
 				left = left + tr.vecPlaneNormal; /* stay a unit out of the brush */
-				UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, human_hull, pPlayer->edict(), &over );
+				UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
 				if( over.fStartSolid )
 					return;
 				dest = over.vecEndPos;
@@ -2765,7 +2780,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				{
 					TraceResult gap;
 					Vector back = dest + tr.vecPlaneNormal * 4.0f;
-					UTIL_TraceHull( dest, back, dont_ignore_monsters, human_hull, pPlayer->edict(), &gap );
+					UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
 					if( !gap.fStartSolid )
 						dest = gap.vecEndPos;
 				}
@@ -2796,7 +2811,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 
 		floorEnd = dest;
 		floorEnd.z -= 2.0f;
-		UTIL_TraceHull( dest, floorEnd, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
+		UTIL_TraceHull( dest, floorEnd, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
 		if( down.fStartSolid )
 			pPlayer->pev->flags |= FL_ONGROUND;
 		else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
@@ -2873,6 +2888,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		{
 			s_inDuck = 1;
 			s_duckTime = 0.0f;
+			s_duckStandZ = pPlayer->pev->origin.z;
 		}
 		if( s_inDuck )
 		{
@@ -2965,7 +2981,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			top.z = s_floorZ;
 			bot = top;
 			bot.z = s_floorZ - 512.0f;
-			UTIL_TraceHull( top, bot, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
+			UTIL_TraceHull( top, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
 			s_airborne = 0;
 			s_vz = 0.0f;
 			if( !down.fStartSolid && down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
@@ -2985,7 +3001,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		}
 		else
 		{
-			UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+			UTIL_TraceHull( start, dest, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &tr );
 			if( !tr.fStartSolid )
 			{
 				if( tr.flFraction < 1.0f && s_vz > 0.0f && tr.vecPlaneNormal.z < 0.7f )
@@ -3000,6 +3016,13 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 
 	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
 		pPlayer->pev->view_ofs.z = 28.0f;
+	else if( ( buttons & IN_DUCK ) && ( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+	{
+		/* The engine crouch stores VEC_DUCK_VIEW after it lowers the origin.
+		   view_ofs -6 matches that eye only while the origin is still standing. */
+		if( pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
+			pPlayer->pev->view_ofs.z = 12.0f;
+	}
 	/* Sample the floor only while the hull is down. A falling origin
 	   used to become the next takeoff height. */
 	if( !s_airborne && !( buttons & IN_JUMP ) && ( pPlayer->pev->flags & FL_ONGROUND ) )
