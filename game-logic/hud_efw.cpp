@@ -2391,7 +2391,6 @@ int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
 	int r, g, b;
-	int hope;
 
 	s_drawN++;
 	if( s_drawN <= 8 || ( s_drawN % 120 ) == 1 )
@@ -2472,19 +2471,16 @@ int CHudEfw::Draw( float flTime )
 	UnpackRGB( r, g, b, RGB_YELLOWISH );
 	{
 		float hopeF = EFW_HopeForDraw();
-		hope = (int)( hopeF + 0.5f );
-		{
-			/* 0x1001e1ab: FUN_10047660(1), ftol, *0.1, ftol, then
-			   FUN_1001daa0(0x14, 0x78, ticks). No HOPE word, no digits,
-			   and no TALK label beside the bars. */
-			EFW_DrawHopeTicks( hope / 10 );
-			{
-				static int s_hopeDraw;
-				s_hopeDraw++;
-				if( s_hopeDraw == 1 || ( s_hopeDraw % 60 ) == 0 )
-					gEngfuncs.Con_Printf( "EFWVGUI HOPE %d\n", hope );
-			}
-		}
+		int whole;
+		int ticks;
+		/* 0x1001e1ab: FUN_10047660(1), ftol, *0.1, ftol, then
+		   FUN_1001daa0(0x14, 0x78, ticks). No HOPE word, no digits,
+		   and no TALK label beside the bars. */
+		if( hopeF < 0.0f )
+			hopeF = 0.0f;
+		whole = (int)hopeF;
+		ticks = (int)( (float)whole * 0.1f );
+		EFW_DrawHopeTicks( ticks );
 	}
 
 	EFW_DrawArtsClock( flTime );
