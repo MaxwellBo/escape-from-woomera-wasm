@@ -1122,32 +1122,39 @@ void CRefugee::IdleThink( void )
 		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
-			float beforeYaw;
-			int yawSpeed;
-
-			/* vtable+0x1a8(1) every close think. It does not clear the
-			   move goal. ResetSequenceInfo sets animtime to now, so
-			   StudioFrameAdvance(0) adds nothing and the idle pose stays
-			   on the frame SetActivity just chose. The host-interval
-			   advance would keep playing it; framerate 0 is that zero step.
-			   The next IdleThink entry restores framerate. Move() would
-			   then ChangeYaw; that call is yawSpeed * frametime * 10.
-			   SetActivity(ACT_IDLE) just stored yaw_speed 70. */
+			/* 0x100c6654: movement activity ACT_WALK and dist < 100 calls
+			   vtable+0x1a8(ACT_IDLE). Move() at 0x1005d500 runs only in the
+			   100..300 band. ResetSequenceInfo sets animtime to now, so the
+			   host-interval advance must not play that sequence; framerate 0
+			   is that zero step. The next IdleThink entry restores it. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
-			yawSpeed = (int)pev->yaw_speed;
-			if( yawSpeed < 1 )
-				yawSpeed = 70;
-			beforeYaw = pev->angles.y;
-			MakeIdealYaw( pPlayer->pev->origin );
-			EFW_PeChangeYaw( this, yawSpeed );
 			{
 				static int s_close;
-				if( s_close < 6 && EFW_FStrEq( tn, "Amir" ) )
+				static float s_yaw;
+				static float s_px, s_py;
+				static int s_held;
+				if( s_close < 3 )
 				{
 					s_close++;
-					EFW_DebugPrint( "close idle %s frame=%.1f yaw %.0f -> %.0f dist=%.0f spd=%d",
-						tn, pev->frame, beforeYaw, pev->angles.y, dist, yawSpeed );
+					s_yaw = pev->angles.y;
+					s_px = pPlayer->pev->origin.x;
+					s_py = pPlayer->pev->origin.y;
+					EFW_DebugPrint( "close idle %s yaw=%.0f dist=%.0f player=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", pev->angles.y, dist,
+						pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				}
+				else if( !s_held )
+				{
+					float dx = pPlayer->pev->origin.x - s_px;
+					float dy = pPlayer->pev->origin.y - s_py;
+					if( dx * dx + dy * dy > 80.0f * 80.0f )
+					{
+						s_held = 1;
+						EFW_DebugPrint( "close hold %s yaw %.0f -> %.0f player=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", s_yaw, pev->angles.y,
+							pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+					}
 				}
 			}
 		}
