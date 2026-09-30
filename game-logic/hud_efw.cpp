@@ -667,6 +667,7 @@ static float EFW_HopeForDraw( void )
 static void EFW_ClearStoryboard( void );
 static void EFW_ClearCaption( void );
 static void EFW_LoadTextScheme( void );
+static void EFW_StartIconFly( float x, float y );
 static int EFW_HasWep( int id );
 
 static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
@@ -705,12 +706,32 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		paused = g_clientHudInt[6];
 		{
 			static int s_lastPause = -1;
+			/* FUN_10048710 sets DAT_100bc338 on the client before the
+			   command buttons draw. The bar click reaches the server as
+			   efw_context, which pauses; hudInt[6] is how this DLL learns
+			   that. FUN_10046590 then skips the name bar. A storyboard or
+			   caption sets its own flag before the same pause bit. */
+			if( s_lastPause == 0 && paused == 1 && !g_storyCode && g_captionLen == 0 )
+			{
+				g_contextMode = 1;
+				g_contextOpenedAt = EFW_ClientTime();
+				gEngfuncs.Con_Printf( ">>> FUN_10046370 client context=1\n" );
+			}
 			/* Falling edge of hudInt[6]: Panel dtor DAT_1007ab5c = -1. */
 			if( s_lastPause == 1 && paused == 0 )
 			{
 				/* FUN_10048460 / FUN_100485d0 Panel dtor ClientCmd pause 0. */
 				gEngfuncs.Con_Printf( ">>> FUN_10048460 efw_pause 0\n" );
 				gEngfuncs.Con_Printf( ">>> FUN_100485d0 efw_pause 0\n" );
+				/* FUN_10048740 then FUN_100463c0: clear context and fly the icon. */
+				if( g_contextMode )
+				{
+					g_contextMode = 0;
+					g_panel48On = 0;
+					g_contextDismissAt = EFW_ClientTime();
+					EFW_StartIconFly( (float)( ScreenWidth / 2 ), (float)( ScreenHeight / 2 ) );
+					gEngfuncs.Con_Printf( ">>> FUN_100463c0 client context=0\n" );
+				}
 				if( g_storyCode )
 					EFW_ClearStoryboard();
 				if( g_captionLen )
