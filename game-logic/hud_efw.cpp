@@ -54,6 +54,7 @@ static int g_scanCount;
 static HSPRITE g_hBubble;
 static HSPRITE g_hHide;
 static HSPRITE g_hPliers;
+static HSPRITE g_hItem[9]; /* ids 16..24, weapon_s from sprites/weapon_efw_*.txt */
 static HSPRITE g_hGive;
 static HSPRITE g_hStory;
 static HSPRITE g_hGrey; /* FUN_100436c0 sprites/efw_grey.spr */
@@ -1325,6 +1326,7 @@ int CHudEfw::VidInit( void )
 	g_hBubble = 0;
 	g_hHide = 0;
 	g_hPliers = 0;
+	memset( g_hItem, 0, sizeof( g_hItem ) );
 	g_hGive = 0;
 	return 1;
 }
@@ -1740,7 +1742,34 @@ static void EFW_DrawBoxBorder( int x, int y, int w, int h, int r, int g, int b, 
 	FillRGBA( x + w - t, y + t, t, inner, r, g, b, a );
 }
 
-/* FUN_10043a70: 64x64 dark tile + 3px grey frame + optional SPR at (x-32,y-32). */
+/* weapon_s sprite named by sprites/weapon_efw_*.txt. Slots 21..23 share
+   efw_item_phonecard.spr. FUN_10043a70 draws [weapon+0xa8], which
+   LoadWeaponSprites fills from that weapon_s line. */
+static HSPRITE EFW_ItemIcon( int id )
+{
+	static const char *kPath[] = {
+		"sprites/efw_item_pliers.spr",
+		"sprites/efw_item_lever.spr",
+		"sprites/efw_item_branch.spr",
+		"sprites/efw_item_simcard.spr",
+		"sprites/efw_item_idtag.spr",
+		"sprites/efw_item_phonecard.spr",
+		"sprites/efw_item_phonecard.spr",
+		"sprites/efw_item_phonecard.spr",
+		"sprites/efw_item_washingpowder.spr"
+	};
+	int i;
+	if( id < 16 || id > 24 )
+		return 0;
+	i = id - 16;
+	if( !g_hItem[i] )
+		g_hItem[i] = EFW_LoadSpr( kPath[i] );
+	return g_hItem[i];
+}
+
+/* FUN_10043a70: 64x64 dark tile + 3px grey frame, then SPR_Draw of
+   weapon+0xa8 (hActive) at (x-32, y-32). The call is pfnSPR_Draw
+   (0x100a5004), not DrawHoles. Rect is NULL, so the whole 128 sprite. */
 static void EFW_DrawInvIcon( int x, int y, HSPRITE icon )
 {
 	wrect_t rc;
@@ -1760,7 +1789,7 @@ static void EFW_DrawInvIcon( int x, int y, HSPRITE icon )
 	rc.right = dw;
 	rc.bottom = dh;
 	SPR_Set( icon, 255, 255, 255 );
-	SPR_DrawHoles( 0, x - 32, y - 32, &rc );
+	SPR_Draw( 0, x - 32, y - 32, &rc );
 }
 
 /* FUN_10043dd0: bottom inventory strip when the diary fade is up.
@@ -1805,19 +1834,19 @@ static void EFW_DrawInventoryStrip( float fade )
 		HSPRITE icon;
 		if( !EFW_HasWep( id ) )
 			continue;
-		icon = ( id == 16 ) ? g_hPliers : 0;
+		icon = EFW_ItemIcon( id );
 		EFW_DrawInvIcon( x, y, icon );
 		gHUD.DrawHudString( x, y - 45, x + 64, EFW_WepLabel( id ), 255, 255, 255 );
-		if( namesN < (int)sizeof( names ) - 16 )
-			namesN += snprintf( names + namesN, sizeof( names ) - namesN, "%s%s",
-				n ? "," : "", EFW_WepLabel( id ) );
+		if( namesN < (int)sizeof( names ) - 24 )
+			namesN += snprintf( names + namesN, sizeof( names ) - namesN, "%s%s:%d",
+				n ? "," : "", EFW_WepLabel( id ), (int)icon );
 		n++;
 		x += 128;
 	}
 	if( ( 100 + n ) != s_invLog )
 	{
 		s_invLog = 100 + n;
-		gEngfuncs.Con_Printf( ">>> FUN_10043dd0 fade=1.00 n=%d %s\n", n, names );
+		gEngfuncs.Con_Printf( ">>> FUN_10043a70 %s\n", names );
 	}
 }
 
