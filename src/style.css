@@ -78,7 +78,10 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   width: 100%;
   aspect-ratio: 4 / 3;
   overflow: hidden;
-  border: 1px solid #fff;
+  /* Outline keeps the 800×600 client area; a border shrinks it to 798×598
+     and FUN_10043750 clips the storyboard by a pixel. */
+  border: none;
+  outline: 1px solid #fff;
 }
 
 canvas#canvas {
