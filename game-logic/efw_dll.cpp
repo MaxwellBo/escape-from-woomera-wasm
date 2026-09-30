@@ -3012,6 +3012,14 @@ static void EFW_ViewRoll( CBasePlayer *pPlayer )
 	pPlayer->pev->angles.y = pPlayer->pev->v_angle.y;
 	pPlayer->pev->angles.z = roll;
 	pPlayer->pev->fixangle = 1;
+	{
+		static float s_sentRoll;
+		if( roll > s_sentRoll + 0.15f || roll < s_sentRoll - 0.15f )
+		{
+			s_sentRoll = roll;
+			CLIENT_COMMAND( pPlayer->edict(), "efw_vroll %.2f\n", roll );
+		}
+	}
 	if( s_log < 6 && ( roll > 0.5f || roll < -0.5f ) )
 	{
 		s_log++;

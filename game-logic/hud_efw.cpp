@@ -449,8 +449,14 @@ static void EFW_PDuck_f( void )
 	gEngfuncs.Con_Printf( "efw: pduck cmd %d\n", s_pmDuck );
 }
 
-/* Deltas from the browser pointer. Applied once, then held as the view
-   so a later fixangle cannot snap the usercmd back to the spawn yaw. */
+static float s_viewRoll;
+
+/* Server V_CalcRoll. The refdef copies these viewangles, and simvel is 0. */
+static void EFW_VRoll_f( void )
+{
+	s_viewRoll = ( gEngfuncs.Cmd_Argc() > 1 ) ? (float)atof( gEngfuncs.Cmd_Argv( 1 ) ) : 0.0f;
+	gEngfuncs.Con_Printf( "efw: vroll cmd %.2f\n", s_viewRoll );
+}
 static void EFW_PLook_f( void )
 {
 	s_lookDyaw += ( gEngfuncs.Cmd_Argc() > 1 ) ? (float)atof( gEngfuncs.Cmd_Argv( 1 ) ) : 0.0f;
@@ -544,11 +550,21 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 		/* viewangles: pitch, yaw, roll. GoldSrc index order. */
 		ang[0] = s_lookPitch;
 		ang[1] = s_lookYaw;
-		ang[2] = 0.0f;
+		ang[2] = s_viewRoll;
 		gEngfuncs.SetViewAngles( ang );
 		cmd->viewangles[0] = ang[0];
 		cmd->viewangles[1] = ang[1];
-		cmd->viewangles[2] = 0.0f;
+		cmd->viewangles[2] = s_viewRoll;
+	}
+	else
+	{
+		gEngfuncs.GetViewAngles( ang );
+		if( ang[2] != s_viewRoll )
+		{
+			ang[2] = s_viewRoll;
+			gEngfuncs.SetViewAngles( ang );
+		}
+		cmd->viewangles[2] = s_viewRoll;
 	}
 	if( n <= 4 || ( n % 120 ) == 0 || ( airLog > 0 && airLog <= 8 )
 		|| ( ( s_pmFwd || s_pmSide || s_lookOn ) && ( n % 30 ) == 0 ) )
@@ -1384,6 +1400,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
 	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );
 	gEngfuncs.pfnAddCommand( "efw_pduck", EFW_PDuck_f );
+	gEngfuncs.pfnAddCommand( "efw_vroll", EFW_VRoll_f );
 	EFW_HudCtor();
 	m_iFlags |= HUD_ACTIVE;
 	gHUD.AddHudElem( this );
