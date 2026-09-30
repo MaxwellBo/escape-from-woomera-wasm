@@ -554,26 +554,6 @@ def main() -> None:
         "\t\tent = gEngfuncs.GetEntityByIndex( g_iUser2 );\n"
         "\t}\n",
     )
-    once(
-        view_cpp,
-        "\t\tsteptime = pparams->time - lasttime;\n"
-        "\n"
-        "\t\tif( steptime < 0 )\n"
-        "\t\t//FIXME\t\tI_Error( \"steptime < 0\" );\n"
-        "\t\t\tsteptime = 0;\n",
-        "\t\tsteptime = pparams->time - lasttime;\n"
-        "\n"
-        "\t\tif( steptime < 0 )\n"
-        "\t\t//FIXME\t\tI_Error( \"steptime < 0\" );\n"
-        "\t\t\tsteptime = 0;\n"
-        "\t\t/* cl.time does not advance, so this delta stays 0 and the eye\n"
-        "\t\t   never catches a step. EFW_OVERLAY */\n"
-        "\t\tif( steptime < 0.001f )\n"
-        "\t\t{\n"
-        "\t\t\textern void EFW_StairClock( float frametime, float *steptime, float simz, float oldz );\n"
-        "\t\t\tEFW_StairClock( pparams->frametime, &steptime, pparams->simorg[2], oldz );\n"
-        "\t\t}\n",
-    )
 
     input_cpp = cldll / "input.cpp"
     once(

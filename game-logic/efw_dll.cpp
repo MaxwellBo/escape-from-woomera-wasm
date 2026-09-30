@@ -2482,19 +2482,60 @@ static void EFW_AirAccelerate( float wishx, float wishy, float wishspeed, float 
 }
 
 /* PM_Friction on the ground. sv_friction 4, sv_stopspeed 100, player
-   friction 1. Releasing the keys used to zero s_hv in one pump. */
-static void EFW_GroundFriction( float dt )
+   friction 1. A point 16 units ahead and 34 down from the feet that
+   misses the world multiplies friction by edgefriction (2), so a coast
+   onto a tall lip stops shorter. */
+static void EFW_GroundFriction( CBasePlayer *pPlayer, float dt )
 {
 	float speed;
 	float control;
 	float drop;
 	float newspeed;
+	float friction;
 
 	speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
 	if( speed < 0.1f )
 		return;
+	friction = 4.0f;
+	if( pPlayer )
+	{
+		Vector feet;
+		Vector stop;
+		TraceResult tr;
+		int hull;
+		float edge;
+
+		feet = pPlayer->pev->origin;
+		feet.x += ( s_hvx / speed ) * 16.0f;
+		feet.y += ( s_hvy / speed ) * 16.0f;
+		hull = ( pPlayer->pev->flags & FL_DUCKING ) ? head_hull : human_hull;
+		feet.z += ( hull == head_hull ) ? -18.0f : -36.0f;
+		stop = feet;
+		stop.z -= 34.0f;
+		UTIL_TraceHull( feet, stop, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( !tr.fStartSolid && tr.flFraction >= 1.0f )
+		{
+			static int s_edgeLog;
+			char line[128];
+
+			edge = CVAR_GET_FLOAT( "edgefriction" );
+			if( edge < 0.05f )
+				edge = 2.0f;
+			friction *= edge;
+			if( s_edgeLog < 6 )
+			{
+				s_edgeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: edge fr=%.0f spd=%.0f at %.0f %.0f z=%.1f\n",
+					friction, speed,
+					pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+					pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+	}
 	control = ( speed < 100.0f ) ? 100.0f : speed;
-	drop = control * 4.0f * dt;
+	drop = control * friction * dt;
 	newspeed = speed - drop;
 	if( newspeed < 0.0f )
 		newspeed = 0.0f;
@@ -3058,7 +3099,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		float slice = left;
 		if( slice > 0.01f )
 			slice = 0.01f;
-		EFW_GroundFriction( slice );
+		EFW_GroundFriction( pPlayer, slice );
 		if( wishspeed > 0.0f )
 			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
 		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
