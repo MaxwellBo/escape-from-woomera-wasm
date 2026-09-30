@@ -2368,16 +2368,53 @@ static void EFW_DrawDiarySpr( int page, float fade )
 		dw = 256;
 	if( dh < 1 )
 		dh = 256;
-	/* FUN_1001d750: x = width-sprW, y = height-sprW, y2 = y + sprH*fade. */
+	/* FUN_1001d750: x = width-sprW, y = height-sprW, y2 = y + sprH*fade.
+	   UV is 0..1 across that quad, so the page squashes while it wipes
+	   instead of clipping the bottom lines. RGB 1,1,1, RenderMode normal. */
 	dx = ScreenWidth - dw;
 	dy = ScreenHeight - dw;
-	vis = (int)( (float)dh * fade );
-	if( vis < 1 )
-		return;
-	/* FUN_1001d750: x = width-sprW, y = height-sprW, y2 = y + sprH*fade,
-	   RGB 1,1,1, param_9 = diary SPR. */
-	EFW_DrawTriQuad( (float)dx, (float)dy, (float)( dx + dw ), (float)( dy + vis ),
-		1.0f, 1.0f, 1.0f, 1.0f, g_hDiary );
+	{
+		float y2 = (float)dy + (float)dh * fade;
+		struct model_s *model;
+		static int s_tri = -1;
+
+		if( y2 <= (float)dy + 0.5f )
+			return;
+		model = (struct model_s *)gEngfuncs.GetSpritePointer( g_hDiary );
+		if( gEngfuncs.pTriAPI && model
+			&& gEngfuncs.pTriAPI->SpriteTexture( model, 0 ) )
+		{
+			if( s_tri != 1 )
+			{
+				s_tri = 1;
+				gEngfuncs.Con_Printf( ">>> FUN_1001d750 diary uv fade=%.2f\n", fade );
+			}
+			gEngfuncs.pTriAPI->RenderMode( kRenderNormal );
+			gEngfuncs.pTriAPI->CullFace( TRI_NONE );
+			gEngfuncs.pTriAPI->Color4f( 1.0f, 1.0f, 1.0f, 1.0f );
+			gEngfuncs.pTriAPI->Begin( TRI_QUADS );
+			gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 0.0f );
+			gEngfuncs.pTriAPI->Vertex3f( (float)dx, (float)dy, 0.5f );
+			gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 0.0f );
+			gEngfuncs.pTriAPI->Vertex3f( (float)( dx + dw ), (float)dy, 0.5f );
+			gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 1.0f );
+			gEngfuncs.pTriAPI->Vertex3f( (float)( dx + dw ), y2, 0.5f );
+			gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 1.0f );
+			gEngfuncs.pTriAPI->Vertex3f( (float)dx, y2, 0.5f );
+			gEngfuncs.pTriAPI->End();
+			return;
+		}
+		if( s_tri != 0 )
+		{
+			s_tri = 0;
+			gEngfuncs.Con_Printf( ">>> FUN_1001d750 diary holes fade=%.2f\n", fade );
+		}
+		vis = (int)( (float)dh * fade );
+		if( vis < 1 )
+			return;
+		EFW_DrawTriQuad( (float)dx, (float)dy, (float)( dx + dw ), (float)( dy + vis ),
+			1.0f, 1.0f, 1.0f, 1.0f, g_hDiary );
+	}
 }
 
 /* DAT_100a95b8 veil, DAT_100a95bc inventory, DAT_100a95c4 diary SPR. */
