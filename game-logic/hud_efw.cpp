@@ -525,6 +525,18 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 		center = CVAR_GET_FLOAT( "v_centermove" );
 		if( center < 0.01f )
 			center = 0.15f;
+		{
+			static int s_wait;
+			if( s_wait < 4 && fwd > 50.0f )
+			{
+				s_wait++;
+				gEngfuncs.Con_Printf(
+					"efw: drift wait ground=%d mlook=%d fwd=%.0f need=%.0f move=%.2f dt=%.3f pitch=%.1f\n",
+					pparams->onground, ( in_mlook.state & 1 ) ? 1 : 0,
+					fwd, maxfwd, s_driftMove, pparams->frametime,
+					pparams->cl_viewangles[0] );
+			}
+		}
 		if( s_driftMove > center )
 			EFW_StartPitchDrift();
 		return;
@@ -561,6 +573,8 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 	gEngfuncs.GetViewAngles( ang );
 	ang[0] = pparams->cl_viewangles[0];
 	gEngfuncs.SetViewAngles( ang );
+	/* The look latch writes this pitch on the next CreateMove. */
+	s_lookPitch = pparams->cl_viewangles[0];
 	if( s_log < 8 && ( pparams->cl_viewangles[0] > s_logged + 0.5f
 		|| pparams->cl_viewangles[0] < s_logged - 0.5f ) )
 	{
@@ -652,20 +666,15 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 	if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f || s_lookOn )
 	{
 		/* A look delta is the mouse path that calls V_StopPitchDrift.
-		   With no new delta, keep the pitch CalcRefdef drifted. */
+		   Later frames keep the latched pitch, which DriftPitch updates. */
 		if( s_lookDyaw != 0.0f || s_lookDpitch != 0.0f )
 			EFW_StopPitchDrift();
-		gEngfuncs.GetViewAngles( ang );
 		if( !s_lookOn )
 		{
+			gEngfuncs.GetViewAngles( ang );
 			s_lookYaw = ang[1];
 			s_lookPitch = ang[0];
 			s_lookOn = 1;
-		}
-		else if( s_lookDyaw == 0.0f && s_lookDpitch == 0.0f )
-		{
-			s_lookYaw = ang[1];
-			s_lookPitch = ang[0];
 		}
 		s_lookYaw += s_lookDyaw;
 		s_lookPitch += s_lookDpitch;
