@@ -153,6 +153,14 @@ canvas#canvas {
   pointer-events: auto;
 }
 
+/* Page turns stay clickable. The original client does not paint [ ] Close. */
+.efw-diary-nav button {
+  background: transparent;
+  color: transparent;
+  border: none;
+  box-shadow: none;
+}
+
 .efw-prevq {
   position: absolute;
   left: 50%;
@@ -330,6 +338,7 @@ canvas#canvas {
   line-height: 1.5;
 }
 
+.efw-hint[hidden],
 .efw-letter[hidden],
 .efw-vgui[hidden],
 .efw-hope[hidden],

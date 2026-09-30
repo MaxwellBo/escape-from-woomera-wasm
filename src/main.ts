@@ -673,7 +673,8 @@ function applyContextHud(text: string): boolean {
     return false;
   }
   if (text.includes('>>> FUN_10046590 none')) {
-    if (none) none.hidden = false;
+    /* FUN_10046590 already DrawHudString's this line. */
+    if (none) none.hidden = true;
     return false;
   }
   return false;
@@ -682,16 +683,10 @@ function applyContextHud(text: string): boolean {
 function applyInteractHud(text: string): boolean {
   const m = text.match(/>>> FUN_10046590 interact=(.*)$/);
   if (!m) return false;
-  const name = m[1].trim();
   const el = document.getElementById('efw-interact');
-  const span = document.getElementById('efw-interact-name');
-  if (!el) return false;
-  if (!name) {
-    el.hidden = true;
-    return false;
-  }
-  el.hidden = false;
-  if (span) span.textContent = name === '-' ? '' : name;
+  /* FUN_10046590 paints the name bar and the click line. The HTML copy
+     sat a second caption on that bar. */
+  if (el) el.hidden = true;
   return false;
 }
 
