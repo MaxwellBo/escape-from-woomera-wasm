@@ -1128,7 +1128,8 @@ function onServerActivateSeen() {
   /* First map: keep the world presenting. r_norefresh 1 here used to paint
      a black canvas for the whole session because HUD_Redraw often never
      ran. Only blank the plaque during CHANGE_LEVEL. */
-  runEngineCmd('r_drawviewmodel 0');
+  /* GoldSrc draws the held view model (v_idtag and the rest). */
+  runEngineCmd('r_drawviewmodel 1');
   if (changing) {
     runEngineCmd('r_norefresh 1');
   } else {
@@ -1730,7 +1731,7 @@ async function boot() {
       '+r_drawentities',
       '1',
       '+r_drawviewmodel',
-      '0',
+      '1',
       '+r_drawparticles',
       '0',
       '+r_norefresh',
