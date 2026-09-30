@@ -3033,6 +3033,19 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	/* Skip HUD/scan/look-use until StartFrame has proven it can return. */
 	if( s_liveTicks < 8 )
 		return;
+	/* DAT_10114740 starts at 1. The first player think on level 1
+	   (FUN_100c5b80 returns 0) sends menu 0x49 and clears the byte.
+	   Level 2 and 3 leave it set. The pawn has to be live first so
+	   the client has hooked EFW_Menu. */
+	{
+		static int s_introFlag = 1;
+		if( s_introFlag && EFW_MapLevel() == 0 )
+		{
+			s_introFlag = 0;
+			EFW_DebugPrint( ">>> FUN_1007db60 intro=0x49" );
+			EFW_FailOrNarrate( pPlayer, 0x49 );
+		}
+	}
 	if( EFW_GetHudInt( 6 ) )
 		pPlayer->pev->movetype = MOVETYPE_NONE;
 	if( s_inUseLatch )

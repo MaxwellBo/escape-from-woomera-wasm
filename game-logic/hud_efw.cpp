@@ -995,6 +995,8 @@ static void EFW_OpenStoryboard( int code )
 		gEngfuncs.pfnServerCmd( "efw_pause 1\n" );
 	}
 	g_hStory = EFW_LoadSpr( spr );
+	gEngfuncs.Con_Printf( ">>> FUN_10047830 code=0x%x spr=%d %s\n",
+		code, g_hStory != 0, spr ? spr : "" );
 }
 
 /* FUN_100464c0: pack from-pos / to-pos / sizes / now into DAT_100bc360. */
