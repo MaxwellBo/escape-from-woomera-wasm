@@ -132,19 +132,25 @@ canvas#canvas {
 
 .efw-diary {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: 8px;
+  top: 8px;
   z-index: 6;
-  width: 220px;
-  border: 1px solid #fff;
-  background: #000;
-  padding: 10px 12px;
+  width: auto;
+  border: none;
+  background: transparent;
+  padding: 0;
+  pointer-events: none;
+}
+
+#efw-diary-label {
+  display: none;
 }
 
 .efw-diary-nav {
   display: flex;
   gap: 6px;
-  margin-top: 8px;
+  margin-top: 0;
+  pointer-events: auto;
 }
 
 .efw-prevq {
