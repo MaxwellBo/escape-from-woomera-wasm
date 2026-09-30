@@ -723,17 +723,11 @@ function applyInvHud(text: string): boolean {
   return false;
 }
 
-function applyPrevQuestion(text: string): boolean {
-  const m = text.match(/>>> prevq (.+)$/);
+function applyPrevQuestion(_text: string): boolean {
   const el = document.getElementById('efw-prevq');
-  const p = document.getElementById('efw-prevq-text');
-  if (text.includes('Conversation hidden, partner too far') || text.includes('<conversation inactive>')) {
-    if (el) el.hidden = true;
-    return false;
-  }
-  if (!m) return false;
-  if (el) el.hidden = false;
-  if (p) p.textContent = m[1];
+  /* FUN_1001db00 draws the previous line in the menu. The page header
+     duplicated that line in white above the view. */
+  if (el) el.hidden = true;
   return false;
 }
 
