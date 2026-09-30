@@ -2668,22 +2668,44 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		dest.z = z;
 		if( z <= s_floorZ )
 		{
-			dest.z = s_floorZ;
+			/* The parabola comes back to the takeoff height. The floor
+			   under the hull may be lower once the hop has left a ledge,
+			   so land on that trace instead of snapping back up. */
+			TraceResult down;
+			Vector top;
+			Vector bot;
+
+			top = dest;
+			top.z = s_floorZ;
+			bot = top;
+			bot.z = s_floorZ - 512.0f;
+			UTIL_TraceHull( top, bot, dont_ignore_monsters, human_hull, pPlayer->edict(), &down );
 			s_airborne = 0;
 			s_vz = 0.0f;
-			pPlayer->pev->flags |= FL_ONGROUND;
-		}
-		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
-		if( !tr.fStartSolid )
-		{
-			if( tr.flFraction < 1.0f && s_vz > 0.0f && tr.vecPlaneNormal.z < 0.7f )
-				s_vz = 0.0f;
-			dest = tr.vecEndPos;
-			if( !s_airborne )
+			if( !down.fStartSolid && down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+			{
+				dest = down.vecEndPos;
+				pPlayer->pev->flags |= FL_ONGROUND;
+				snprintf( line, sizeof( line ),
+					"efw: jump land z=%.1f from %.1f\n", dest.z, s_floorZ );
+				EFW_LogLine( line );
+			}
+			else
+			{
 				dest.z = s_floorZ;
+				pPlayer->pev->flags &= ~FL_ONGROUND;
+			}
 		}
-		else if( !s_airborne )
-			dest = pPlayer->pev->origin;
+		else
+		{
+			UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+			if( !tr.fStartSolid )
+			{
+				if( tr.flFraction < 1.0f && s_vz > 0.0f && tr.vecPlaneNormal.z < 0.7f )
+					s_vz = 0.0f;
+				dest = tr.vecEndPos;
+			}
+		}
 		pPlayer->pev->origin = dest;
 		pPlayer->pev->velocity.z = s_vz;
 		UTIL_SetOrigin( pPlayer->pev, dest );
