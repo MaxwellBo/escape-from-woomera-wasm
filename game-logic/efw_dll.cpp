@@ -2439,18 +2439,25 @@ static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int si
 	dest = start + Vector( s_hvx * dt, s_hvy * dt, 0 );
 	UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
 	if( tr.fStartSolid )
-	{
-		s_hvx = 0.0f;
-		s_hvy = 0.0f;
 		return start;
-	}
 	if( tr.flFraction < 1.0f )
 	{
 		Vector hit = tr.vecEndPos;
 		Vector left = dest - hit;
 		float into = DotProduct( left, tr.vecPlaneNormal );
+		float backoff;
 		TraceResult slide;
 
+		/* PM_ClipVelocity. A one-unit stand-off is not the new speed;
+		   dividing that nudge by dt was wiping a running jump. */
+		/* Into the plane the dot is negative. Leave a velocity that is
+		   already moving back out of the brush alone. */
+		backoff = s_hvx * tr.vecPlaneNormal.x + s_hvy * tr.vecPlaneNormal.y;
+		if( backoff < 0.0f )
+		{
+			s_hvx -= backoff * tr.vecPlaneNormal.x;
+			s_hvy -= backoff * tr.vecPlaneNormal.y;
+		}
 		if( into < 0.0f )
 			left = left - tr.vecPlaneNormal * into;
 		left = left + tr.vecPlaneNormal;
@@ -2459,11 +2466,6 @@ static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int si
 	}
 	else
 		dest = tr.vecEndPos;
-	if( dt > 0.0f )
-	{
-		s_hvx = ( dest.x - start.x ) / dt;
-		s_hvy = ( dest.y - start.y ) / dt;
-	}
 	if( s_hvLog < 80 )
 	{
 		s_hvLog++;
