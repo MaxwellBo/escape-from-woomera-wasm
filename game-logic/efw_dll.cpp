@@ -2271,6 +2271,7 @@ static void EFW_PulseRefugeeThinks( void )
 	int i;
 	int n = 0;
 
+	EFW_BeginNpcPulse();
 	for( i = 1; i < EFW_MaxEnts(); i++ )
 	{
 		edict_t *pent;

@@ -194,9 +194,30 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
    pump faults, so the think only records the origin. StartFrame links
    the queue after the pulse returns. */
 static int s_npcStep;
+static int s_linkDepth;
 static edict_t *s_linkEdict[48];
 static Vector s_linkOrigin[48];
 static int s_linkN;
+
+/* The link sets the guard so a touch-reentered think cannot queue another
+   origin. If that call does not return to the clear, later pumps would
+   skip the anim and the hull step. A new pulse is not inside the link. */
+void EFW_BeginNpcPulse( void )
+{
+	if( s_linkDepth )
+		return;
+	if( !s_npcStep )
+		return;
+	s_npcStep = 0;
+	{
+		static int s_clear;
+		if( s_clear < 3 )
+		{
+			s_clear++;
+			EFW_DebugPrint( "npc step flag cleared" );
+		}
+	}
+}
 
 static void EFW_QueueOrigin( entvars_t *pev, const Vector &org )
 {
@@ -247,9 +268,11 @@ void EFW_FlushNpcOrigins( void )
 	{
 		if( !queued[i] || queued[i]->free )
 			continue;
+		s_linkDepth++;
 		s_npcStep = 1;
 		UTIL_SetOrigin( &queued[i]->v, origins[i] );
 		s_npcStep = 0;
+		s_linkDepth--;
 	}
 }
 
@@ -1133,6 +1156,16 @@ void CRefugee::IdleThink( void )
 		int moved;
 
 		speed = EFW_NpcGroundSpeed( this );
+		{
+			static int s_why;
+			if( s_why < 4 )
+			{
+				s_why++;
+				EFW_DebugPrint( "step why flag=%d dt=%.3f ground=%d mi=%d",
+					s_npcStep, flInterval,
+					( pev->flags & FL_ONGROUND ) ? 1 : 0, pev->modelindex );
+			}
+		}
 		{
 			static int s_gateLog;
 			if( s_gateLog < 8 )
