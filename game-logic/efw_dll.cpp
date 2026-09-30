@@ -2360,9 +2360,35 @@ static int EFW_SnapToPlayerStart( CBasePlayer *pPlayer )
 	return DROP_TO_FLOOR( pPlayer->edict() );
 }
 
+/* PM_Move does not run while libmenu leaves the listen server paused.
+   IN_JUMP / IN_DUCK still arrive on pev->button. PM_Jump's impulse is
+   sqrt(2 * sv_gravity * 45). PM_Duck eases the eye from 28 toward -6
+   over 0.4s (view 12 after the origin drop, which this standing hull
+   does not take). */
+static int s_airborne;
+static float s_vz;
+static int s_oldAirButtons;
+static int s_inDuck;
+static float s_duckTime;
+
+static float EFW_DuckSpline( float time )
+{
+	float value;
+	float valueSquared;
+
+	value = time / 0.4f;
+	if( value < 0.0f )
+		value = 0.0f;
+	if( value > 1.0f )
+		value = 1.0f;
+	valueSquared = value * value;
+	return 3.0f * valueSquared - 2.0f * valueSquared * value;
+}
+
 static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 {
 	float dt;
+	float speed;
 	Vector delta;
 	Vector dest;
 	int fwd;
@@ -2408,8 +2434,12 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		if( len < 0.01f )
 			return;
 		/* GoldSrc sv_maxspeed. The paused listen server does not run
-		   PM_Move, so this hull step spends the usercmd at that speed. */
-		delta = delta * ( ( 270.0f * dt ) / len );
+		   PM_Move, so this hull step spends the usercmd at that speed.
+		   PM_Duck scales the cmd by 0.333 once the crouch finishes. */
+		speed = 270.0f;
+		if( pPlayer->pev->flags & FL_DUCKING )
+			speed *= 0.333f;
+		delta = delta * ( ( speed * dt ) / len );
 	}
 	dest = pPlayer->pev->origin + delta;
 	{
@@ -2479,7 +2509,11 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 	pPlayer->pev->origin = dest;
 	pPlayer->pev->velocity = delta * ( 1.0f / dt );
-	pPlayer->pev->flags |= FL_ONGROUND;
+	pPlayer->pev->velocity.z = s_vz;
+	if( s_airborne )
+		pPlayer->pev->flags &= ~FL_ONGROUND;
+	else
+		pPlayer->pev->flags |= FL_ONGROUND;
 	UTIL_SetOrigin( pPlayer->pev, dest );
 	s_moveN++;
 	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
@@ -2491,6 +2525,133 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			fromCmd ? "cmd" : "latch" );
 		EFW_LogLine( line );
 	}
+}
+
+static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
+{
+	float dt;
+	float dz;
+	float frac;
+	int buttons;
+	int pressed;
+	Vector start;
+	Vector dest;
+	TraceResult tr;
+	char line[160];
+	static int s_jumpN;
+
+	if( !pPlayer || !s_walkOn )
+		return;
+	if( EFW_GetHudInt( 6 ) )
+		return;
+	dt = g_efw.dt;
+	if( dt <= 0.0f )
+		dt = EFW_HostInterval();
+	if( dt > 0.2f )
+		dt = 0.2f;
+	buttons = pPlayer->pev->button;
+	pressed = buttons & ~s_oldAirButtons;
+
+	if( buttons & IN_DUCK )
+	{
+		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+		{
+			s_inDuck = 1;
+			s_duckTime = 0.0f;
+		}
+		if( s_inDuck )
+		{
+			s_duckTime += dt;
+			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air. */
+			if( s_duckTime >= 0.4f || s_airborne )
+			{
+				s_inDuck = 0;
+				pPlayer->pev->flags |= FL_DUCKING;
+				pPlayer->pev->view_ofs.z = -6.0f;
+				snprintf( line, sizeof( line ),
+					"efw: duck viewz=-6 z=%.1f flags=%d\n",
+					pPlayer->pev->origin.z, pPlayer->pev->flags );
+				EFW_LogLine( line );
+			}
+			else
+			{
+				frac = EFW_DuckSpline( s_duckTime );
+				pPlayer->pev->view_ofs.z = ( ( 12.0f - 18.0f ) * frac ) + ( 28.0f * ( 1.0f - frac ) );
+				snprintf( line, sizeof( line ),
+					"efw: duck viewz=%.1f t=%.2f z=%.1f\n",
+					pPlayer->pev->view_ofs.z, s_duckTime, pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+	}
+	else if( s_inDuck || ( pPlayer->pev->flags & FL_DUCKING ) )
+	{
+		s_inDuck = 0;
+		s_duckTime = 0.0f;
+		pPlayer->pev->flags &= ~FL_DUCKING;
+		pPlayer->pev->view_ofs.z = 28.0f;
+		snprintf( line, sizeof( line ),
+			"efw: unduck viewz=28 z=%.1f\n", pPlayer->pev->origin.z );
+		EFW_LogLine( line );
+	}
+
+	if( !s_airborne && ( pressed & IN_JUMP ) )
+	{
+		s_vz = sqrtf( 2.0f * 800.0f * 45.0f );
+		s_airborne = 1;
+		pPlayer->pev->flags &= ~FL_ONGROUND;
+		snprintf( line, sizeof( line ),
+			"efw: jump impulse vz=%.0f z=%.1f\n", s_vz, pPlayer->pev->origin.z );
+		EFW_LogLine( line );
+	}
+
+	if( s_airborne )
+	{
+		start = pPlayer->pev->origin;
+		dz = s_vz * dt - 0.5f * 800.0f * dt * dt;
+		s_vz -= 800.0f * dt;
+		if( s_vz > 2000.0f )
+			s_vz = 2000.0f;
+		if( s_vz < -2000.0f )
+			s_vz = -2000.0f;
+		dest = start;
+		dest.z += dz;
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+		{
+			s_airborne = 0;
+			s_vz = 0.0f;
+			pPlayer->pev->flags |= FL_ONGROUND;
+		}
+		else
+		{
+			dest = tr.vecEndPos;
+			if( tr.flFraction < 1.0f )
+			{
+				if( dz <= 0.0f || tr.vecPlaneNormal.z > 0.7f )
+				{
+					s_airborne = 0;
+					s_vz = 0.0f;
+					pPlayer->pev->flags |= FL_ONGROUND;
+				}
+				else
+					s_vz = 0.0f;
+			}
+			pPlayer->pev->origin = dest;
+			pPlayer->pev->velocity.z = s_vz;
+			UTIL_SetOrigin( pPlayer->pev, dest );
+		}
+		if( s_jumpN < 40 || !s_airborne )
+		{
+			s_jumpN++;
+			snprintf( line, sizeof( line ),
+				"efw: jump z=%.1f vz=%.0f air=%d viewz=%.0f\n",
+				pPlayer->pev->origin.z, s_vz, s_airborne, pPlayer->pev->view_ofs.z );
+			EFW_LogLine( line );
+		}
+	}
+
+	s_oldAirButtons = buttons;
 }
 
 static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
@@ -2614,6 +2775,7 @@ void EFW_StartFrame( void )
 			if( s_walkOn )
 			{
 				EFW_ApplyLatchedMove( pPlayer );
+				EFW_ApplyUsercmdAir( pPlayer );
 				EFW_ForceWorldPresent( pPlayer );
 			}
 		}
