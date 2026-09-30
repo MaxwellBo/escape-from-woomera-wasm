@@ -1791,8 +1791,11 @@ static void EFW_DrawInventoryStrip( float fade )
 		}
 		return;
 	}
+	/* FUN_10043dd0: fild(ScreenHeight) minus the float at 0x10064d44
+	   (108.8), then ftol. The grey strip still starts at height-190.
+	   Names are DrawHudString 45px above that icon row. */
 	x = 60;
-	y = ScreenHeight - 190;
+	y = (int)( (float)ScreenHeight - 108.8f );
 	n = 0;
 	names[0] = '\0';
 	namesN = 0;
@@ -2374,7 +2377,6 @@ static void EFW_DrawDiaryWipe( void )
 {
 	int cur = g_diaryPage;
 	int prev = g_diaryFadePage;
-	char dlabel[32];
 
 	if( g_diaryFade <= 0.0f && g_invFade <= 0.0f )
 		return;
@@ -2387,11 +2389,8 @@ static void EFW_DrawDiaryWipe( void )
 		EFW_DrawDiarySpr( prev, 1.0f );
 	if( g_diaryFade > 0.0f )
 		EFW_DrawDiarySpr( cur, g_diaryFade );
-	if( g_diaryOpen )
-	{
-		snprintf( dlabel, sizeof( dlabel ), "DIARY  %d", g_diaryPage );
-		gHUD.DrawHudString( ScreenWidth - 160, 32, ScreenWidth - 8, dlabel, 200, 0, 0 );
-	}
+	/* FUN_1001db00 draws the page sprite and then the hope ticks.
+	   It does not draw a DIARY caption. */
 }
 
 /* FUN_1001daa0: 10×(28×6) ticks at (20,120), stacked up by 12px.

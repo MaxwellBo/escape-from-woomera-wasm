@@ -644,16 +644,29 @@ static void EFW_ToggleDiary( void )
 
 static void EFW_StepDiary( int dir )
 {
-	int cursor = EFW_GetHudInt( 0 ) + dir;
-	int n = EFW_DiaryCount();
-	if( n <= 0 )
-		return;
-	if( cursor < 0 )
-		cursor = n - 1;
-	if( cursor >= n )
-		cursor = 0;
+	int cursor;
+	int n;
+
+	/* 0x1001b249 next / 0x1001b2b9 prev: force the diary open, then
+	   step hudInt[0]. Next that lands on the count wraps to 1.
+	   Prev that lands on 0 wraps to count-1. Slot 0 is not a stop. */
+	EFW_SetHudInt( 5, 1 );
+	n = EFW_DiaryCount();
+	cursor = EFW_GetHudInt( 0 );
+	if( dir > 0 )
+	{
+		cursor++;
+		if( cursor == n )
+			cursor = 1;
+	}
+	else
+	{
+		cursor--;
+		if( cursor == 0 )
+			cursor = n - 1;
+	}
 	EFW_SetHudInt( 0, cursor );
-	EFW_SendEfwData();
+	EFW_SendHudState();
 }
 
 static const char *EFW_CmdName( int arg0 )
