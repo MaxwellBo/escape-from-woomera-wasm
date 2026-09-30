@@ -2814,7 +2814,8 @@ int CHudEfw::Draw( float flTime )
 			EFW_DrawWrapped( x, y, xmax, prev, 100, 200, 100 );
 			y += 0x23;
 		}
-		y = EFW_DrawWrapped( x, y, xmax, body, 0, 200, 200 ) + 0x23;
+		/* FUN_1001de18 pushes 200, 200, 0. That is the yellow body line. */
+		y = EFW_DrawWrapped( x, y, xmax, body, 200, 200, 0 ) + 0x23;
 		choices = ( reveal >= fullLen ) ? 1 : 0;
 		if( choices )
 		{
@@ -2835,7 +2836,7 @@ int CHudEfw::Draw( float flTime )
 			{
 				s_menuLog = key;
 				gEngfuncs.Con_Printf(
-					">>> FUN_1001db00 menu reveal=%d/%d choices=%d y0=%d\n",
+					">>> FUN_1001db00 menu reveal=%d/%d choices=%d y0=%d body=200,200,0\n",
 					reveal, fullLen, choices, ScreenHeight - 295 );
 			}
 		}
