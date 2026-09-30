@@ -2973,8 +2973,8 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 
 /* V_CalcRoll. sv_rollangle is 0 on this host, and the client simvel stays
    0 while the pump moves the hull, so V_CalcViewRoll leaves the horizon
-   level. GoldSrc uses 2 degrees at sv_rollspeed 200. The result is the
-   view punch the refdef adds on top of the look angles. */
+   level. GoldSrc uses 2 degrees at sv_rollspeed 200. svc_setangle follows
+   pev->angles, so the roll is written there. */
 static void EFW_ViewRoll( CBasePlayer *pPlayer )
 {
 	float side;
@@ -3005,7 +3005,13 @@ static void EFW_ViewRoll( CBasePlayer *pPlayer )
 	else
 		roll = rollangle;
 	roll *= sign;
-	pPlayer->pev->punchangle.z = roll;
+	/* punchangle reaches UpdateClientData and the refdef still stays
+	   level. svc_setangle follows pev->angles, which is what the view uses. */
+	pPlayer->pev->v_angle.z = roll;
+	pPlayer->pev->angles.x = pPlayer->pev->v_angle.x;
+	pPlayer->pev->angles.y = pPlayer->pev->v_angle.y;
+	pPlayer->pev->angles.z = roll;
+	pPlayer->pev->fixangle = 1;
 	if( s_log < 6 && ( roll > 0.5f || roll < -0.5f ) )
 	{
 		s_log++;
