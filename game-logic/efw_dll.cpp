@@ -2458,31 +2458,80 @@ static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, flo
 	s_hvy += accelspeed * wishy;
 }
 
+/* PM_WalkMove / PM_AirMove wish. cl_forwardspeed and cl_sidespeed are 400.
+   sv_maxspeed is 320, so a full axis clamps to 320. PM_Duck scales the cmd
+   by 0.333 once FL_DUCKING is set, and that product (133) stays under the cap.
+   Looking up zeroes the vertical part of the basis and renormalizes, so the
+   planar wish keeps the cmd speed. */
+static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
+{
+	Vector fwdDir;
+	Vector sideDir;
+	Vector wish;
+	float fmove;
+	float smove;
+	float cmdFwd;
+	float cmdSide;
+	float len;
+	float maxspd;
+
+	*dir = Vector( 0, 0, 0 );
+	*wishspeed = 0.0f;
+	if( !pPlayer || ( !fwd && !side ) )
+		return;
+	cmdFwd = CVAR_GET_FLOAT( "cl_forwardspeed" );
+	cmdSide = CVAR_GET_FLOAT( "cl_sidespeed" );
+	if( cmdFwd < 1.0f )
+		cmdFwd = 400.0f;
+	if( cmdSide < 1.0f )
+		cmdSide = 400.0f;
+	fmove = cmdFwd * (float)fwd;
+	smove = cmdSide * (float)side;
+	if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		fmove *= 0.333f;
+		smove *= 0.333f;
+	}
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	fwdDir = gpGlobals->v_forward;
+	sideDir = gpGlobals->v_right;
+	fwdDir.z = 0.0f;
+	sideDir.z = 0.0f;
+	if( fwdDir.Length() > 0.01f )
+		fwdDir = fwdDir.Normalize();
+	else
+		fwdDir = Vector( 0, 0, 0 );
+	if( sideDir.Length() > 0.01f )
+		sideDir = sideDir.Normalize();
+	else
+		sideDir = Vector( 0, 0, 0 );
+	wish = fwdDir * fmove + sideDir * smove;
+	len = wish.Length();
+	if( len < 0.01f )
+		return;
+	maxspd = CVAR_GET_FLOAT( "sv_maxspeed" );
+	if( maxspd < 1.0f )
+		maxspd = 320.0f;
+	if( len > maxspd )
+	{
+		wish = wish * ( maxspd / len );
+		len = maxspd;
+	}
+	*dir = wish * ( 1.0f / len );
+	*wishspeed = len;
+}
+
 static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int side )
 {
 	Vector wish;
 	Vector dest;
 	Vector start;
 	float speed;
-	float len;
 	TraceResult tr;
 	char line[96];
 	static int s_hvLog;
 
-	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	wish = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
-	wish.z = 0.0f;
-	speed = 0.0f;
-	len = wish.Length();
-	if( len >= 0.01f )
-	{
-		speed = 270.0f;
-		if( pPlayer->pev->flags & FL_DUCKING )
-			speed *= 0.333f;
-		wish = wish * ( 1.0f / len );
-	}
-	else
-		wish = Vector( 0, 0, 0 );
+	EFW_WishMove( pPlayer, fwd, side, &wish, &speed );
 	EFW_AirAccelerate( wish.x, wish.y, speed, dt );
 	start = pPlayer->pev->origin;
 	dest = start + Vector( s_hvx * dt, s_hvy * dt, 0 );
@@ -2605,24 +2654,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	{
 	Vector wish;
 	float wishspeed;
-	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	delta = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
-	delta.z = 0.0f;
-	wish = Vector( 0, 0, 0 );
-	wishspeed = 0.0f;
-	{
-		float len = delta.Length();
-		if( len >= 0.01f )
-		{
-			/* GoldSrc sv_maxspeed. PM_Duck scales the cmd by 0.333 once
-			   the crouch finishes. Friction runs before that add, so a
-			   release keeps the speed PM_Friction has not bled off. */
-			wishspeed = 270.0f;
-			if( pPlayer->pev->flags & FL_DUCKING )
-				wishspeed *= 0.333f;
-			wish = delta * ( 1.0f / len );
-		}
-	}
+	/* Friction runs before the add, so a release keeps whatever PM_Friction
+	   has not bled off. The wish is the clamped usercmd, not a flat 270. */
+	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 	EFW_GroundFriction( dt );
 	if( wishspeed > 0.0f )
 		EFW_GroundAccelerate( wish.x, wish.y, wishspeed, dt );
@@ -2632,6 +2666,30 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		s_hvx = 0.0f;
 		s_hvy = 0.0f;
 		return;
+	}
+	{
+		static int s_runLog;
+		static int s_duckRun;
+		char line[128];
+		int ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
+		if( s_runLog < 8 )
+		{
+			s_runLog++;
+			snprintf( line, sizeof( line ),
+				"efw: run hv=%.0f %.0f wish=%.0f at %.0f %.0f duck=%d\n",
+				s_hvx, s_hvy, wishspeed,
+				pPlayer->pev->origin.x, pPlayer->pev->origin.y, ducked );
+			EFW_LogLine( line );
+		}
+		else if( ducked && s_duckRun < 4 )
+		{
+			s_duckRun++;
+			snprintf( line, sizeof( line ),
+				"efw: duckrun hv=%.0f %.0f wish=%.0f at %.0f %.0f\n",
+				s_hvx, s_hvy, wishspeed,
+				pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+			EFW_LogLine( line );
+		}
 	}
 	{
 		int ax = (int)fabsf( s_hvx );
