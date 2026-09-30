@@ -117,6 +117,25 @@ int CRefugee::Classify( void )
 	return CLASS_HUMAN_PASSIVE; /* FUN_100c6310 returns 3 */
 }
 
+/* SV_LinkEdict calls this, then inserts the edict using absmin/absmax.
+   UTIL_SetSize from here goes pfnSetSize → SV_LinkEdict → this again and
+   the frame never presents. Write the same mins the original SET_SIZE
+   would, and the abs box CBaseEntity::SetObjectCollisionBox writes. */
+static void EFW_WriteLinkedHull( entvars_t *pev, const Vector &mins, const Vector &maxs )
+{
+	pev->mins = mins;
+	pev->maxs = maxs;
+	pev->size = maxs - mins;
+	pev->absmin = pev->origin + mins;
+	pev->absmax = pev->origin + maxs;
+	pev->absmin.x -= 1;
+	pev->absmin.y -= 1;
+	pev->absmin.z -= 1;
+	pev->absmax.x += 1;
+	pev->absmax.y += 1;
+	pev->absmax.z += 1;
+}
+
 void CRefugee::SetObjectCollisionBox( void )
 {
 	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c.
@@ -139,7 +158,7 @@ void CRefugee::SetObjectCollisionBox( void )
 	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
 	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
 	{
-		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+		EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 		return;
 	}
 	index = pev->sequence;
@@ -156,11 +175,11 @@ void CRefugee::SetObjectCollisionBox( void )
 			maxs[i] = 128.0f;
 		if( mins[i] > maxs[i] )
 		{
-			UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+			EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 			return;
 		}
 	}
-	UTIL_SetSize( pev, mins, maxs );
+	EFW_WriteLinkedHull( pev, mins, maxs );
 }
 
 void CRefugee::SetYawSpeed( void )
