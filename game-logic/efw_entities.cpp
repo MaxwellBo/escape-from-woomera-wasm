@@ -193,19 +193,18 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
    SET_ORIGIN from inside the think re-enters IdleThink until the host
    pump faults, so the think only records the origin. StartFrame links
    the queue after the pulse returns. */
-static int s_npcStep;
-static int s_linkDepth;
+static volatile int s_npcStep;
+static volatile int s_linkDepth;
 static edict_t *s_linkEdict[48];
 static Vector s_linkOrigin[48];
 static int s_linkN;
 
-/* The link sets the guard so a touch-reentered think cannot queue another
-   origin. If that call does not return to the clear, later pumps would
-   skip the anim and the hull step. A new pulse is not inside the link. */
+/* A link that re-enters the pump used to leave this guard set, and every
+   later think skipped the hull step. The pulse is the think, so the guard
+   comes down here. s_linkDepth stays up so the re-entered pump does not
+   start a second link. */
 void EFW_BeginNpcPulse( void )
 {
-	if( s_linkDepth )
-		return;
 	if( !s_npcStep )
 		return;
 	s_npcStep = 0;
@@ -214,7 +213,7 @@ void EFW_BeginNpcPulse( void )
 		if( s_clear < 3 )
 		{
 			s_clear++;
-			EFW_DebugPrint( "npc step flag cleared" );
+			EFW_DebugPrint( "npc step flag cleared depth=%d", s_linkDepth );
 		}
 	}
 }
@@ -255,6 +254,9 @@ void EFW_FlushNpcOrigins( void )
 	n = s_linkN;
 	if( n <= 0 )
 		return;
+	/* Already inside UTIL_SetOrigin. Leave the queue for the outer link. */
+	if( s_linkDepth )
+		return;
 	if( n > 48 )
 		n = 48;
 	for( i = 0; i < n; i++ )
@@ -269,9 +271,7 @@ void EFW_FlushNpcOrigins( void )
 		if( !queued[i] || queued[i]->free )
 			continue;
 		s_linkDepth++;
-		s_npcStep = 1;
 		UTIL_SetOrigin( &queued[i]->v, origins[i] );
-		s_npcStep = 0;
 		s_linkDepth--;
 	}
 }
