@@ -2847,6 +2847,7 @@ static void EFW_IdealPitch( CBasePlayer *pPlayer )
 	Vector bot;
 	static float s_sent;
 	static int s_log;
+	static int s_miss;
 
 	if( !pPlayer || !( pPlayer->pev->flags & FL_ONGROUND ) )
 		return;
@@ -2866,7 +2867,19 @@ static void EFW_IdealPitch( CBasePlayer *pPlayer )
 		bot.z -= 160.0f;
 		UTIL_TraceLine( top, bot, ignore_monsters, pPlayer->edict(), &tr );
 		if( tr.fStartSolid || tr.flFraction >= 1.0f )
+		{
+			if( s_miss < 6 )
+			{
+				char line[160];
+				s_miss++;
+				snprintf( line, sizeof( line ),
+					"efw: ideal miss i=%d solid=%d frac=%.2f eye=%.1f at %.0f %.0f\n",
+					i, tr.fStartSolid ? 1 : 0, tr.flFraction, eye,
+					pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				EFW_LogLine( line );
+			}
 			return;
+		}
 		z[i] = top.z + tr.flFraction * ( bot.z - top.z );
 	}
 	dir = 0;
@@ -2877,14 +2890,35 @@ static void EFW_IdealPitch( CBasePlayer *pPlayer )
 		if( step > -1 && step < 1 )
 			continue;
 		if( dir && ( step - dir > 0 || step - dir < 0 ) )
+		{
+			if( s_miss < 6 )
+			{
+				char line[160];
+				s_miss++;
+				snprintf( line, sizeof( line ),
+					"efw: ideal mix step=%d dir=%d z=%.1f %.1f %.1f %.1f %.1f %.1f\n",
+					step, dir, z[0], z[1], z[2], z[3], z[4], z[5] );
+				EFW_LogLine( line );
+			}
 			return;
+		}
 		steps++;
 		dir = step;
 	}
 	if( !dir )
 		ideal = 0.0f;
 	else if( steps < 2 )
+	{
+		if( s_miss < 6 )
+		{
+			char line[96];
+			s_miss++;
+			snprintf( line, sizeof( line ),
+				"efw: ideal short steps=%d dir=%d\n", steps, dir );
+			EFW_LogLine( line );
+		}
 		return;
+	}
 	else
 	{
 		scale = CVAR_GET_FLOAT( "cl_idealpitchscale" );
@@ -2960,6 +2994,11 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		{
 			s_hvx = 0.0f;
 			s_hvy = 0.0f;
+			/* Quake samples the grade every think, including a stand.
+			   The walk early-out used to skip that, so a hull placed
+			   on a slope never told the client to tilt. */
+			if( pPlayer->pev->flags & FL_ONGROUND )
+				EFW_IdealPitch( pPlayer );
 			return;
 		}
 	}
