@@ -10,6 +10,7 @@
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
+#include <time.h>
 
 // Client half of EFWData / EFWShow / EFW_Menu / EFW_CtPrv / EFW_Cntxt
 // (client.dll 0x100419e0, FUN_10044f70 prompts, FUN_10047830 storyboards).
@@ -192,6 +193,58 @@ static float EFW_GetClientHudFloat( int idx )
 		gEngfuncs.Con_Printf( ">>> FUN_10047660 idx=%d v=%.1f\n", idx, v );
 	}
 	return v;
+}
+
+static int EFW_GetClientHudInt( int idx );
+
+/* DAT_100a95ac is the flTime HUD_Redraw stores. The wasm host leaves that
+   value at 1, inside the dawn window (time < 4 paints 0,0,0,255). The
+   original cl.time leaves that window a few seconds after play starts.
+   While hudInt[6] is clear, spend wall time so FUN_1001e4c0 can lift. */
+static double EFW_WallSeconds( void )
+{
+	struct timespec ts;
+
+	if( clock_gettime( CLOCK_MONOTONIC, &ts ) != 0 )
+		return 0.0;
+	return (double)ts.tv_sec + (double)ts.tv_nsec * 1.0e-9;
+}
+
+static float EFW_HudPlayTime( float flTime )
+{
+	static double s_wall;
+	static float s_play = -1.0f;
+	static int s_dawnDone;
+	double now;
+	double dt;
+	int paused;
+
+	now = EFW_WallSeconds();
+	paused = EFW_GetClientHudInt( 6 );
+	if( s_play < 0.0f )
+	{
+		s_play = flTime;
+		s_wall = now;
+	}
+	if( flTime > s_play + 0.001f )
+		s_play = flTime;
+	else if( !paused && s_wall > 0.0 )
+	{
+		dt = now - s_wall;
+		if( dt < 0.0 )
+			dt = 0.0;
+		if( dt > 0.25 )
+			dt = 0.25;
+		s_play += (float)dt;
+	}
+	s_wall = now;
+	if( !s_dawnDone && s_play >= 4.0f )
+	{
+		s_dawnDone = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e4c0 clock t=%.2f engine=%.2f pause=%d\n",
+			s_play, flTime, paused );
+	}
+	return s_play;
 }
 
 /* FUN_10044870: return *DAT_1007f7f8 (gHUD.m_flTime). */
@@ -2693,7 +2746,7 @@ int CHudEfw::Draw( float flTime )
 	if( !g_hGive )
 		g_hGive = EFW_LoadSpr( "sprites/efw_give_icon.spr" );
 
-	g_hudDrawTime = flTime;
+	g_hudDrawTime = EFW_HudPlayTime( flTime );
 	g_mapLevel = EFW_MapLevelFromName();
 	EFW_SetClientHudInt( 3, g_mapLevel );
 	(void)EFW_ClientTime();
