@@ -914,13 +914,15 @@ function dismissMenuAfterHud() {
   if (firstMapKeyGame)
     return;
   firstMapKeyGame = true;
-  /* HUD_Redraw skip proves ca_active. Open then close console so
-     Con_ToggleConsole_f calls UI_SetActiveMenu(false) → key_game.
-     Deferred: never nest Cmd_ExecuteString inside HUD_Redraw. */
-  log('listen: gles3compat first-map double toggleconsole → key_game');
+  /* HUD_Redraw proves ca_active, and the boot console is already
+     key_console (Con_DestHeight is half the framebuffer). One
+     Con_ToggleConsole_f closes it and calls UI_SetActiveMenu(false).
+     A second toggle opens it again: the 3D view stays the bottom half
+     and the intro pixels above it are never redrawn. Deferred so
+     Cmd_ExecuteString is not nested inside HUD_Redraw. */
+  log('listen: gles3compat first-map toggleconsole → key_game');
   runEngineCmd('toggleconsole');
   setTimeout(() => {
-    runEngineCmd('toggleconsole');
     runEngineCmd('setpause 0');
     runEngineCmd('unpause');
     runEngineCmd('pausable 0');
