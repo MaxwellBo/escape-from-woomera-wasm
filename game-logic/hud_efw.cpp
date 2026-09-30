@@ -2648,7 +2648,8 @@ int CHudEfw::Draw( float flTime )
 			g_storyFade = 1.0f;
 		EFW_DrawGreyVeil();
 		EFW_DrawStoryboardTiles( g_hStory );
-		gHUD.DrawHudString( 16, ScreenHeight - 28, ScreenWidth - 16, "Press any key", r, g, b );
+		/* FUN_10043a10 stops after the tiles. "Press left mouse button to
+		   continue" is the caption letterbox (FUN_10043bb0), not this path. */
 		return 1;
 	}
 
