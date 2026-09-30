@@ -2464,11 +2464,11 @@ static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int si
 		s_hvx = ( dest.x - start.x ) / dt;
 		s_hvy = ( dest.y - start.y ) / dt;
 	}
-	if( s_hvLog < 32 )
+	if( s_hvLog < 80 )
 	{
 		s_hvLog++;
 		snprintf( line, sizeof( line ),
-			"efw: airhv hv=%.0f %.0f z=%.1f\n", s_hvx, s_hvy, start.z );
+			"efw: airhv hv=%.0f %.0f z=%.1f fwd=%d\n", s_hvx, s_hvy, start.z, fwd );
 		EFW_LogLine( line );
 	}
 	return dest;
@@ -2791,8 +2791,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			s_airborne = 1;
 			pPlayer->pev->flags &= ~FL_ONGROUND;
 			snprintf( line, sizeof( line ),
-				"efw: jump impulse vz=%.0f z=%.1f floor=%.1f\n",
-				s_vz, pPlayer->pev->origin.z, s_floorZ );
+				"efw: jump impulse vz=%.0f z=%.1f floor=%.1f hv=%.0f %.0f\n",
+				s_vz, pPlayer->pev->origin.z, s_floorZ, s_hvx, s_hvy );
 			EFW_LogLine( line );
 		}
 	}
@@ -2828,7 +2828,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				dest = down.vecEndPos;
 				pPlayer->pev->flags |= FL_ONGROUND;
 				snprintf( line, sizeof( line ),
-					"efw: jump land z=%.1f from %.1f\n", dest.z, s_floorZ );
+					"efw: jump land z=%.1f from %.1f at %.0f %.0f\n",
+					dest.z, s_floorZ, dest.x, dest.y );
 				EFW_LogLine( line );
 			}
 			else
