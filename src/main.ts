@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll193`;
+    return `${url}?v=efw-dll194`;
   return url;
 }
 
@@ -1939,7 +1939,16 @@ async function boot() {
 
 btnLaunch.addEventListener('click', () => void boot());
 canvas.addEventListener('click', () => void captureInput());
-canvas.addEventListener('pointerdown', () => canvas.focus());
+/* FUN_10048710: a click on the interact bar opens the command buttons
+   (efw_pause 1, FUN_10046370). The next click dismisses them. The first
+   press only locks the pointer; the game click is the one after that. */
+let promptContext = false;
+canvas.addEventListener('pointerdown', (ev) => {
+  canvas.focus();
+  if (ev.button !== 0 || document.pointerLockElement !== canvas) return;
+  promptContext = !promptContext;
+  runGameCmd(promptContext ? 'efw_context 1' : 'efw_context 0');
+});
 document.addEventListener('pointerlockchange', syncCaptureUi);
 document.addEventListener('pointerlockerror', () => log('pointer lock error'));
 consoleInput.addEventListener('keydown', (e) => e.stopPropagation());

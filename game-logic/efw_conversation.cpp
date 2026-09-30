@@ -851,6 +851,10 @@ static int EFW_HtmlProject( CBasePlayer *pPlayer, const Vector &world, int *sx, 
 	return 1;
 }
 
+/* FUN_10046370 sets this; FUN_10048740 clears it. World CommandButtons
+   exist only while it is set. */
+static int s_promptContext;
+
 void EFW_HtmlVguiSync( void )
 {
 	static char s_sig[512];
@@ -883,10 +887,10 @@ void EFW_HtmlVguiSync( void )
 			EFW_HtmlVguiAdd( btns, &n, x, y, label, cmd );
 		}
 	}
-	else if( !st->talkActive )
+	else if( !st->talkActive && s_promptContext )
 	{
-		/* FUN_10044f70: WorldToScreen, drop the 90px edge band (0x10064f44),
-		   then the caller clamps into the 180px inset. */
+		/* FUN_10044f70 runs only from FUN_10046370, after the interact
+		   bar click. WorldToScreen, drop the 90px edge band, then clamp. */
 		{
 			static int s_world;
 			if( !s_world )
@@ -940,6 +944,44 @@ void EFW_HtmlVguiSync( void )
 	}
 	snprintf( line, sizeof( line ), "efw: vgui buttons=%d\n", n );
 	EFW_EnginePrint( line );
+}
+
+void EFW_SetPromptContext( CBasePlayer *pPlayer, int on )
+{
+	EfwDllState *st;
+	int i;
+	int hit = 0;
+	int next = 0;
+
+	st = EFW_Dll();
+	if( on && pPlayer && st )
+	{
+		for( i = 0; i < st->scanCount; i++ )
+		{
+			int sx, sy;
+			Vector world( st->scan[i].x, st->scan[i].y, st->scan[i].z );
+			if( EFW_HtmlProject( pPlayer, world, &sx, &sy ) )
+			{
+				hit = 1;
+				break;
+			}
+		}
+	}
+	if( on && hit )
+		next = 1;
+	if( s_promptContext == next )
+	{
+		EFW_DebugPrint( ">>> FUN_10046370 context=%d held", next );
+		return;
+	}
+	s_promptContext = next;
+	if( next )
+		EFW_DebugPrint( ">>> FUN_10046370 context=1" );
+	else
+		EFW_DebugPrint( ">>> FUN_10048740 context=0" );
+	/* FUN_10048710 ClientCmd efw_pause 1 before the buttons; dismiss is 0. */
+	EFW_SetPause( next );
+	EFW_HtmlVguiSync();
 }
 
 void EFW_SendCntxt( void )

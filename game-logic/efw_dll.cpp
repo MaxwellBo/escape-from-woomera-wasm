@@ -1838,7 +1838,7 @@ static void EFW_RegisterHostCmds( void )
 		"efw_diary", "efw_diary_next", "efw_diary_prev", "efw_ShowMenu",
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
-		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
+		"efw_pause", "efw_context", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
 		"efw_move", "efw_clmove", "efw_clook", "efw_turn",
 		"efw_cjump", "efw_cduck",

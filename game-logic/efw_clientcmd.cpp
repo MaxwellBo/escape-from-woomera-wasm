@@ -1087,6 +1087,15 @@ int EFW_ClientCommand( edict_t *pEntity )
 		}
 		return 1;
 	}
+	if( FStrEq( pcmd, "efw_context" ) )
+	{
+		int on = 1;
+		if( CMD_ARGC() > arg0 + 1 )
+			on = atoi( CMD_ARGV( arg0 + 1 ) ) != 0;
+		/* FUN_10048710 opens the bar's CommandButtons; FUN_10048740 closes. */
+		EFW_SetPromptContext( pPlayer, on );
+		return 1;
+	}
 	if( FStrEq( pcmd, "efw_pause" ) )
 	{
 		int on = 1;

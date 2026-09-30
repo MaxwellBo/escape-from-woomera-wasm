@@ -1627,7 +1627,10 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 			if( s_bub <= 3 || ( s_bub % 40 ) == 0 )
 				gEngfuncs.Con_Printf( ">>> bubble %s sx=%d sy=%d type=%d\n",
 					s->name[0] ? s->name : "?", x, y, s->type );
-			EFW_BuildVgui( s, x, y );
+			/* FUN_10044f70 is only reached from FUN_10046370, the interact
+			   bar click. g_contextMode is that flag. */
+			if( g_contextMode )
+				EFW_BuildVgui( s, x, y );
 		}
 		/* FUN_10044f70 returns without creating CommandButtons when the
 		   projection misses or sits in the 90px edge band. */

@@ -124,6 +124,7 @@ void EFW_LoadAllConversations( void ); /* 0x100b8ff0 */
 void EFW_ThinkConversation( void ); /* 0x100c6c10 */
 void EFW_TalkScan( void ); /* 0x100c7830 */
 void EFW_HtmlVguiSync( void ); /* FUN_10044f70 stand-in: TalkScan → /efwvgui.txt */
+void EFW_SetPromptContext( CBasePlayer *pPlayer, int on ); /* FUN_10046370 / FUN_10048740 */
 void EFW_PollMenuKeys( void ); /* FUN_100c6a60 → FUN_100c69a0 GetAsyncKeyState */
 void EFW_LatchInUse( void ); /* HostFwd +use when usercmds do not flush */
 void EFW_LatchMove( int fwd, int side ); /* HostFwd WASD when usercmds do not flush */
