@@ -89,6 +89,8 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 
 static void EFW_StartIconFly( float x, float y, HSPRITE spr ); /* FUN_100464c0 */
 static void EFW_FlyDismissedButton( void );
+static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
+	float r, float g, float b, float v, HSPRITE spr );
 
 #define EFW_VGUI_MAX 6 /* FUN_100c6d70 DAT_10134894..a8 — six CommandButton slots */
 struct EfwVguiBtn
@@ -1827,7 +1829,21 @@ static void EFW_DrawInventoryStrip( float fade )
 	if( fade <= 0.0f )
 		return;
 	x0 = (int)( (float)ScreenWidth * ( 1.0f - fade ) );
-	FillRGBA( x0, ScreenHeight - 190, ScreenWidth - x0, 190, 51, 51, 51, 204 );
+	/* FUN_10043dd0: FUN_1001d750 from x=width*(1-fade) to width, y=height-190
+	   to height, RGB 0.2,0.2,0.2, UV v=0.8, spr=0. That ascale row is alpha
+	   204, so the strip is translucent grey. pfnFillRGBA would add the grey. */
+	EFW_DrawTriQuad( (float)x0, (float)( ScreenHeight - 190 ),
+		(float)ScreenWidth, (float)ScreenHeight,
+		0.2f, 0.2f, 0.2f, 0.8f, 0 );
+	{
+		static int s_quad;
+		if( !s_quad && fade > 0.5f )
+		{
+			s_quad = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10043dd0 quad %d %d %d 190 rgb=51,51,51 a=204\n",
+				x0, ScreenHeight - 190, ScreenWidth - x0 );
+		}
+	}
 	if( fade < 1.0f )
 	{
 		packed = (int)( fade * 10.0f + 0.5f );
