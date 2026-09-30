@@ -757,10 +757,7 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 		static int s_hopeLog;
 		s_hopeLog++;
 		if( s_hopeLog == 1 || ( s_hopeLog % 40 ) == 0 )
-		{
-			gEngfuncs.Cvar_SetValue( "con_notifytime", 0.0f );
 			gEngfuncs.Con_Printf( ">>> hopehud %.1f\n", g_hope );
-		}
 	}
 	return 1;
 }
@@ -2555,12 +2552,19 @@ static void EFW_DrawArtsClock( float flTime )
 	SPR_DrawAdditive( 0, x, 5, NULL );
 }
 
-/* -dev 1 paints every client Con_Printf on the view. con_notifytime 0
-   from the page is replaced when the client cvars register, so hopehud
-   stays on the storyboard. Set it from the client once drawing. */
+/* -dev 1 paints every client Con_Printf on the view. Cvar_SetValue
+   does not move this cvar; the console command does, and it also drops
+   lines already queued. One ClientCmd after drawing has started. */
 static void EFW_SilenceNotify( void )
 {
-	gEngfuncs.Cvar_SetValue( "con_notifytime", 0.0f );
+	static int s_sent;
+	if( s_sent )
+		return;
+	s_sent = 1;
+	{
+		static char cmd[] = "con_notifytime 0\n";
+		gEngfuncs.pfnClientCmd( cmd );
+	}
 }
 
 int CHudEfw::Draw( float flTime )

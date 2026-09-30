@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll214`;
+    return `${url}?v=efw-dll215`;
   return url;
 }
 
@@ -745,6 +745,15 @@ function log(text: string) {
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live=')
       || normalized.includes('efw: world present live='))
     resumeAfterFirstClientFrame();
+  if (normalized.includes('>>> FUN_10043750') || /efw: HUD_Draw n=(\d+)/.test(normalized)) {
+    const n = /efw: HUD_Draw n=(\d+)/.exec(normalized);
+    if (!n || Number(n[1]) > 8) {
+      setTimeout(() => {
+        runEngineCmd('con_notifytime 0');
+        log('listen: con_notifytime 0');
+      }, 400);
+    }
+  }
   if (consoleForPlaque && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip'))
     schedulePlaqueClose();
   if (chapterNeedsGameKey && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip')) {
