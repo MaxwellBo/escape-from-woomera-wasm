@@ -552,6 +552,7 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 	if( center < 1.0f )
 		center = 500.0f;
 	s_pitchVel += pparams->frametime * center;
+	s_logged = pparams->cl_viewangles[0];
 	if( delta > 0.0f )
 	{
 		if( move > delta )
@@ -579,9 +580,8 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 		|| pparams->cl_viewangles[0] < s_logged - 0.5f ) )
 	{
 		s_log++;
-		s_logged = pparams->cl_viewangles[0];
-		gEngfuncs.Con_Printf( "efw: drift pitch %.1f ideal=%.1f vel=%.0f\n",
-			pparams->cl_viewangles[0], pparams->idealpitch, s_pitchVel );
+		gEngfuncs.Con_Printf( "efw: drift pitch %.1f -> %.1f ideal=%.1f\n",
+			s_logged, pparams->cl_viewangles[0], pparams->idealpitch );
 	}
 }
 
