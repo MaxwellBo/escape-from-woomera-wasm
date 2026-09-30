@@ -1962,49 +1962,34 @@ static void EFW_DrawIconFly( void )
 
 /* FUN_10046590: idle bar while DAT_100bc338==0 and DAT_100bc490!=0.
    DAT_100bc490 is the Cntxt scan count; DAT_100bc38c is the nearest name. */
-/* FUN_1001d750 when the sprite argument is 0: SPR_Load sprites/ascale.spr,
-   RenderMode kRenderTransAlpha, CullFace TRI_NONE, UV (0,v)..(1,v).
-   v=1 samples the opaque row, so RGB 0,0,0 is a solid black panel.
-   pfnFillRGBA is additive, and adding black leaves the floor showing. */
+/* FUN_1001d750 spr==0 paints sprites/ascale.spr with RenderMode
+   kRenderTransAlpha and UV v=1 (the opaque row) at RGB 0,0,0.
+   That tri call sticks on this renderer and the next world frame is black.
+   pfnFillRGBA is additive, so a black rect adds nothing. pfnFillRGBABlend
+   is the alpha fill of the same rectangle: opaque black behind the lines. */
 static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v )
 {
-	struct model_s *model;
-	static int s_tri = -1;
+	int x, y, w, h;
+	static int s_logged;
 
-	if( !g_hAscale )
+	(void)v;
+	x = (int)x1;
+	y = (int)y1;
+	w = (int)( x2 - x1 );
+	h = (int)( y2 - y1 );
+	if( w < 1 )
+		w = 1;
+	if( h < 1 )
+		h = 1;
+	if( !s_logged )
 	{
-		g_hAscale = EFW_LoadSpr( "sprites/ascale.spr" );
-		gEngfuncs.Con_Printf( ">>> FUN_10044e30 ascale=%d\n", g_hAscale != 0 );
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d\n", x, y, w, h );
 	}
-	model = g_hAscale ? (struct model_s *)gEngfuncs.GetSpritePointer( g_hAscale ) : NULL;
-	if( gEngfuncs.pTriAPI && model && gEngfuncs.pTriAPI->SpriteTexture( model, 0 ) )
-	{
-		if( s_tri != 1 )
-		{
-			s_tri = 1;
-			gEngfuncs.Con_Printf( ">>> FUN_1001d750 ascale v=%.2f\n", v );
-		}
-		gEngfuncs.pTriAPI->RenderMode( kRenderTransAlpha );
-		gEngfuncs.pTriAPI->CullFace( TRI_NONE );
-		gEngfuncs.pTriAPI->Color4f( 0.0f, 0.0f, 0.0f, 1.0f );
-		gEngfuncs.pTriAPI->Begin( TRI_QUADS );
-		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, v );
-		gEngfuncs.pTriAPI->Vertex3f( x1, y1, 0.5f );
-		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, v );
-		gEngfuncs.pTriAPI->Vertex3f( x2, y1, 0.5f );
-		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, v );
-		gEngfuncs.pTriAPI->Vertex3f( x2, y2, 0.5f );
-		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, v );
-		gEngfuncs.pTriAPI->Vertex3f( x1, y2, 0.5f );
-		gEngfuncs.pTriAPI->End();
-		return;
-	}
-	if( s_tri != 0 )
-	{
-		s_tri = 0;
-		gEngfuncs.Con_Printf( ">>> FUN_1001d750 ascale fill\n" );
-	}
-	FillRGBA( (int)x1, (int)y1, (int)( x2 - x1 ), (int)( y2 - y1 ), 0, 0, 0, 255 );
+	if( gEngfuncs.pfnFillRGBABlend )
+		gEngfuncs.pfnFillRGBABlend( x, y, w, h, 0, 0, 0, 255 );
+	else
+		FillRGBA( x, y, w, h, 0, 0, 0, 255 );
 }
 
 static void EFW_DrawInteractPrompt( void )
