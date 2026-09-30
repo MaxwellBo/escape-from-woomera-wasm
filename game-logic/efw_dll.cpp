@@ -2372,6 +2372,8 @@ static int s_inDuck;
 static float s_duckTime;
 static int s_floorSet;
 static float s_floorZ;
+static float s_jumpT;
+static float s_jumpVz0;
 
 static float EFW_DuckSpline( float time )
 {
@@ -2532,7 +2534,6 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
-	float dz;
 	float frac;
 	int buttons;
 	int pressed;
@@ -2607,65 +2608,72 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 
 	if( !s_airborne && ( pressed & IN_JUMP ) )
 	{
-		float lift = s_floorSet ? ( pPlayer->pev->origin.z - s_floorZ ) : 0.0f;
-		/* PM_Jump's full impulse. If this origin is already off the floor,
-		   the rise has started and a second 268 would hit the ceiling. */
-		if( lift < 8.0f )
-			s_vz = sqrtf( 2.0f * 800.0f * 45.0f );
-		else if( pPlayer->pev->velocity.z > 40.0f )
-			s_vz = pPlayer->pev->velocity.z;
-		else
-		{
-			float left = 45.0f - lift;
-			if( left < 0.0f )
-				left = 0.0f;
-			s_vz = sqrtf( 2.0f * 800.0f * left );
-		}
+		/* PM_Jump impulse sqrt(2 * 800 * 45). The listen server may already
+		   have stepped the origin up before this pump; the arc still
+		   starts at the last grounded height. */
+		s_jumpVz0 = sqrtf( 2.0f * 800.0f * 45.0f );
+		s_vz = s_jumpVz0;
+		s_jumpT = 0.0f;
 		s_airborne = 1;
 		pPlayer->pev->flags &= ~FL_ONGROUND;
 		snprintf( line, sizeof( line ),
-			"efw: jump impulse vz=%.0f z=%.1f floor=%.1f velz=%.0f\n",
-			s_vz, pPlayer->pev->origin.z, s_floorZ, pPlayer->pev->velocity.z );
+			"efw: jump impulse vz=%.0f z=%.1f floor=%.1f\n",
+			s_vz, pPlayer->pev->origin.z, s_floorZ );
 		EFW_LogLine( line );
 	}
 
 	if( s_airborne )
 	{
+		float z;
+		s_jumpT += dt;
+		s_vz = s_jumpVz0 - 800.0f * s_jumpT;
+		z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
 		start = pPlayer->pev->origin;
-		dz = s_vz * dt - 0.5f * 800.0f * dt * dt;
-		s_vz -= 800.0f * dt;
-		if( s_vz > 2000.0f )
-			s_vz = 2000.0f;
-		if( s_vz < -2000.0f )
-			s_vz = -2000.0f;
+		start.z = s_floorZ;
 		dest = start;
-		dest.z += dz;
-		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
-		if( tr.fStartSolid )
+		dest.z = z;
+		if( z <= s_floorZ )
 		{
+			dest.z = s_floorZ;
 			s_airborne = 0;
 			s_vz = 0.0f;
 			pPlayer->pev->flags |= FL_ONGROUND;
 		}
-		else
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		if( !tr.fStartSolid )
 		{
+			if( tr.flFraction < 1.0f && s_vz > 0.0f && tr.vecPlaneNormal.z < 0.7f )
+				s_vz = 0.0f;
 			dest = tr.vecEndPos;
-			if( tr.flFraction < 1.0f )
-			{
-				if( dz <= 0.0f || tr.vecPlaneNormal.z > 0.7f )
-				{
-					s_airborne = 0;
-					s_vz = 0.0f;
-					pPlayer->pev->flags |= FL_ONGROUND;
-				}
-				else
-					s_vz = 0.0f;
-			}
-			pPlayer->pev->origin = dest;
-			pPlayer->pev->velocity.z = s_vz;
-			UTIL_SetOrigin( pPlayer->pev, dest );
+			if( !s_airborne )
+				dest.z = s_floorZ;
 		}
-		if( s_jumpN < 40 || !s_airborne )
+		else if( !s_airborne )
+			dest = pPlayer->pev->origin;
+		pPlayer->pev->origin = dest;
+		pPlayer->pev->velocity.z = s_vz;
+		UTIL_SetOrigin( pPlayer->pev, dest );
+	}
+
+	if( s_floorSet )
+	{
+		float lift = pPlayer->pev->origin.z - s_floorZ;
+		if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
+		{
+			if( lift > 1.0f || s_airborne )
+				pPlayer->pev->view_ofs.z = 28.0f + lift;
+			else
+				pPlayer->pev->view_ofs.z = 28.0f;
+		}
+	}
+	if( !s_airborne && !( buttons & IN_JUMP ) )
+	{
+		s_floorZ = pPlayer->pev->origin.z;
+		s_floorSet = 1;
+	}
+	if( s_airborne || ( s_floorSet && pPlayer->pev->origin.z > s_floorZ + 1.0f ) )
+	{
+		if( s_jumpN < 48 )
 		{
 			s_jumpN++;
 			snprintf( line, sizeof( line ),
@@ -2673,23 +2681,6 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				pPlayer->pev->origin.z, s_vz, s_airborne, pPlayer->pev->view_ofs.z );
 			EFW_LogLine( line );
 		}
-	}
-
-	if( s_floorSet )
-	{
-		float lift = pPlayer->pev->origin.z - s_floorZ;
-		float base = pPlayer->pev->view_ofs.z;
-		if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
-			base = 28.0f;
-		if( lift > 1.0f || s_airborne )
-			pPlayer->pev->view_ofs.z = base + lift;
-		else if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
-			pPlayer->pev->view_ofs.z = 28.0f;
-	}
-	if( !s_airborne && !( buttons & IN_JUMP ) )
-	{
-		s_floorZ = pPlayer->pev->origin.z;
-		s_floorSet = 1;
 	}
 
 	s_oldAirButtons = buttons;
