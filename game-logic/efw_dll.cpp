@@ -2642,18 +2642,34 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 
 	if( !s_airborne && ( pressed & IN_JUMP ) )
 	{
-		/* PM_Jump impulse sqrt(2 * 800 * 45). The listen server may already
-		   have stepped the origin up before this pump; the arc still
-		   starts at the last grounded height. */
-		s_jumpVz0 = sqrtf( 2.0f * 800.0f * 45.0f );
-		s_vz = s_jumpVz0;
-		s_jumpT = 0.0f;
-		s_airborne = 1;
-		pPlayer->pev->flags &= ~FL_ONGROUND;
-		snprintf( line, sizeof( line ),
-			"efw: jump impulse vz=%.0f z=%.1f floor=%.1f\n",
-			s_vz, pPlayer->pev->origin.z, s_floorZ );
-		EFW_LogLine( line );
+		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
+
+		/* PM_Jump returns while onground == -1. A fall that has already
+		   left the takeoff height must not relaunch from that stored
+		   floor. The listen server can still apply the impulse and lift
+		   the origin before this pump; that hop keeps the stored floor. */
+		if( !onGround && pPlayer->pev->origin.z <= s_floorZ + 1.0f )
+		{
+			snprintf( line, sizeof( line ),
+				"efw: jump ignored z=%.1f floor=%.1f flags=%d\n",
+				pPlayer->pev->origin.z, s_floorZ, pPlayer->pev->flags );
+			EFW_LogLine( line );
+		}
+		else
+		{
+			if( onGround )
+				s_floorZ = pPlayer->pev->origin.z;
+			/* PM_Jump impulse sqrt(2 * 800 * 45). */
+			s_jumpVz0 = sqrtf( 2.0f * 800.0f * 45.0f );
+			s_vz = s_jumpVz0;
+			s_jumpT = 0.0f;
+			s_airborne = 1;
+			pPlayer->pev->flags &= ~FL_ONGROUND;
+			snprintf( line, sizeof( line ),
+				"efw: jump impulse vz=%.0f z=%.1f floor=%.1f\n",
+				s_vz, pPlayer->pev->origin.z, s_floorZ );
+			EFW_LogLine( line );
+		}
 	}
 
 	if( s_airborne )
@@ -2713,7 +2729,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 
 	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
 		pPlayer->pev->view_ofs.z = 28.0f;
-	if( !s_airborne && !( buttons & IN_JUMP ) )
+	/* Sample the floor only while the hull is down. A falling origin
+	   used to become the next takeoff height. */
+	if( !s_airborne && !( buttons & IN_JUMP ) && ( pPlayer->pev->flags & FL_ONGROUND ) )
 	{
 		s_floorZ = pPlayer->pev->origin.z;
 		s_floorSet = 1;
