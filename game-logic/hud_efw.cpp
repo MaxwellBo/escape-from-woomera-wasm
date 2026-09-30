@@ -2670,7 +2670,18 @@ static void EFW_DrawArtsClock( float flTime )
 	if( fade > 0.0f && !g_hLogo )
 		g_hLogo = EFW_LoadSpr( "sprites/efw_artslogo.spr" );
 	if( fade <= 0.0f || !g_hLogo )
+	{
+		if( fade <= 0.0f )
+		{
+			static int s_gone;
+			if( !s_gone )
+			{
+				s_gone = 1;
+				gEngfuncs.Con_Printf( "efw: arts logo faded t=%.1f\n", flTime );
+			}
+		}
 		return;
+	}
 	dw = SPR_Width( g_hLogo, 0 );
 	if( dw < 1 )
 		dw = 64;
@@ -2791,7 +2802,10 @@ int CHudEfw::Draw( float flTime )
 		EFW_DrawHopeTicks( ticks );
 	}
 
-	EFW_DrawArtsClock( flTime );
+	/* cl.time stays near 1, so the 5s logo fade never leaves full
+	   brightness. The dawn palette already spends wall time in
+	   g_hudDrawTime; the logo uses that same clock. */
+	EFW_DrawArtsClock( g_hudDrawTime );
 
 	EFW_DrawScanPrompts( r, g, b );
 	EFW_DrawInteractPrompt();
