@@ -2432,8 +2432,8 @@ static void EFW_GroundFriction( float dt )
 	s_hvy *= newspeed;
 }
 
-/* PM_Accelerate. accel 10, and pmove->friction is the player value 1,
-   so a 0.12s pump still reaches 270 in one step from a stand. */
+/* PM_Accelerate. accel 10, and pmove->friction is the player value 1.
+   The pump is longer than a cmd, so the caller slices this at 10ms. */
 static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, float dt )
 {
 	float current;
@@ -2601,11 +2601,88 @@ static float EFW_DuckSpline( float time )
 	return 3.0f * valueSquared - 2.0f * valueSquared * value;
 }
 
+/* One PM_WalkMove hull step. Returns 0 when the standing trace is solid
+   and the step-up cannot leave it; s_hv is left alone in that case. */
+static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
+{
+	TraceResult tr;
+	TraceResult over;
+	TraceResult down;
+	Vector step( 0, 0, 18 );
+	Vector start;
+	Vector dest;
+	int hull;
+	int stepped;
+
+	if( !pPlayer || !out || slice < 0.001f )
+		return 0;
+	start = pPlayer->pev->origin;
+	dest = start + Vector( s_hvx * slice, s_hvy * slice, 0 );
+	hull = EFW_PlayerHull( pPlayer );
+	stepped = 0;
+	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+	if( tr.fStartSolid )
+	{
+		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( over.fStartSolid || over.flFraction < 1.0f )
+			return 0;
+		start = over.vecEndPos;
+		dest = dest + step;
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+			return 0;
+	}
+	if( tr.flFraction < 1.0f )
+	{
+		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( !over.fStartSolid && over.flFraction >= 1.0f )
+		{
+			UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, hull, pPlayer->edict(), &down );
+			if( !down.fStartSolid && down.flFraction > 0.2f )
+			{
+				TraceResult drop;
+				UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
+				if( !drop.fStartSolid )
+				{
+					dest = drop.vecEndPos;
+					stepped = 1;
+				}
+			}
+		}
+		if( !stepped )
+		{
+			Vector hit = tr.vecEndPos;
+			Vector left = dest - hit;
+			float into = DotProduct( left, tr.vecPlaneNormal );
+			if( into < 0.0f )
+				left = left - tr.vecPlaneNormal * into;
+			left = left + tr.vecPlaneNormal;
+			UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+			if( over.fStartSolid )
+				return 0;
+			dest = over.vecEndPos;
+			if( tr.vecPlaneNormal.z < 0.5f && tr.vecPlaneNormal.z > -0.5f )
+			{
+				TraceResult gap;
+				Vector back = dest + tr.vecPlaneNormal * 4.0f;
+				UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
+				if( !gap.fStartSolid )
+					dest = gap.vecEndPos;
+			}
+		}
+	}
+	else
+		dest = tr.vecEndPos;
+	s_hvx = ( dest.x - pPlayer->pev->origin.x ) / slice;
+	s_hvy = ( dest.y - pPlayer->pev->origin.y ) / slice;
+	*out = dest;
+	return 1;
+}
+
 static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 {
 	float dt;
 	float speed;
-	Vector delta;
 	Vector dest;
 	int fwd;
 	int side;
@@ -2666,42 +2743,73 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	else
 	{
 	Vector wish;
+	Vector origin0;
 	float wishspeed;
-	/* Friction runs before the add, so a release keeps whatever PM_Friction
-	   has not bled off. The wish is the clamped usercmd, not a flat 270. */
+	float left;
+	float moved;
+	int slices;
+	/* A GoldSrc cmd is about 10ms. One friction step across the whole
+	   pump (drop = speed * 4 * 0.2) leaves 64 from 320. Twenty 10ms steps
+	   leave about 141, and the hull coasts farther. */
+	origin0 = pPlayer->pev->origin;
+	dest = origin0;
 	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
-	EFW_GroundFriction( dt );
-	if( wishspeed > 0.0f )
-		EFW_GroundAccelerate( wish.x, wish.y, wishspeed, dt );
-	speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
-	if( speed < 1.0f )
+	left = dt;
+	slices = 0;
+	while( left > 0.0005f && slices < 25 )
 	{
-		s_hvx = 0.0f;
-		s_hvy = 0.0f;
-		return;
+		float slice = left;
+		if( slice > 0.01f )
+			slice = 0.01f;
+		EFW_GroundFriction( slice );
+		if( wishspeed > 0.0f )
+			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
+		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		if( speed < 1.0f )
+		{
+			s_hvx = 0.0f;
+			s_hvy = 0.0f;
+			break;
+		}
+		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
+			break;
+		pPlayer->pev->origin = dest;
+		UTIL_SetOrigin( pPlayer->pev, dest );
+		left -= slice;
+		slices++;
 	}
+	moved = ( dest - origin0 ).Length();
 	{
 		static int s_runLog;
 		static int s_duckRun;
-		char line[128];
+		static int s_coastLog;
+		char line[160];
 		int ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
-		if( s_runLog < 8 )
+		if( wishspeed > 0.0f && s_runLog < 8 )
 		{
 			s_runLog++;
 			snprintf( line, sizeof( line ),
-				"efw: run hv=%.0f %.0f wish=%.0f at %.0f %.0f duck=%d\n",
-				s_hvx, s_hvy, wishspeed,
-				pPlayer->pev->origin.x, pPlayer->pev->origin.y, ducked );
+				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f duck=%d\n",
+				s_hvx, s_hvy, wishspeed, moved, dt,
+				dest.x, dest.y, ducked );
 			EFW_LogLine( line );
 		}
-		else if( ducked && s_duckRun < 4 )
+		else if( wishspeed > 0.0f && ducked && s_duckRun < 4 )
 		{
 			s_duckRun++;
 			snprintf( line, sizeof( line ),
-				"efw: duckrun hv=%.0f %.0f wish=%.0f at %.0f %.0f z=%.1f viewz=%.0f\n",
-				s_hvx, s_hvy, wishspeed,
-				pPlayer->pev->origin.x, pPlayer->pev->origin.y,
-				pPlayer->pev->origin.z, pPlayer->pev->view_ofs.z );
+				"efw: duckrun hv=%.0f %.0f wish=%.0f moved=%.0f at %.0f %.0f z=%.1f viewz=%.0f\n",
+				s_hvx, s_hvy, wishspeed, moved,
+				dest.x, dest.y,
+				dest.z, pPlayer->pev->view_ofs.z );
+			EFW_LogLine( line );
+		}
+		else if( wishspeed <= 0.0f && moved > 1.0f && s_coastLog < 6 )
+		{
+			s_coastLog++;
+			snprintf( line, sizeof( line ),
+				"efw: coast hv=%.0f %.0f moved=%.0f dt=%.3f at %.0f %.0f\n",
+				s_hvx, s_hvy, moved, dt, dest.x, dest.y );
 			EFW_LogLine( line );
 		}
 	}
@@ -2710,86 +2818,16 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		int ay = (int)fabsf( s_hvy );
 		int steady = ( ay < 15 && ax > 200 ) || ( ax < 15 && ay > 200 );
 		static int s_groundLog;
-		if( !steady && s_groundLog < 48 )
+		if( !steady && s_groundLog < 48 && slices > 0 )
 		{
 			char line[128];
 			s_groundLog++;
 			snprintf( line, sizeof( line ),
 				"efw: ground hv=%.0f %.0f wish=%d %d at %.0f %.0f\n",
 				s_hvx, s_hvy, fwd, side,
-				pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				dest.x, dest.y );
 			EFW_LogLine( line );
 		}
-	}
-	delta = Vector( s_hvx * dt, s_hvy * dt, 0 );
-	dest = pPlayer->pev->origin + delta;
-	{
-		/* Clip the player hull, step onto low ledges, and slide along
-		   walls so a bunk does not freeze the pawn in the brush. */
-		TraceResult tr;
-		TraceResult over;
-		TraceResult down;
-		Vector step( 0, 0, 18 );
-		Vector start = pPlayer->pev->origin;
-		int hull = EFW_PlayerHull( pPlayer );
-		int stepped = 0;
-		UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
-		if( tr.fStartSolid )
-		{
-			UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
-			if( over.fStartSolid || over.flFraction < 1.0f )
-				return;
-			start = over.vecEndPos;
-			dest = dest + step;
-			UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
-			if( tr.fStartSolid )
-				return;
-		}
-		if( tr.flFraction < 1.0f )
-		{
-			UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
-			if( !over.fStartSolid && over.flFraction >= 1.0f )
-			{
-				UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, hull, pPlayer->edict(), &down );
-				if( !down.fStartSolid && down.flFraction > 0.2f )
-				{
-					TraceResult drop;
-					UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
-					if( !drop.fStartSolid )
-					{
-						dest = drop.vecEndPos;
-						stepped = 1;
-					}
-				}
-			}
-			if( !stepped )
-			{
-				Vector hit = tr.vecEndPos;
-				Vector left = dest - hit;
-				float into = DotProduct( left, tr.vecPlaneNormal );
-				if( into < 0.0f )
-					left = left - tr.vecPlaneNormal * into;
-				left = left + tr.vecPlaneNormal; /* stay a unit out of the brush */
-				UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
-				if( over.fStartSolid )
-					return;
-				dest = over.vecEndPos;
-				/* Stand off the face so the view is not inside the brush
-				   and PlayerUse can see the door. */
-				if( tr.vecPlaneNormal.z < 0.5f && tr.vecPlaneNormal.z > -0.5f )
-				{
-					TraceResult gap;
-					Vector back = dest + tr.vecPlaneNormal * 4.0f;
-					UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
-					if( !gap.fStartSolid )
-						dest = gap.vecEndPos;
-				}
-			}
-		}
-		else
-			dest = tr.vecEndPos;
-		s_hvx = ( dest.x - pPlayer->pev->origin.x ) / dt;
-		s_hvy = ( dest.y - pPlayer->pev->origin.y ) / dt;
 	}
 	}
 	pPlayer->pev->velocity.x = s_hvx;
