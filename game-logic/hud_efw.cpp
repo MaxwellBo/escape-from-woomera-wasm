@@ -2200,7 +2200,20 @@ static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	FillRGBA( x, y, w, h, ir, ig, ib, 255 );
 }
 
-/* FUN_1001e7d0: wrap at xmax-100 on space, hard wrap at xmax, 15px lines. */
+/* FUN_1001e7d0: width is the console glyph at 0x100a4ddc. Soft wrap when
+   the pen passes xmax-100 on a space, hard wrap at xmax, then y += 15. */
+static int EFW_GlyphWidth( int ch )
+{
+	int w;
+
+	if( ch < 0 || ch > 255 )
+		return 8;
+	w = gHUD.m_scrinfo.charWidths[ch];
+	if( w < 1 )
+		w = 8;
+	return w;
+}
+
 /* Returns the y FUN_1001e7d0 stores (one 15px line past the last drawn row). */
 static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b )
 {
@@ -2218,14 +2231,15 @@ static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int
 	if( !s_logged && text[0] )
 	{
 		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_1001e7d0 n=%d xmax=%d\n",
-			(int)strlen( text ), xmax );
+		gEngfuncs.Con_Printf( ">>> FUN_1001e7d0 n=%d xmax=%d i=%d M=%d sp=%d\n",
+			(int)strlen( text ), xmax,
+			EFW_GlyphWidth( 'i' ), EFW_GlyphWidth( 'M' ), EFW_GlyphWidth( ' ' ) );
 	}
 	line[0] = '\0';
 	for( i = 0; text[i]; i++ )
 	{
 		ch = (unsigned char)text[i];
-		w = 8;
+		w = EFW_GlyphWidth( ch );
 		if( ch == '\n' || ( ch == ' ' && x + cx + w > xmax - 100 ) || x + cx + w > xmax )
 		{
 			line[n] = '\0';
