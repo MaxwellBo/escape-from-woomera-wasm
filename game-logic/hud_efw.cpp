@@ -470,19 +470,27 @@ static float s_pitchVel;
 static int s_noDrift;
 static float s_driftMove;
 static float s_lastStop;
+static int s_driftFrame;
+static int s_stopFrame;
 
 static void EFW_StopPitchDrift( void )
 {
 	s_lastStop = gEngfuncs.GetClientTime();
+	s_stopFrame = s_driftFrame;
 	s_noDrift = 1;
 	s_pitchVel = 0.0f;
 }
 
 static void EFW_StartPitchDrift( void )
 {
+	float now;
 	float speed;
 
-	if( s_lastStop == gEngfuncs.GetClientTime() )
+	/* V_StartPitchDrift bails when the stop happened this frame. Client
+	   time stays put on this host, so that compare never expires and a
+	   walk after mouse look never pitches. Count frames instead. */
+	now = gEngfuncs.GetClientTime();
+	if( s_stopFrame == s_driftFrame && now == s_lastStop )
 		return;
 	if( s_noDrift || s_pitchVel == 0.0f )
 	{
@@ -508,6 +516,7 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 
 	if( !pparams )
 		return;
+	s_driftFrame++;
 	if( in_mlook.state & 1 )
 		EFW_StopPitchDrift();
 	if( ( gEngfuncs.IsNoClipping && gEngfuncs.IsNoClipping() )
