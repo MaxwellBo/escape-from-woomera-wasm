@@ -2934,6 +2934,70 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 }
 
+/* V_CalcBob. cl.time stays near 1, so the client bob freezes after the
+   first frame. The same curve runs on the pump clock and adds to the
+   eye. cl_bob 0.01, cl_bobcycle 0.8, cl_bobup 0.5. Air keeps the last bob. */
+static void EFW_ViewBob( CBasePlayer *pPlayer, float dt )
+{
+	static float s_bobTime;
+	static float s_bob;
+	static int s_log;
+	float cycle;
+	float bob;
+	float speed;
+	float bobcycle;
+	float bobup;
+	float bobscale;
+	int onGround;
+	char line[128];
+
+	if( !pPlayer )
+		return;
+	onGround = ( pPlayer->pev->flags & FL_ONGROUND ) ? 1 : 0;
+	if( onGround )
+	{
+		if( dt < 0.001f )
+			dt = 0.1f;
+		if( dt > 0.25f )
+			dt = 0.25f;
+		bobcycle = CVAR_GET_FLOAT( "cl_bobcycle" );
+		bobup = CVAR_GET_FLOAT( "cl_bobup" );
+		bobscale = CVAR_GET_FLOAT( "cl_bob" );
+		if( bobcycle < 0.05f )
+			bobcycle = 0.8f;
+		if( bobup < 0.05f || bobup > 0.95f )
+			bobup = 0.5f;
+		if( bobscale < 0.0001f )
+			bobscale = 0.01f;
+		s_bobTime += dt;
+		cycle = s_bobTime - (float)( (int)( s_bobTime / bobcycle ) ) * bobcycle;
+		cycle /= bobcycle;
+		if( cycle < bobup )
+			cycle = 3.14159265f * cycle / bobup;
+		else
+			cycle = 3.14159265f + 3.14159265f * ( cycle - bobup ) / ( 1.0f - bobup );
+		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		bob = speed * bobscale;
+		bob = bob * 0.3f + bob * 0.7f * sinf( cycle );
+		if( bob > 4.0f )
+			bob = 4.0f;
+		if( bob < -7.0f )
+			bob = -7.0f;
+		s_bob = bob;
+	}
+	pPlayer->pev->view_ofs.z += s_bob;
+	if( onGround && s_log < 6 && sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ) > 100.0f )
+	{
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: bob %.2f viewz=%.1f spd=%.0f at %.0f %.0f\n",
+			s_bob, pPlayer->pev->view_ofs.z,
+			sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ),
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+		EFW_LogLine( line );
+	}
+}
+
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
@@ -3126,6 +3190,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		}
 	}
 
+	EFW_ViewBob( pPlayer, dt );
 	s_oldAirButtons = buttons;
 }
 
