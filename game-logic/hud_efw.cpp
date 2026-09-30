@@ -7,6 +7,7 @@
 #include "const.h"
 #include "usercmd.h"
 
+#include <math.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -1011,38 +1012,57 @@ static void EFW_StartIconFly( float x, float y, HSPRITE spr )
 	g_iconFlyOn = 1;
 }
 
+/* FUN_10045f20 orbit, then FUN_10046900 vtable+0x10 (point inside the sprite).
+   The shared anchor is the VGUI box top-left. A miss leaves DAT_100bc350
+   clear, so FUN_100463c0 does not start the fly. */
+static int EFW_HitOrbitButton( int cx, int cy, float *ox, float *oy )
+{
+	int i;
+	int n = g_vguiN;
+	float hx;
+	float hy;
+
+	if( n < 1 )
+		return -1;
+	hx = 97.44f * (float)ScreenWidth / 640.0f * 0.5f;
+	hy = 97.44f * (float)ScreenHeight / 480.0f * 0.5f;
+	for( i = 0; i < n; i++ )
+	{
+		EfwVguiBtn *b = &g_vgui[i];
+		float angle = 3.14159265f * ( 1.0f + ( 2.0f * (float)i ) / (float)n );
+		float rx = 130.0f * (float)ScreenWidth / 640.0f;
+		float ry = 130.0f * (float)ScreenHeight / 480.0f;
+		float x = (float)b->x + sinf( angle ) * rx;
+		float y = (float)b->y + cosf( angle ) * ry;
+		if( (float)cx >= x - hx && (float)cx <= x + hx
+			&& (float)cy >= y - hy && (float)cy <= y + hy )
+		{
+			if( ox )
+				*ox = x;
+			if( oy )
+				*oy = y;
+			return i;
+		}
+	}
+	return -1;
+}
+
 /* FUN_10046900 picks the command button under the cursor. FUN_100463c0
    copies that button into the fly. A miss leaves DAT_100bc350 clear. */
 static void EFW_FlyDismissedButton( void )
 {
-	int i;
-	int best = -1;
-	int bestD = 80 * 80;
-	int cx = ScreenWidth / 2;
-	int cy = ScreenHeight / 2;
+	int best;
+	float ox;
+	float oy;
 	EfwVguiBtn *b;
 	HSPRITE spr;
 
-	for( i = 0; i < g_vguiN; i++ )
-	{
-		int mx;
-		int my;
-		int d;
-		b = &g_vgui[i];
-		mx = b->x + b->w / 2;
-		my = b->y + b->h / 2;
-		d = ( mx - cx ) * ( mx - cx ) + ( my - cy ) * ( my - cy );
-		if( d < bestD )
-		{
-			bestD = d;
-			best = i;
-		}
-	}
+	best = EFW_HitOrbitButton( ScreenWidth / 2, ScreenHeight / 2, &ox, &oy );
 	if( best < 0 )
 		return;
 	b = &g_vgui[best];
 	spr = b->icon ? b->icon : g_hBubble;
-	EFW_StartIconFly( (float)( b->x + b->w / 2 ), (float)( b->y + b->h / 2 ), spr );
+	EFW_StartIconFly( ox, oy, spr );
 }
 
 /* FUN_10043a10 / Panel dtor 0x10045899: DAT_1007ab5c = -1 so tiles stop. */
