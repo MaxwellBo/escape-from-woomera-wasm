@@ -1872,6 +1872,10 @@ static void EFW_DrawInteractPrompt( void )
 		s_wasStory = 0;
 		s_interact[0] = '\0';
 	}
+	/* FUN_10044f70 tail writes DAT_100bc38c. A slot has to project inside
+	   the 90px margin before the bar appears. The name is the last type-0
+	   slot that does, and a raw name of "Detainee" is left blank. Markers
+	   turn the bar on and do not replace that name. */
 	if( g_scanCount <= 0 )
 	{
 		if( s_interact[0] )
@@ -1881,7 +1885,33 @@ static void EFW_DrawInteractPrompt( void )
 		}
 		return;
 	}
-	name = g_scan[0].name[0] ? EFW_ClientDisplayName( g_scan[0].name ) : "";
+	{
+		int i;
+		int show = 0;
+		const char *picked = "";
+		for( i = 0; i < g_scanCount; i++ )
+		{
+			int sx, sy;
+			if( !EFW_Project( g_scan[i].x, g_scan[i].y, g_scan[i].z, &sx, &sy ) )
+				continue;
+			show = 1;
+			if( g_scan[i].type != 0 )
+				continue;
+			if( !g_scan[i].name[0] || !strcmp( g_scan[i].name, "Detainee" ) )
+				continue;
+			picked = EFW_ClientDisplayName( g_scan[i].name );
+		}
+		if( !show )
+		{
+			if( s_interact[0] )
+			{
+				s_interact[0] = '\0';
+				gEngfuncs.Con_Printf( ">>> FUN_10046590 interact=\n" );
+			}
+			return;
+		}
+		name = picked ? picked : "";
+	}
 	w = 240;
 	x = ScreenWidth / 2 - 120;
 	y = ScreenHeight - 25;
