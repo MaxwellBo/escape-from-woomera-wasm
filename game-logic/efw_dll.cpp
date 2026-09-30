@@ -2365,35 +2365,56 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	float dt;
 	Vector delta;
 	Vector dest;
+	int fwd;
+	int side;
+	int fromCmd;
 	static int s_moveN;
 
 	if( !pPlayer || !s_walkOn )
 		return;
 	if( EFW_GetHudInt( 6 ) )
 		return;
-	if( !s_moveFwd && !s_moveSide )
+	/* The usercmd arrives (pev->button, forwardmove on the client) but
+	   libmenu leaves this listen server paused, so PM_Move never spends
+	   it. The pump is the frame. Buttons are that usercmd; the efw_move
+	   latch is only the fallback when no button is held. */
+	fwd = s_moveFwd;
+	side = s_moveSide;
+	fromCmd = 0;
+	if( !fwd && !side )
+	{
+		if( pPlayer->pev->button & IN_FORWARD )
+			fwd++;
+		if( pPlayer->pev->button & IN_BACK )
+			fwd--;
+		if( pPlayer->pev->button & IN_MOVERIGHT )
+			side++;
+		if( pPlayer->pev->button & IN_MOVELEFT )
+			side--;
+		fromCmd = ( fwd || side ) ? 1 : 0;
+	}
+	if( !fwd && !side )
 		return;
 	dt = g_efw.dt;
 	if( dt <= 0.0f )
-		dt = 0.12f;
+		dt = EFW_HostInterval();
 	if( dt > 0.2f )
 		dt = 0.2f;
 	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	delta = gpGlobals->v_forward * (float)s_moveFwd + gpGlobals->v_right * (float)s_moveSide;
+	delta = gpGlobals->v_forward * (float)fwd + gpGlobals->v_right * (float)side;
 	delta.z = 0.0f;
 	{
 		float len = delta.Length();
 		if( len < 0.01f )
 			return;
-		/* GoldSrc sv_maxspeed. Usercmds still do not flush on this listen
-		   server, so the latch is the walk; the speed is the engine's. */
+		/* GoldSrc sv_maxspeed. The paused listen server does not run
+		   PM_Move, so this hull step spends the usercmd at that speed. */
 		delta = delta * ( ( 270.0f * dt ) / len );
 	}
 	dest = pPlayer->pev->origin + delta;
 	{
-		/* Browser WASD is a latched origin step because usercmds never
-		   flush. Clip the player hull, step onto low ledges, and slide
-		   along walls so a bunk does not freeze the pawn in the brush. */
+		/* Clip the player hull, step onto low ledges, and slide along
+		   walls so a bunk does not freeze the pawn in the brush. */
 		TraceResult tr;
 		TraceResult over;
 		TraceResult down;
@@ -2465,8 +2486,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	{
 		char line[128];
 		snprintf( line, sizeof( line ),
-			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d\n",
-			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, s_moveFwd, s_moveSide );
+			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d src=%s\n",
+			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, fwd, side,
+			fromCmd ? "cmd" : "latch" );
 		EFW_LogLine( line );
 	}
 }
