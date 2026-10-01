@@ -160,6 +160,8 @@ int EFW_WeaponMask( CBasePlayer *pPlayer ); /* inventory bits for ids 16..31, pa
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
 CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMarker ); /* FUN_100c2a20 */
+void EFW_ArmIdTagPickup( edict_t *ed ); /* GetTickCount + 500ms at weapon+0x12c */
+int EFW_IdTagPickupBlocked( edict_t *ed ); /* FUN_100c29f0: deadline still ahead */
 CBaseEntity *EFW_MaterializeIdTag( CBaseEntity *pMarker ); /* FUN_100c27f0 then FUN_100c2a20 */
 CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard chases the player */

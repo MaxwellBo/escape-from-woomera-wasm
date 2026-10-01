@@ -180,14 +180,14 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 	/* FUN_100c29f0: GetTickCount must pass this+0x12c before FUN_100c46a0. */
 	if( defEarly->itemBit == EFW_ITEM_IDTAG )
 	{
+		int blocked = EFW_IdTagPickupBlocked( edict() );
 		static int s_idGate;
-		if( !s_idGate )
+		if( s_idGate < 6 )
 		{
-			s_idGate = 1;
-			EFW_DebugPrint( ">>> FUN_100c29f0 tick=%s",
-				( pev->dmgtime && gpGlobals->time < pev->dmgtime ) ? "wait" : "ok" );
+			s_idGate++;
+			EFW_DebugPrint( ">>> FUN_100c29f0 tick=%s", blocked ? "wait" : "ok" );
 		}
-		if( pev->dmgtime && gpGlobals->time < pev->dmgtime )
+		if( blocked )
 			return FALSE;
 	}
 #endif

@@ -681,6 +681,31 @@ void EFW_DropTablePush( void *owner, void *weapon )
 	g_dropN++;
 }
 
+static void EFW_DropTableRemove( void *weapon )
+{
+	int i;
+
+	/* FUN_100c2e20 drops the pair out of DAT_10132470 before unlink. */
+	if( !weapon )
+		return;
+	for( i = 0; i < g_dropN; i++ )
+	{
+		if( g_dropWep[i] != weapon )
+			continue;
+		if( i + 1 < g_dropN )
+		{
+			memmove( &g_dropWep[i], &g_dropWep[i + 1],
+				(size_t)( g_dropN - i - 1 ) * sizeof( g_dropWep[0] ) );
+			memmove( &g_dropOwner[i], &g_dropOwner[i + 1],
+				(size_t)( g_dropN - i - 1 ) * sizeof( g_dropOwner[0] ) );
+		}
+		g_dropN--;
+		g_dropWep[g_dropN] = NULL;
+		g_dropOwner[g_dropN] = NULL;
+		return;
+	}
+}
+
 int EFW_DropTableHas( CBasePlayer *pPlayer, int weaponId )
 {
 	int i;
@@ -1118,6 +1143,62 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 	}
 }
 
+/* FUN_100c2a20 stores GetTickCount()+0x1f4 at weapon+0x12c.
+   FUN_100c29f0 refuses AddToPlayer while that stamp is still ahead of
+   GetTickCount. sv.time does not move here, so the half second is host time. */
+static struct
+{
+	edict_t *ed;
+	float until;
+} s_idArm[4];
+
+void EFW_ArmIdTagPickup( edict_t *ed )
+{
+	int i;
+	int freeSlot;
+	float until;
+
+	if( !ed )
+		return;
+	until = EFW_HostClock() + 0.5f;
+	freeSlot = -1;
+	for( i = 0; i < 4; i++ )
+	{
+		if( s_idArm[i].ed == ed )
+		{
+			s_idArm[i].until = until;
+			return;
+		}
+		if( freeSlot < 0 && !s_idArm[i].ed )
+			freeSlot = i;
+	}
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	s_idArm[freeSlot].ed = ed;
+	s_idArm[freeSlot].until = until;
+}
+
+int EFW_IdTagPickupBlocked( edict_t *ed )
+{
+	int i;
+	float now;
+
+	if( !ed )
+		return 0;
+	now = EFW_HostClock();
+	for( i = 0; i < 4; i++ )
+	{
+		if( s_idArm[i].ed != ed )
+			continue;
+		/* cmp [this+0x12c], GetTickCount; jae skip. Equal still waits. */
+		if( now <= s_idArm[i].until )
+			return 1;
+		s_idArm[i].ed = NULL;
+		return 0;
+	}
+	return 0;
+}
+
 CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 {
 	Vector pos;
@@ -1158,7 +1239,11 @@ CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 	pItem->Materialize();
 	pTag->pev->solid = SOLID_NOT;
 	pTag->pev->effects |= EF_NODRAW;
-	pTag->pev->dmgtime = gpGlobals->time + 0.5f; /* GetTickCount + 0x1f4 at this+0x12c */
+	/* FUN_100c2a20 zeros pev+0x194 aiment and pev+0x198 owner.
+	   efw_Pickup skips any weapon that still has an owner. */
+	pTag->pev->aiment = NULL;
+	pTag->pev->owner = NULL;
+	EFW_ArmIdTagPickup( pTag->edict() ); /* GetTickCount + 0x1f4 at this+0x12c */
 	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
 	EFW_Print( EFW_Player(), "ID Tag has been placed on the wall" );
 	EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
@@ -1203,6 +1288,7 @@ CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMark )
 				continue;
 			pPlayer->RemovePlayerItem( pItem, true );
 			pItem->m_pPlayer = NULL;
+			EFW_DropTableRemove( pItem );
 			g_efw.items &= ~EFW_ITEM_IDTAG;
 			return EFW_PlaceIdTag( pItem, pMark );
 		}
