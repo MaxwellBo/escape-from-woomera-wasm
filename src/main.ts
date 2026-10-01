@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll295`;
+    return `${url}?v=efw-dll296`;
   return url;
 }
 
@@ -288,6 +288,7 @@ let promptPoseSig = '';
 let promptPoseAt = 0;
 let promptPoseRaf = 0;
 let promptPoseLogged = 0;
+let promptHoverLogged = 0;
 let promptPosePendingClear = false;
 const promptPoseTimes = new Map<string, number>();
 
@@ -295,6 +296,7 @@ function forgetPromptPose() {
   promptPoseSig = '';
   promptPoseAt = 0;
   promptPoseLogged = 0;
+  promptHoverLogged = 0;
   promptPoseTimes.clear();
   if (promptPoseRaf) {
     cancelAnimationFrame(promptPoseRaf);
@@ -341,22 +343,45 @@ function layoutPromptColumn(layer: HTMLElement) {
     log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
   }
   const n = buttons.length;
-  const sprW = 97.44 / 640;
-  const sprH = 97.44 / 480;
   const radiusX = (130 / 640) * radiusScale;
   const radiusY = (130 / 480) * radiusScale;
+  /* FUN_10046040: sin(cl.time * pi * 10/7). Idle side is
+     (sin*0.0225+1.5225)*64. Hover is (sin*0.15+1.65)*64, white. */
+  const wave = Math.sin((performance.now() / 1000) * Math.PI * 1.4285715);
+  let hovering = false;
   buttons.forEach((b, i) => {
     const ax = Number(b.dataset.ax || '0.5');
     const ay = Number(b.dataset.ay || '0.5');
     const angle = Math.PI * (1 + (2 * i) / n) - u3 * Math.PI + wobble;
     const cx = ax + Math.sin(angle) * radiusX;
     const cy = ay + Math.cos(angle) * radiusY;
+    const hover = b.matches(':hover');
+    if (hover)
+      hovering = true;
+    const mul = hover ? wave * 0.15 + 1.65 : wave * 0.0225 + 1.5225;
+    const side = mul * 64;
+    const sprW = side / 640;
+    const sprH = side / 480;
     b.style.left = `${((cx - sprW / 2) * 100).toFixed(2)}%`;
     b.style.top = `${((cy - sprH / 2) * 100).toFixed(2)}%`;
     b.style.width = `${(sprW * 100).toFixed(2)}%`;
     b.style.height = `${(sprH * 100).toFixed(2)}%`;
   });
-  if (clamped < 1 && promptPoseRaf === 0) {
+  if (hovering && promptHoverLogged < 3) {
+    let bucket = 0;
+    if (wave <= -0.85)
+      bucket = 2;
+    else if (wave >= 0.85)
+      bucket = 1;
+    if (bucket >= promptHoverLogged) {
+      promptHoverLogged = bucket + 1;
+      const side = (wave * 0.15 + 1.65) * 64;
+      log(`efw: orbit hover s=${wave.toFixed(2)} side=${side.toFixed(1)}`);
+    }
+  } else if (!hovering && promptHoverLogged >= 3) {
+    promptHoverLogged = 0;
+  }
+  if ((clamped < 1 || hovering) && promptPoseRaf === 0) {
     promptPoseRaf = requestAnimationFrame(() => {
       promptPoseRaf = 0;
       const live = document.getElementById('efw-vgui');
@@ -1170,11 +1195,9 @@ function startHostPumps() {
     /* FUN_10045f20 keeps moving for half a second after the buttons exist.
        The vgui file does not rewrite, so the pump is what steps the ease
        when a paint callback does not land between wasm frames. */
-    if (promptPoseSig && promptPoseLogged < 3) {
-      const poseLayer = document.getElementById('efw-vgui');
-      if (poseLayer)
-        layoutPromptColumn(poseLayer);
-    }
+    const poseLayer = document.getElementById('efw-vgui');
+    if (poseLayer && promptPoseSig && (promptPoseLogged < 3 || poseLayer.querySelector('button.efw-prompt:hover')))
+      layoutPromptColumn(poseLayer);
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
       log(`listen: hostpump n=${pumps}`);
