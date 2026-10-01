@@ -408,37 +408,9 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support < 0 )
 	{
-		Vector stood;
-		int up;
-		/* Inside a hull-1 floor. The first clear feet spot above is the
-		   surface the player stands on; a basement hit is the miss. */
-		for( up = 1; up <= 24; up++ )
-		{
-			Vector raised = pev->origin;
-			TraceResult hole;
-
-			raised.z += (float)up * 4.0f;
-			EFW_TraceFeetHull( pev, raised, raised, &hole );
-			if( hole.fStartSolid || hole.fAllSolid )
-				continue;
-			if( EFW_LandMonster( pev, raised, &stood ) && stood.z > pev->origin.z + 1.0f )
-			{
-				static int s_out;
-
-				if( s_out < 6 )
-				{
-					s_out++;
-					EFW_DebugPrint( "floor escape z=%.0f -> %.0f at %.0f %.0f",
-						pev->origin.z, stood.z, stood.x, stood.y );
-				}
-				pev->flags |= FL_ONGROUND;
-				pev->velocity.z = 0.0f;
-				s_npcStep = 0;
-				EFW_QueueOrigin( pev, stood );
-				return;
-			}
-			break;
-		}
+		/* A low ceiling makes the tall hull startsolid while the feet are
+		   already on the floor. Climbing out of that lands on the bunk.
+		   Leave the origin; the step still runs. */
 		s_npcStep = 0;
 		pev->flags &= ~FL_ONGROUND;
 		return;
