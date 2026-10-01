@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll290`;
+    return `${url}?v=efw-dll291`;
   return url;
 }
 
@@ -788,6 +788,8 @@ function log(text: string) {
   applyMenuHit(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
+  if (normalized.includes('not valid from the console'))
+    armBootConsoleClose();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
     logChangeLevelProgress(normalized);
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live=')
@@ -795,6 +797,8 @@ function log(text: string) {
     resumeAfterFirstClientFrame();
   if (normalized.includes('>>> FUN_10043750') || /efw: HUD_Draw n=(\d+)/.test(normalized)) {
     const n = /efw: HUD_Draw n=(\d+)/.exec(normalized);
+    if (n)
+      maybeCloseBootConsole(Number(n[1]));
     if (!n || Number(n[1]) > 8) {
       setTimeout(() => {
         runEngineCmd('con_notifytime -1');
@@ -884,6 +888,12 @@ let lastResumeMs = 0;
    HUD_Redraw (proof of ca_active). */
 let consoleForPlaque = false;
 let plaqueCloseTimer: ReturnType<typeof setTimeout> | null = null;
+/* 0 idle, 1 engine rejected `begin` while key_dest was still the console,
+   2 the follow-up toggle has run. Con_ToggleConsole_f returns immediately
+   unless cls.state is ca_active, so the HUD_Redraw toggle is a no-op and
+   the half-screen console stays over the view. The rejection is the proof
+   key_dest is still key_console; the next toggle takes the close branch. */
+let bootConsoleState = 0;
 /* First-map libmenu pause is why engine StartFrame never advances without
    HostPump. Software present hung on UI_SetActiveMenu(false). WebGL2
    (gles3compat) is the new present path that can survive key_game. */
@@ -947,6 +957,31 @@ function releaseConsoleToGame() {
   /* ca_active is required: otherwise Con_ToggleConsole_f reopens the menu. */
   runEngineCmd('toggleconsole');
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
+}
+
+function armBootConsoleClose() {
+  if (bootConsoleState !== 0 || consoleForPlaque || changeWatch)
+    return;
+  bootConsoleState = 1;
+  log('listen: begin rejected from console — close once HUD is up');
+}
+
+function maybeCloseBootConsole(hudN: number) {
+  if (bootConsoleState !== 1 || hudN < 40)
+    return;
+  if (consoleForPlaque || changeWatch || chapterChanging)
+    return;
+  bootConsoleState = 2;
+  /* Outside the print callback. toggleconsole from inside Con_Printf
+     nests Cmd_ExecuteString in the frame that is still painting. */
+  setTimeout(() => {
+    if (consoleForPlaque || changeWatch) {
+      bootConsoleState = 1;
+      return;
+    }
+    runEngineCmd('toggleconsole');
+    log('listen: toggleconsole closed boot console');
+  }, 400);
 }
 
 function dismissMenuAfterHud() {
@@ -1091,6 +1126,8 @@ function loadMap(name: string, reason: string) {
     plaqueCloseTimer = null;
   }
   firstMapKeyGame = true;
+  if (bootConsoleState === 2)
+    bootConsoleState = 0;
   if (pumpTimer) {
     clearInterval(pumpTimer);
     pumpTimer = null;
