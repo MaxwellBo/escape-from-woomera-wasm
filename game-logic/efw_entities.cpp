@@ -306,10 +306,30 @@ void EFW_FlushNpcOrigins( void )
 	}
 }
 
+/* TraceMonsterHull does not see hull-1 floors. Mouhtaz landed on the
+   kitchen at z=6, then the next step dropped him to z=-42 while a
+   player hull at the same spot still stops at z=42. The feet box
+   (-16,-16,0)-(16,16,72) is that player hull stood on the feet, so
+   the trace origin is 36 above the feet. End positions come back in
+   feet space. */
+static void EFW_TraceFeetHull( entvars_t *pev, const Vector &start, const Vector &end, TraceResult *tr )
+{
+	Vector a;
+	Vector b;
+
+	a = start;
+	b = end;
+	a.z += 36.0f;
+	b.z += 36.0f;
+	*tr = TraceResult();
+	UTIL_TraceHull( a, b, ignore_monsters, human_hull, ENT( pev ), tr );
+	tr->vecEndPos.z -= 36.0f;
+}
+
 /* SV_MoveStep: stand the hull on the floor within sv_stepsize (18, set in
    CWorld::Precache). Raise the candidate by that, drop twice that, and
    take the hit. MOVE_TO_ORIGIN is the engine call that stalls with
-   WALK_MOVE, so this is the same test with TRACE_MONSTER_HULL. */
+   WALK_MOVE, so this is the same test with the feet hull. */
 static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
 {
 	TraceResult tr;
@@ -321,14 +341,12 @@ static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
 	bot = pos;
 	top.z += step;
 	bot.z -= step;
-	memset( &tr, 0, sizeof( tr ) );
-	TRACE_MONSTER_HULL( ENT( pev ), top, bot, ignore_monsters, ENT( pev ), &tr );
+	EFW_TraceFeetHull( pev, top, bot, &tr );
 	/* The raised hull is in the ceiling. Retry from the candidate z. */
 	if( tr.fStartSolid || tr.fAllSolid )
 	{
 		top = pos;
-		memset( &tr, 0, sizeof( tr ) );
-		TRACE_MONSTER_HULL( ENT( pev ), top, bot, ignore_monsters, ENT( pev ), &tr );
+		EFW_TraceFeetHull( pev, top, bot, &tr );
 	}
 	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
 		return 0;
@@ -351,8 +369,7 @@ static int EFW_ProbeSupport( entvars_t *pev )
 		pev->mins.z = 1.0f;
 	down = pev->origin;
 	down.z -= 2.0f;
-	memset( &tr, 0, sizeof( tr ) );
-	TRACE_MONSTER_HULL( ENT( pev ), pev->origin, down, ignore_monsters, ENT( pev ), &tr );
+	EFW_TraceFeetHull( pev, pev->origin, down, &tr );
 	pev->mins.z = saved;
 	if( tr.fStartSolid || tr.fAllSolid )
 		return -1;
@@ -391,6 +408,37 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support < 0 )
 	{
+		Vector stood;
+		int up;
+		/* Inside a hull-1 floor. The first clear feet spot above is the
+		   surface the player stands on; a basement hit is the miss. */
+		for( up = 1; up <= 24; up++ )
+		{
+			Vector raised = pev->origin;
+			TraceResult hole;
+
+			raised.z += (float)up * 4.0f;
+			EFW_TraceFeetHull( pev, raised, raised, &hole );
+			if( hole.fStartSolid || hole.fAllSolid )
+				continue;
+			if( EFW_LandMonster( pev, raised, &stood ) && stood.z > pev->origin.z + 1.0f )
+			{
+				static int s_out;
+
+				if( s_out < 6 )
+				{
+					s_out++;
+					EFW_DebugPrint( "floor escape z=%.0f -> %.0f at %.0f %.0f",
+						pev->origin.z, stood.z, stood.x, stood.y );
+				}
+				pev->flags |= FL_ONGROUND;
+				pev->velocity.z = 0.0f;
+				s_npcStep = 0;
+				EFW_QueueOrigin( pev, stood );
+				return;
+			}
+			break;
+		}
 		s_npcStep = 0;
 		pev->flags &= ~FL_ONGROUND;
 		return;
@@ -436,8 +484,7 @@ static void EFW_NpcFall( entvars_t *pev )
 	z0 = pev->origin.z;
 	end = pev->origin;
 	end.z += pev->velocity.z * dt;
-	memset( &tr, 0, sizeof( tr ) );
-	TRACE_MONSTER_HULL( ENT( pev ), pev->origin, end, ignore_monsters, ENT( pev ), &tr );
+	EFW_TraceFeetHull( pev, pev->origin, end, &tr );
 	s_npcStep = 0;
 	if( tr.fStartSolid || tr.fAllSolid )
 		return;
@@ -504,8 +551,7 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 	savedMins = pev->mins.z;
 	if( savedMins < 1.0f )
 		pev->mins.z = 1.0f;
-	memset( &tr, 0, sizeof( tr ) );
-	TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+	EFW_TraceFeetHull( pev, start, end, &tr );
 	if( tr.fAllSolid || tr.fStartSolid )
 	{
 		int stepUp;
@@ -516,13 +562,11 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 			Vector raised = start;
 
 			raised.z = baseZ + stepUp * 2.0f;
-			memset( &tr, 0, sizeof( tr ) );
-			TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
+			EFW_TraceFeetHull( pev, raised, raised, &tr );
 			if( !tr.fStartSolid && !tr.fAllSolid )
 			{
 				end = raised + wish * step;
-				memset( &tr, 0, sizeof( tr ) );
-				TRACE_MONSTER_HULL( ENT( pev ), raised, end, ignore_monsters, ENT( pev ), &tr );
+				EFW_TraceFeetHull( pev, raised, end, &tr );
 				break;
 			}
 		}
@@ -773,8 +817,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		savedMins = pev->mins.z;
 		if( savedMins < 1.0f )
 			pev->mins.z = 1.0f;
-		memset( &tr, 0, sizeof( tr ) );
-		TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+		EFW_TraceFeetHull( pev, start, end, &tr );
 		/* Feet-origin mins.z == 0 sits in the floor and the trace is
 		   startsolid. StartMonster adds 1 to origin.z; DROP_TO_FLOOR
 		   cannot lift an origin already inside the floor. */
@@ -787,14 +830,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				Vector raised = start;
 				raised.z = baseZ + stepUp * 2.0f;
-				memset( &tr, 0, sizeof( tr ) );
-				TRACE_MONSTER_HULL( ENT( pev ), raised, raised, ignore_monsters, ENT( pev ), &tr );
+				EFW_TraceFeetHull( pev, raised, raised, &tr );
 				if( !tr.fStartSolid && !tr.fAllSolid )
 				{
 					start = raised;
 					end = start + wish;
-					memset( &tr, 0, sizeof( tr ) );
-					TRACE_MONSTER_HULL( ENT( pev ), start, end, ignore_monsters, ENT( pev ), &tr );
+					EFW_TraceFeetHull( pev, start, end, &tr );
 					{
 						static int s_lift;
 						if( s_lift < 6 )
