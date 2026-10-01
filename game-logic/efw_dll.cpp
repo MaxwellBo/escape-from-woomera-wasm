@@ -3437,16 +3437,61 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		if( s_inDuck )
 		{
 			s_duckTime += dt;
-			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air. */
+			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air.
+			   On the ground the origin drops by 18 (duck mins.z − standing
+			   mins.z) and the eye becomes VEC_DUCK_VIEW. In the air the eye
+			   is 12 and the origin stays. */
 			if( s_duckTime >= 0.4f || s_airborne )
 			{
+				int inAirFinish;
+
 				s_inDuck = 0;
 				pPlayer->pev->flags |= FL_DUCKING;
-				pPlayer->pev->view_ofs.z = -6.0f;
-				snprintf( line, sizeof( line ),
-					"efw: duck viewz=-6 z=%.1f flags=%d\n",
-					pPlayer->pev->origin.z, pPlayer->pev->flags );
-				EFW_LogLine( line );
+				inAirFinish = ( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) ) ? 1 : 0;
+				if( inAirFinish )
+				{
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck air viewz=12 z=%.1f\n",
+						pPlayer->pev->origin.z );
+					EFW_LogLine( line );
+				}
+				else
+				{
+					Vector dropped;
+					Vector saved;
+					int i;
+					int freed;
+
+					dropped = pPlayer->pev->origin;
+					dropped.z -= 18.0f;
+					saved = dropped;
+					freed = 0;
+					for( i = 0; i < 36; i++ )
+					{
+						TraceResult stuck;
+
+						UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
+							pPlayer->edict(), &stuck );
+						if( !stuck.fStartSolid && !stuck.fAllSolid )
+						{
+							freed = 1;
+							break;
+						}
+						dropped.z += 1.0f;
+					}
+					if( !freed )
+						dropped = saved;
+					pPlayer->pev->origin = dropped;
+					UTIL_SetOrigin( pPlayer->pev, dropped );
+					s_floorZ = dropped.z;
+					s_floorSet = 1;
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck drop z=%.1f -> %.1f\n",
+						s_duckStandZ, dropped.z );
+					EFW_LogLine( line );
+				}
 			}
 			else
 			{
@@ -3459,15 +3504,58 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			}
 		}
 	}
-	else if( s_inDuck || ( pPlayer->pev->flags & FL_DUCKING ) )
+	else if( s_inDuck )
 	{
+		/* Released during the spline, before the origin drop. */
 		s_inDuck = 0;
 		s_duckTime = 0.0f;
-		pPlayer->pev->flags &= ~FL_DUCKING;
 		pPlayer->pev->view_ofs.z = 28.0f;
 		snprintf( line, sizeof( line ),
 			"efw: unduck viewz=28 z=%.1f\n", pPlayer->pev->origin.z );
 		EFW_LogLine( line );
+	}
+	else if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		Vector up;
+		TraceResult stand;
+		float lift;
+
+		/* PM_UnDuck adds the 18 back only after a ground drop, and only
+		   when the standing hull fits. A low ceiling leaves the crouch. */
+		up = pPlayer->pev->origin;
+		lift = 0.0f;
+		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND )
+			&& pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
+			lift = 18.0f;
+		up.z += lift;
+		UTIL_TraceHull( up, up, dont_ignore_monsters, human_hull, pPlayer->edict(), &stand );
+		if( stand.fStartSolid || stand.fAllSolid )
+		{
+			static int s_blockLog;
+
+			pPlayer->pev->view_ofs.z = 12.0f;
+			if( s_blockLog < 4 )
+			{
+				s_blockLog++;
+				snprintf( line, sizeof( line ),
+					"efw: unduck blocked z=%.1f\n", pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+		else
+		{
+			s_inDuck = 0;
+			s_duckTime = 0.0f;
+			pPlayer->pev->flags &= ~FL_DUCKING;
+			pPlayer->pev->origin = up;
+			UTIL_SetOrigin( pPlayer->pev, up );
+			s_floorZ = up.z;
+			s_floorSet = 1;
+			pPlayer->pev->view_ofs.z = 28.0f;
+			snprintf( line, sizeof( line ),
+				"efw: unduck z=%.1f lift=%.0f\n", up.z, lift );
+			EFW_LogLine( line );
+		}
 	}
 
 	if( !s_airborne && ( pressed & IN_JUMP ) )
@@ -3620,8 +3708,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		pPlayer->pev->view_ofs.z = 28.0f;
 	else if( ( buttons & IN_DUCK ) && ( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
 	{
-		/* The engine crouch stores VEC_DUCK_VIEW after it lowers the origin.
-		   view_ofs -6 matches that eye only while the origin is still standing. */
+		/* After the ground drop the eye is VEC_DUCK_VIEW. Bob adds after this. */
 		if( pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
 			pPlayer->pev->view_ofs.z = 12.0f;
 	}
