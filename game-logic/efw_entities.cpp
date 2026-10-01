@@ -763,8 +763,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	}
 	/* ResetSequenceInfo stores animtime = now. MoveExecute then gets a
 	   zero interval and does not translate. A SetActivity that ran after
-	   the anim call still has that clock; rewind it so the next pump is
-	   not another hold. dt is the interval StudioFrameAdvance returned. */
+	   the anim call still has that clock; push it ahead so the next pump
+	   is not another hold. dt is the interval StudioFrameAdvance returned. */
 	{
 		float skew = pev->animtime - gpGlobals->time;
 		if( skew < 0.0f )
@@ -772,7 +772,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( dt < 0.001f || skew <= 0.001f )
 		{
 			if( skew <= 0.001f )
-				pev->animtime = gpGlobals->time - 1.0f;
+				pev->animtime = gpGlobals->time + 0.25f;
 			return 0;
 		}
 	}
@@ -1023,11 +1023,14 @@ static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		return 0.0f;
 	/* MonsterThink calls StudioFrameAdvance(0). ResetSequenceInfo sets
 	   animtime to gpGlobals->time, so that call returns 0 and the feet
-	   do not move on the SetActivity think. sv.time does not advance
-	   between pumps, so a literal 0 every think would freeze the pose.
-	   A clock that was just reset (or still 0) gets interval 0. After
-	   the call, animtime is rewound one second so the next stuck clock
-	   is a real host interval. */
+	   do not move on the SetActivity think. A clock that was just reset
+	   (or still 0) gets interval 0. After the call, animtime is stamped
+	   0.25s ahead. That keeps the next skew above the hold, and it meets
+	   the client clock, which leads gpGlobals->time by that same 0.25s.
+	   StudioEstimateFrame adds (cl.time - animtime) * framerate * fps, so
+	   a stamp one second behind drew the pose 1.25s ahead of this frame.
+	   A stamp a full second ahead makes the step-position ratio largely
+	   negative and walks the model off its origin. */
 	if( !pev->animtime )
 		pev->animtime = ( gpGlobals->time > 0.0f ) ? gpGlobals->time : 0.001f;
 	skew = pev->animtime - gpGlobals->time;
@@ -1084,8 +1087,9 @@ static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		}
 	}
 	/* StudioFrameAdvance and ResetSequenceInfo both store animtime = now.
-	   Leave it a second behind so the next pump is not another hold. */
-	pev->animtime = gpGlobals->time - 1.0f;
+	   Leave it 0.25s ahead so the next pump is not another hold and the
+	   client does not add a second of sequence on top of this frame. */
+	pev->animtime = gpGlobals->time + 0.25f;
 	return flInterval;
 }
 

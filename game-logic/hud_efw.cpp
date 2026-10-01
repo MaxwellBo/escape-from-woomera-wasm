@@ -2962,6 +2962,62 @@ static void EFW_SilenceNotify( void )
 	}
 }
 
+/* StudioEstimateFrame adds (cl.time - animtime) * framerate * fps on top of
+   the networked frame when cl.time is past animtime, and adds nothing when
+   animtime is still ahead. A stamp one second behind leaves dlt at 1.25
+   once the client leads gpGlobals->time by 0.25s, about ten walk frames
+   past the server pose. A stamp 0.25s ahead meets that lead (dlt 0). While
+   both engine clocks are still sitting on 1, the same stamp leaves dlt at
+   -0.25 and the estimator draws the server frame. */
+static void EFW_LogPoseClock( float flTime )
+{
+	cl_entity_t *lp;
+	cl_entity_t *best;
+	float bestD;
+	int i;
+	static int s_n;
+
+	if( s_n >= 5 )
+		return;
+	s_n++;
+	lp = gEngfuncs.GetLocalPlayer();
+	best = NULL;
+	bestD = 1.0e9f;
+	for( i = 1; i <= 1024; i++ )
+	{
+		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
+		float dx, dy, d;
+
+		if( !ent || ent->curstate.modelindex <= 0 || ent->player )
+			continue;
+		if( ent->curstate.movetype != MOVETYPE_STEP && ent->curstate.sequence <= 0 )
+			continue;
+		if( !lp )
+		{
+			best = ent;
+			break;
+		}
+		dx = ent->origin[0] - lp->origin[0];
+		dy = ent->origin[1] - lp->origin[1];
+		d = dx * dx + dy * dy;
+		if( d < bestD )
+		{
+			bestD = d;
+			best = ent;
+		}
+	}
+	if( !best )
+	{
+		gEngfuncs.Con_Printf( "pose clock cl=%.3f none\n", flTime );
+		return;
+	}
+	gEngfuncs.Con_Printf(
+		"pose clock cl=%.3f anim=%.3f dlt=%.3f frame=%.1f fr=%.2f seq=%d mt=%d org=%.0f %.0f\n",
+		flTime, best->curstate.animtime, flTime - best->curstate.animtime,
+		best->curstate.frame, best->curstate.framerate, best->curstate.sequence,
+		best->curstate.movetype, best->origin[0], best->origin[1] );
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -2969,6 +3025,8 @@ int CHudEfw::Draw( float flTime )
 
 	s_drawN++;
 	EFW_SilenceNotify();
+	if( s_drawN == 40 || s_drawN == 100 || s_drawN == 180 || s_drawN == 260 )
+		EFW_LogPoseClock( flTime );
 	if( s_drawN <= 8 || ( s_drawN % 120 ) == 1 )
 		gEngfuncs.Con_Printf( "efw: HUD_Draw n=%d\n", s_drawN );
 	/* First ClientFrame never returned after this log under software
