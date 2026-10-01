@@ -203,6 +203,16 @@ def main() -> None:
     )
     once(
         client_cpp,
+        "void CmdStart( const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed )\n"
+        "{\n"
+        "	entvars_t *pev = (entvars_t *)&player->v;\n",
+        "void CmdStart( const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed )\n"
+        "{\n"
+        f"	EFW_NoteUsercmd( cmd ); {MARKER}\n"
+        "	entvars_t *pev = (entvars_t *)&player->v;\n",
+    )
+    once(
+        client_cpp,
         "void StartFrame( void )\n"
         "{\n"
         "	//ALERT( at_console, \"SV_Physics( %g, frametime %g )\\n\", gpGlobals->time, gpGlobals->frametime );\n",

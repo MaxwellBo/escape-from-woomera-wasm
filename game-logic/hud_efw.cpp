@@ -395,8 +395,8 @@ static int EFW_ContextOn( void )
 }
 
 /* Stuffed by the server as `efw_pmove` / `efw_plook` (CLIENT_COMMAND).
-   CL_CreateMove copies this into the usercmd so PM_Move walks and looks.
-   The origin latch stays at zero. */
+   CL_CreateMove copies this into the usercmd. The paused listen server
+   does not run PM_Move, so the host pump walks from efw_move. */
 extern kbutton_t in_speed;
 extern kbutton_t in_mlook;
 

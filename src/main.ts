@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll286`;
+    return `${url}?v=efw-dll288`;
   return url;
 }
 
@@ -2063,10 +2063,10 @@ function walkSlot(key: string): keyof typeof walkKeys | null {
 function syncWalkLatch() {
   const fwd = (walkKeys.w ? 1 : 0) + (walkKeys.s ? -1 : 0);
   const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
-  /* CL_CreateMove writes efw_pmove into the usercmd. The listen-server
-     console runs that client command; stufftext from efw_clmove does not
-     arrive. efw_move 0 0 keeps the origin latch clear. */
-  runGameCmd('efw_move 0 0');
+  /* CL_CreateMove writes efw_pmove into the usercmd. Libmenu pauses the
+     listen server, so that usercmd never lands on pev->button and PM_Move
+     never spends it. The host pump walks from efw_move. */
+  runGameCmd(`efw_move ${fwd} ${side}`);
   runGameCmd(`efw_pmove ${fwd} ${side}`);
 }
 function syncJump(on: boolean) {

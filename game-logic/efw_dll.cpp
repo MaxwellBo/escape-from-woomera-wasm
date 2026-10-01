@@ -11,6 +11,7 @@
 #include "client.h"
 #include "efw_dll.h"
 #include "efw_persist.h"
+#include "usercmd.h"
 
 #include <stdio.h>
 #include <stdarg.h>
@@ -2126,6 +2127,12 @@ static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
 static int s_moveSide;
 static int s_speedKey; /* HostFwd efw_pspeed, or pev->button IN_RUN */
 static int s_useHeld; /* HostFwd efw_puse, or pev->button IN_USE */
+/* CmdStart still runs while libmenu pauses PM_Move, so pev->button stays
+   0. The pump reads this copy of the usercmd. */
+static int s_cmdFwd;
+static int s_cmdSide;
+static int s_cmdButtons;
+static float s_cmdClock;
 static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
@@ -2155,6 +2162,57 @@ void EFW_LatchSpeed( int on )
 void EFW_LatchUseHold( int on )
 {
 	s_useHeld = on ? 1 : 0;
+}
+
+/* A usercmd older than this has stopped arriving. Holding the last one
+   would walk after the client let go. */
+static int EFW_CmdFresh( void )
+{
+	float age;
+
+	age = s_hostClock - s_cmdClock;
+	if( age < 0.0f )
+		age = 0.0f;
+	return age <= 0.45f;
+}
+
+void EFW_NoteUsercmd( const usercmd_s *cmd )
+{
+	static int s_log;
+
+	if( !cmd )
+		return;
+	s_cmdClock = s_hostClock;
+	s_cmdButtons = cmd->buttons;
+	s_cmdFwd = 0;
+	s_cmdSide = 0;
+	if( cmd->forwardmove > 50.0f )
+		s_cmdFwd = 1;
+	else if( cmd->forwardmove < -50.0f )
+		s_cmdFwd = -1;
+	if( cmd->sidemove > 50.0f )
+		s_cmdSide = 1;
+	else if( cmd->sidemove < -50.0f )
+		s_cmdSide = -1;
+	if( ( s_cmdFwd || s_cmdSide ) && s_log < 4 )
+	{
+		char line[128];
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: usercmd fwd=%.0f side=%.0f btn=%d\n",
+			cmd->forwardmove, cmd->sidemove, cmd->buttons );
+		EFW_LogLine( line );
+	}
+}
+
+static int EFW_LiveButtons( CBasePlayer *pPlayer )
+{
+	int buttons;
+
+	buttons = pPlayer ? pPlayer->pev->button : 0;
+	if( EFW_CmdFresh() )
+		buttons |= s_cmdButtons;
+	return buttons;
 }
 
 void EFW_LatchTurn( float yawDelta, float pitchDelta )
@@ -3103,22 +3161,30 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	fwd = s_moveFwd;
 	side = s_moveSide;
 	fromCmd = 0;
+	if( !fwd && !side && EFW_CmdFresh() )
+	{
+		fwd = s_cmdFwd;
+		side = s_cmdSide;
+		fromCmd = ( fwd || side ) ? 1 : 0;
+	}
 	if( !fwd && !side )
 	{
-		if( pPlayer->pev->button & IN_FORWARD )
+		int buttons = EFW_LiveButtons( pPlayer );
+		if( buttons & IN_FORWARD )
 			fwd++;
-		if( pPlayer->pev->button & IN_BACK )
+		if( buttons & IN_BACK )
 			fwd--;
-		if( pPlayer->pev->button & IN_MOVERIGHT )
+		if( buttons & IN_MOVERIGHT )
 			side++;
-		if( pPlayer->pev->button & IN_MOVELEFT )
+		if( buttons & IN_MOVELEFT )
 			side--;
 		fromCmd = ( fwd || side ) ? 1 : 0;
 	}
 	{
 		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
+		int liveBtn = EFW_LiveButtons( pPlayer );
 		int jumpEdge = !s_airborne
-			&& ( pPlayer->pev->button & IN_JUMP )
+			&& ( liveBtn & IN_JUMP )
 			&& !( s_oldAirButtons & IN_JUMP )
 			&& ( onGround || ( s_floorSet && pPlayer->pev->origin.z > s_floorZ + 1.0f ) );
 		/* Off the ground, or the frame the jump leaves it. PM_AirMove
@@ -3555,7 +3621,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 	if( dt > 0.2f )
 		dt = 0.2f;
 	EFW_DropPunch( dt );
-	buttons = pPlayer->pev->button;
+	buttons = EFW_LiveButtons( pPlayer );
 	pressed = buttons & ~s_oldAirButtons;
 	/* PM_Jump moves the hull and leaves the standing eye at 28. The
 	   camera follows origin, so adding the hop onto view_ofs put the
@@ -3863,6 +3929,382 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 	s_oldAirButtons = buttons;
 }
 
+/* PM_PlayStepSound in this DLL (0x10084940). Concrete, the materials.txt
+   default, is Footsteps/Guard_Footstep_Generic_1..4 in irand order.
+   Dirt is Footsteps/Player_Footstep_Dirt_5,2,3,4. Metal, vent, grate,
+   tile, slosh and ladder keep the stock player/pl_* set. irand is
+   RandomLong(0,1) plus the toggled foot * 2. */
+static const char *EFW_StepSample( int step, int irand )
+{
+	static const char *kMetal[] = {
+		"player/pl_metal1.wav", "player/pl_metal3.wav",
+		"player/pl_metal2.wav", "player/pl_metal4.wav"
+	};
+	static const char *kDirt[] = {
+		"Footsteps/Player_Footstep_Dirt_5.wav",
+		"Footsteps/Player_Footstep_Dirt_2.wav",
+		"Footsteps/Player_Footstep_Dirt_3.wav",
+		"Footsteps/Player_Footstep_Dirt_4.wav"
+	};
+	static const char *kDuct[] = {
+		"player/pl_duct1.wav", "player/pl_duct3.wav",
+		"player/pl_duct2.wav", "player/pl_duct4.wav"
+	};
+	static const char *kGrate[] = {
+		"player/pl_grate1.wav", "player/pl_grate3.wav",
+		"player/pl_grate2.wav", "player/pl_grate4.wav"
+	};
+	static const char *kTile[] = {
+		"player/pl_tile1.wav", "player/pl_tile3.wav",
+		"player/pl_tile2.wav", "player/pl_tile4.wav",
+		"player/pl_tile5.wav"
+	};
+	static const char *kSlosh[] = {
+		"player/pl_slosh1.wav", "player/pl_slosh3.wav",
+		"player/pl_slosh2.wav", "player/pl_slosh4.wav"
+	};
+	static const char *kWade[] = {
+		"player/pl_wade1.wav", "player/pl_wade2.wav",
+		"player/pl_wade3.wav", "player/pl_wade4.wav"
+	};
+	static const char *kLadder[] = {
+		"player/pl_ladder1.wav", "player/pl_ladder3.wav",
+		"player/pl_ladder2.wav", "player/pl_ladder4.wav"
+	};
+	static const char *kGuard[] = {
+		"Footsteps/Guard_Footstep_Generic_1.wav",
+		"Footsteps/Guard_Footstep_Generic_2.wav",
+		"Footsteps/Guard_Footstep_Generic_3.wav",
+		"Footsteps/Guard_Footstep_Generic_4.wav"
+	};
+	const char **tab = kGuard;
+	int n = 4;
+
+	switch( step )
+	{
+	case 1: tab = kMetal; break;
+	case 2: tab = kDirt; break;
+	case 3: tab = kDuct; break;
+	case 4: tab = kGrate; break;
+	case 5: tab = kTile; n = 5; break;
+	case 6: tab = kSlosh; break;
+	case 7: tab = kWade; break;
+	case 8: tab = kLadder; break;
+	default: break;
+	}
+	if( irand < 0 )
+		irand = 0;
+	if( irand >= n )
+		irand = n - 1;
+	return tab[irand];
+}
+
+static int EFW_TexCmp( const void *a, const void *b )
+{
+	const char *na = (const char *)a;
+	const char *nb = (const char *)b;
+	int i;
+	/* Entries are 13 bytes: type at [0], name at [1]. */
+	na++;
+	nb++;
+	for( i = 0; i < 12; i++ )
+	{
+		unsigned char ca = (unsigned char)na[i];
+		unsigned char cb = (unsigned char)nb[i];
+		if( ca >= 'a' && ca <= 'z' )
+			ca = (unsigned char)( ca - 32 );
+		if( cb >= 'a' && cb <= 'z' )
+			cb = (unsigned char)( cb - 32 );
+		if( ca != cb )
+			return (int)ca - (int)cb;
+		if( !ca )
+			return 0;
+	}
+	return 0;
+}
+
+static char EFW_TextureType( const char *texName )
+{
+	static char s_tex[512 * 13];
+	static int s_n;
+	static int s_loaded;
+	char query[13];
+	int i;
+
+	if( !s_loaded )
+	{
+		int length = 0;
+		char *buf;
+		int pos = 0;
+
+		s_loaded = 1;
+		s_n = 0;
+		buf = (char *)LOAD_FILE_FOR_ME( (char *)"sound/materials.txt", &length );
+		if( buf && length > 0 )
+		{
+			while( pos < length && s_n < 512 )
+			{
+				int line = pos;
+				char type;
+				int nameAt;
+				int copied;
+
+				while( pos < length && buf[pos] != '\n' )
+					pos++;
+				if( pos < length && buf[pos] == '\n' )
+					pos++;
+				while( line < pos && ( buf[line] == ' ' || buf[line] == '\t' || buf[line] == '\r' ) )
+					line++;
+				if( line >= pos || buf[line] == '/' || buf[line] == '\n' || buf[line] == '\r' )
+					continue;
+				type = buf[line];
+				if( type >= 'a' && type <= 'z' )
+					type = (char)( type - 32 );
+				if( type < 'A' || type > 'Z' )
+					continue;
+				line++;
+				while( line < pos && ( buf[line] == ' ' || buf[line] == '\t' ) )
+					line++;
+				if( line >= pos || buf[line] == '\n' || buf[line] == '\r' )
+					continue;
+				s_tex[s_n * 13] = type;
+				nameAt = s_n * 13 + 1;
+				copied = 0;
+				while( copied < 12 && line < pos && buf[line] != ' ' && buf[line] != '\t'
+					&& buf[line] != '\r' && buf[line] != '\n' )
+				{
+					s_tex[nameAt + copied] = buf[line];
+					copied++;
+					line++;
+				}
+				if( copied < 12 )
+					s_tex[nameAt + copied] = '\0';
+				s_n++;
+			}
+			FREE_FILE( buf );
+			if( s_n > 1 )
+				qsort( s_tex, (size_t)s_n, 13, EFW_TexCmp );
+		}
+		{
+			char line[80];
+			snprintf( line, sizeof( line ), "efw: materials %d\n", s_n );
+			EFW_LogLine( line );
+		}
+	}
+	if( !texName || !texName[0] || s_n < 1 )
+		return 'C';
+	if( texName[0] == '-' || texName[0] == '+' )
+		texName += 2;
+	if( texName[0] == '{' || texName[0] == '!' || texName[0] == '~' || texName[0] == ' ' )
+		texName++;
+	for( i = 0; i < 12; i++ )
+	{
+		query[i] = texName[i];
+		if( !texName[i] )
+			break;
+	}
+	query[i < 12 ? i : 12] = '\0';
+	{
+		char probe[13];
+		int left = 0;
+		int right = s_n - 1;
+
+		memset( probe, 0, sizeof( probe ) );
+		probe[0] = 'C';
+		for( i = 0; query[i] && i < 12; i++ )
+			probe[1 + i] = query[i];
+		while( left <= right )
+		{
+			int mid = ( left + right ) / 2;
+			int cmp = EFW_TexCmp( probe, s_tex + mid * 13 );
+			if( cmp == 0 )
+				return s_tex[mid * 13];
+			if( cmp > 0 )
+				left = mid + 1;
+			else
+				right = mid - 1;
+		}
+	}
+	return 'C';
+}
+
+static void EFW_PrecacheSteps( void )
+{
+	static const char *kWav[] = {
+		"Footsteps/Guard_Footstep_Generic_1.wav",
+		"Footsteps/Guard_Footstep_Generic_2.wav",
+		"Footsteps/Guard_Footstep_Generic_3.wav",
+		"Footsteps/Guard_Footstep_Generic_4.wav",
+		"Footsteps/Player_Footstep_Dirt_2.wav",
+		"Footsteps/Player_Footstep_Dirt_3.wav",
+		"Footsteps/Player_Footstep_Dirt_4.wav",
+		"Footsteps/Player_Footstep_Dirt_5.wav",
+		"player/pl_metal1.wav", "player/pl_metal2.wav",
+		"player/pl_metal3.wav", "player/pl_metal4.wav",
+		"player/pl_duct1.wav", "player/pl_duct2.wav",
+		"player/pl_duct3.wav", "player/pl_duct4.wav",
+		"player/pl_grate1.wav", "player/pl_grate2.wav",
+		"player/pl_grate3.wav", "player/pl_grate4.wav",
+		"player/pl_tile1.wav", "player/pl_tile2.wav",
+		"player/pl_tile3.wav", "player/pl_tile4.wav",
+		"player/pl_tile5.wav",
+		"player/pl_slosh1.wav", "player/pl_slosh2.wav",
+		"player/pl_slosh3.wav", "player/pl_slosh4.wav",
+		"player/pl_wade1.wav", "player/pl_wade2.wav",
+		"player/pl_wade3.wav", "player/pl_wade4.wav",
+		"player/pl_ladder1.wav", "player/pl_ladder2.wav",
+		"player/pl_ladder3.wav", "player/pl_ladder4.wav"
+	};
+	unsigned i;
+	for( i = 0; i < sizeof( kWav ) / sizeof( kWav[0] ); i++ )
+		PRECACHE_SOUND( (char *)kWav[i] );
+}
+
+/* PM_UpdateStepSound. The pump is the cmd.msec clock. A timer that
+   reaches 0 this pump still plays, matching ReduceTimers before the
+   step check. */
+static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
+{
+	int msec;
+	float speed;
+	float velwalk;
+	float velrun;
+	float flduck;
+	int ducked;
+	int step;
+	float fvol;
+	int irand;
+	const char *sample;
+	const char *texName = NULL;
+	char texType;
+	Vector start;
+	Vector end;
+	static int s_skipWade;
+	static int s_log;
+
+	if( !pPlayer )
+		return;
+	msec = (int)( EFW_HostInterval() * 1000.0f );
+	if( msec < 1 )
+		msec = 1;
+	if( pPlayer->m_flTimeStepSound > 0.0f )
+	{
+		pPlayer->m_flTimeStepSound -= (float)msec;
+		if( pPlayer->m_flTimeStepSound < 0.0f )
+			pPlayer->m_flTimeStepSound = 0.0f;
+	}
+	if( pPlayer->m_flTimeStepSound > 0.0f )
+		return;
+	if( pPlayer->pev->flags & FL_FROZEN )
+		return;
+	speed = pPlayer->pev->velocity.Length();
+	ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
+	if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
+	{
+		velwalk = 60.0f;
+		velrun = 80.0f;
+		flduck = 100.0f;
+	}
+	else
+	{
+		velwalk = 120.0f;
+		velrun = 210.0f;
+		flduck = 0.0f;
+	}
+	if( !( pPlayer->pev->flags & FL_ONGROUND ) && pPlayer->pev->movetype != MOVETYPE_FLY )
+		return;
+	if( speed <= 0.0f )
+		return;
+	if( speed < velwalk && pPlayer->m_flTimeStepSound != 0.0f )
+		return;
+	{
+		int walking = speed < velrun;
+		float height;
+		Vector knee;
+		Vector feet;
+
+		height = pPlayer->pev->maxs.z - pPlayer->pev->mins.z;
+		knee = pPlayer->pev->origin;
+		feet = pPlayer->pev->origin;
+		knee.z -= 0.3f * height;
+		feet.z -= 0.5f * height;
+		if( pPlayer->pev->movetype == MOVETYPE_FLY )
+		{
+			step = 8;
+			fvol = 0.35f;
+			pPlayer->m_flTimeStepSound = 350.0f;
+		}
+		else if( UTIL_PointContents( knee ) == CONTENTS_WATER )
+		{
+			step = 7;
+			fvol = 0.65f;
+			pPlayer->m_flTimeStepSound = 600.0f;
+		}
+		else if( UTIL_PointContents( feet ) == CONTENTS_WATER )
+		{
+			step = 6;
+			fvol = walking ? 0.2f : 0.5f;
+			pPlayer->m_flTimeStepSound = walking ? 400.0f : 300.0f;
+		}
+		else
+		{
+			start = pPlayer->pev->origin;
+			end = start;
+			end.z -= 64.0f;
+			{
+				edict_t *world = INDEXENT( 0 );
+				texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
+			}
+			texType = EFW_TextureType( texName );
+			switch( texType )
+			{
+			case 'M': step = 1; break;
+			case 'D': step = 2; break;
+			case 'V': step = 3; break;
+			case 'G': step = 4; break;
+			case 'T': step = 5; break;
+			case 'S': step = 6; break;
+			default: step = 0; break;
+			}
+			if( texType == 'D' )
+				fvol = walking ? 0.25f : 0.55f;
+			else if( texType == 'V' )
+				fvol = walking ? 0.4f : 0.7f;
+			else
+				fvol = walking ? 0.2f : 0.5f;
+			pPlayer->m_flTimeStepSound = walking ? 400.0f : 300.0f;
+		}
+	}
+	pPlayer->m_flTimeStepSound += flduck;
+	if( ducked )
+		fvol *= 0.35f;
+	pPlayer->m_iStepLeft = !pPlayer->m_iStepLeft;
+	irand = RANDOM_LONG( 0, 1 ) + ( pPlayer->m_iStepLeft ? 2 : 0 );
+	if( step == 5 && !RANDOM_LONG( 0, 4 ) )
+		irand = 4;
+	if( step == 7 )
+	{
+		if( s_skipWade == 0 )
+		{
+			s_skipWade++;
+			return;
+		}
+		if( s_skipWade++ == 3 )
+			s_skipWade = 0;
+	}
+	sample = EFW_StepSample( step, irand );
+	EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
+	if( s_log < 8 )
+	{
+		char line[160];
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: step %s vol=%.2f spd=%.0f tex=%s\n",
+			sample, fvol, speed, texName ? texName : "-" );
+		EFW_LogLine( line );
+	}
+}
+
 static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
 {
 	char line[128];
@@ -3985,6 +4427,7 @@ void EFW_StartFrame( void )
 			{
 				EFW_ApplyLatchedMove( pPlayer );
 				EFW_ApplyUsercmdAir( pPlayer );
+				EFW_UpdateStepSound( pPlayer );
 				EFW_ForceWorldPresent( pPlayer );
 			}
 		}
@@ -4318,6 +4761,7 @@ void EFW_Precache( void )
 	PRECACHE_MODEL( "models/w_Pliers.mdl" );
 	PRECACHE_MODEL( "models/v_Pliers.mdl" );
 	PRECACHE_MODEL( "models/p_Pliers.mdl" );
+	EFW_PrecacheSteps();
 	EFW_InitPA();
 }
 
