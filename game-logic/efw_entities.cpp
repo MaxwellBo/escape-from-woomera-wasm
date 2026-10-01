@@ -263,6 +263,17 @@ static void EFW_QueueOrigin( entvars_t *pev, const Vector &org )
 	s_linkN++;
 }
 
+void EFW_LinkNpcBody( edict_t *pent )
+{
+	if( !pent || pent->free )
+		return;
+	/* Spawn left SOLID_NOT, and SV_LinkEdict never ran again. A hull trace
+	   only tests edicts in the area nodes, so a queue that never steps is
+	   a ghost. The same queue FlushNpcOrigins already drains links a
+	   walker after the first move. */
+	EFW_QueueOrigin( &pent->v, pent->v.origin );
+}
+
 void EFW_FlushNpcOrigins( void )
 {
 	edict_t *queued[48];

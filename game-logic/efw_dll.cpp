@@ -2317,6 +2317,10 @@ static int EFW_BindOneDetainee( void )
 				i, cn[0] ? cn : "?", idx );
 			EFW_LogLine( line );
 		}
+		/* Link after the size is on the edict. Flush runs at the end of
+		   this frame, outside the think, which is the path that does not
+		   re-enter IdleThink. */
+		EFW_LinkNpcBody( pent );
 		EFW_EnableNpcThink( pent );
 		return 1;
 	}
