@@ -2662,61 +2662,6 @@ static int EFW_PlayerHull( CBasePlayer *pPlayer )
 	return human_hull;
 }
 
-static Vector EFW_AirHorizontal( CBasePlayer *pPlayer, float dt, int fwd, int side )
-{
-	Vector wish;
-	Vector dest;
-	Vector start;
-	float speed;
-	TraceResult tr;
-	char line[96];
-	int hull;
-	static int s_hvLog;
-
-	EFW_WishMove( pPlayer, fwd, side, &wish, &speed );
-	EFW_AirAccelerate( wish.x, wish.y, speed, dt );
-	start = pPlayer->pev->origin;
-	dest = start + Vector( s_hvx * dt, s_hvy * dt, 0 );
-	hull = EFW_PlayerHull( pPlayer );
-	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
-	if( tr.fStartSolid )
-		return start;
-	if( tr.flFraction < 1.0f )
-	{
-		Vector hit = tr.vecEndPos;
-		Vector left = dest - hit;
-		float into = DotProduct( left, tr.vecPlaneNormal );
-		float backoff;
-		TraceResult slide;
-
-		/* PM_ClipVelocity. A one-unit stand-off is not the new speed;
-		   dividing that nudge by dt was wiping a running jump. */
-		/* Into the plane the dot is negative. Leave a velocity that is
-		   already moving back out of the brush alone. */
-		backoff = s_hvx * tr.vecPlaneNormal.x + s_hvy * tr.vecPlaneNormal.y;
-		if( backoff < 0.0f )
-		{
-			s_hvx -= backoff * tr.vecPlaneNormal.x;
-			s_hvy -= backoff * tr.vecPlaneNormal.y;
-		}
-		if( into < 0.0f )
-			left = left - tr.vecPlaneNormal * into;
-		left = left + tr.vecPlaneNormal;
-		UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &slide );
-		dest = slide.fStartSolid ? hit : slide.vecEndPos;
-	}
-	else
-		dest = tr.vecEndPos;
-	if( s_hvLog < 80 )
-	{
-		s_hvLog++;
-		snprintf( line, sizeof( line ),
-			"efw: airhv hv=%.0f %.0f z=%.1f fwd=%d\n", s_hvx, s_hvy, start.z, fwd );
-		EFW_LogLine( line );
-	}
-	return dest;
-}
-
 static float EFW_DuckSpline( float time )
 {
 	float value;
@@ -3077,7 +3022,17 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	if( dt > 0.2f )
 		dt = 0.2f;
 	if( inAir )
-		dest = EFW_AirHorizontal( pPlayer, dt, fwd, side );
+	{
+		Vector wish;
+		float wishspeed;
+
+		/* Accelerate here. The position step is the 3D trace in
+		   EFW_ApplyUsercmdAir, so a descent can hit a deck the flat
+		   move would already have crossed. */
+		EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
+		EFW_AirAccelerate( wish.x, wish.y, wishspeed, dt );
+		dest = pPlayer->pev->origin;
+	}
 	else
 	{
 	Vector wish;
@@ -3393,6 +3348,69 @@ static void EFW_ViewBob( CBasePlayer *pPlayer, float dt )
 	}
 }
 
+/* PM_FlyMove along one displacement. Returns 1 when a descending segment
+   hits a walkable floor, -1 when the hull starts in a solid, else 0. */
+static int EFW_FlyDisplace( CBasePlayer *pPlayer, const Vector &wish, Vector *out )
+{
+	Vector pos;
+	Vector remain;
+	int bump;
+	int hull;
+
+	if( !pPlayer || !out )
+		return 0;
+	pos = pPlayer->pev->origin;
+	remain = wish;
+	hull = EFW_PlayerHull( pPlayer );
+	for( bump = 0; bump < 4; bump++ )
+	{
+		TraceResult tr = {};
+		Vector end;
+		float back;
+		float span;
+
+		span = remain.x * remain.x + remain.y * remain.y + remain.z * remain.z;
+		if( span < 0.0001f )
+			break;
+		end = pos + remain;
+		UTIL_TraceHull( pos, end, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+		{
+			*out = pos;
+			return -1;
+		}
+		if( tr.flFraction > 0.0f )
+			pos = tr.vecEndPos;
+		if( tr.flFraction >= 1.0f )
+			break;
+		if( remain.z <= 0.05f && tr.vecPlaneNormal.z >= 0.7f )
+		{
+			*out = pos;
+			return 1;
+		}
+		remain = remain * ( 1.0f - tr.flFraction );
+		back = remain.x * tr.vecPlaneNormal.x
+			+ remain.y * tr.vecPlaneNormal.y
+			+ remain.z * tr.vecPlaneNormal.z;
+		if( back < 0.0f )
+		{
+			remain.x -= back * tr.vecPlaneNormal.x;
+			remain.y -= back * tr.vecPlaneNormal.y;
+			remain.z -= back * tr.vecPlaneNormal.z;
+		}
+		back = s_hvx * tr.vecPlaneNormal.x + s_hvy * tr.vecPlaneNormal.y;
+		if( back < 0.0f )
+		{
+			s_hvx -= back * tr.vecPlaneNormal.x;
+			s_hvy -= back * tr.vecPlaneNormal.y;
+		}
+		if( tr.vecPlaneNormal.z < 0.0f && s_vz > 0.0f )
+			s_vz = 0.0f;
+	}
+	*out = pos;
+	return 0;
+}
+
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
@@ -3617,38 +3635,28 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		s_jumpT += dt;
 		s_vz = s_jumpVz0 - 800.0f * s_jumpT;
 		z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
-		/* PM_FlyMove traces this frame's vertical segment from the hull,
-		   not from the takeoff height. A deck above the takeoff is a floor
-		   on the way down; starting the trace at s_floorZ put that deck
-		   inside the solid and the hull flew over it. */
+		/* PM_FlyMove steps along the whole displacement. A flat move at the
+		   old height clears a deck, then the drop at the new x,y misses it. */
 		{
-			TraceResult down;
 			Vector top;
-			Vector bot;
-			int descending;
+			Vector wish;
+			int hit;
 
 			top = pPlayer->pev->origin;
-			bot = top;
-			bot.z = z;
-			descending = ( z <= top.z + 0.05f ) ? 1 : 0;
-			dest = top;
-			UTIL_TraceHull( top, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
-			if( down.fStartSolid )
+			wish = Vector( s_hvx * dt, s_hvy * dt, z - top.z );
+			hit = EFW_FlyDisplace( pPlayer, wish, &dest );
+			if( hit < 0 && wish.z <= 0.0f )
 			{
 				dest = top;
-				if( descending )
-				{
-					s_airborne = 0;
-					s_vz = 0.0f;
-					pPlayer->pev->flags &= ~FL_ONGROUND;
-				}
+				s_airborne = 0;
+				s_vz = 0.0f;
+				pPlayer->pev->flags &= ~FL_ONGROUND;
 			}
-			else if( descending && down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+			else if( hit > 0 )
 			{
 				float fall;
 				float drop;
 
-				dest = down.vecEndPos;
 				drop = s_floorZ - dest.z;
 				if( drop < 0.0f )
 					drop = 0.0f;
@@ -3680,12 +3688,6 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 						dest.z, s_floorZ, fall, dest.x, dest.y );
 					EFW_LogLine( line );
 				}
-			}
-			else
-			{
-				if( down.flFraction < 1.0f && s_vz > 0.0f && down.vecPlaneNormal.z < 0.7f )
-					s_vz = 0.0f;
-				dest = down.vecEndPos;
 			}
 		}
 		pPlayer->pev->origin = dest;
