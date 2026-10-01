@@ -312,7 +312,7 @@ void EFW_FlushNpcOrigins( void )
    (-16,-16,0)-(16,16,72) is that player hull stood on the feet, so
    the trace origin is 36 above the feet. End positions come back in
    feet space. */
-static void EFW_TraceFeetHull( entvars_t *pev, const Vector &start, const Vector &end, TraceResult *tr )
+static void EFW_TraceFeetHull( entvars_t *pev, const Vector &start, const Vector &end, TraceResult *tr, IGNORE_MONSTERS igmon = ignore_monsters )
 {
 	Vector a;
 	Vector b;
@@ -322,8 +322,28 @@ static void EFW_TraceFeetHull( entvars_t *pev, const Vector &start, const Vector
 	a.z += 36.0f;
 	b.z += 36.0f;
 	*tr = TraceResult();
-	UTIL_TraceHull( a, b, ignore_monsters, human_hull, ENT( pev ), tr );
+	UTIL_TraceHull( a, b, igmon, human_hull, ENT( pev ), tr );
 	tr->vecEndPos.z -= 36.0f;
+}
+
+/* A blocked MOVE_NORMAL step stops on another solid body. A BSP hit is a
+   wall or a stair, and the step-size landing still applies there. */
+static int EFW_TraceHitBody( entvars_t *pev, const TraceResult *tr )
+{
+	edict_t *hit;
+
+	if( !tr )
+		return 0;
+	if( !tr->fStartSolid && !tr->fAllSolid && tr->flFraction >= 1.0f )
+		return 0;
+	hit = tr->pHit;
+	if( !hit || ( pev && hit == ENT( pev ) ) )
+		return 0;
+	if( hit->free )
+		return 0;
+	if( hit->v.solid == SOLID_BSP )
+		return 0;
+	return 1;
 }
 
 /* SV_MoveStep: stand the hull on the floor within sv_stepsize (18, set in
@@ -496,8 +516,9 @@ static void EFW_NpcFall( entvars_t *pev )
 }
 
 /* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
-   Trace the PE hull (-16..16, 0..72) and ignore other monsters so touch
-   does not call back into think. MoveExecute walks
+   Trace the PE hull (-16..16, 0..72). A horizontal step hits other bodies
+   the way MOVE_NORMAL does; the floor probe still ignores them so a
+   neighbor is not a stair. MoveExecute walks
    groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
 
@@ -523,8 +544,8 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 	savedMins = pev->mins.z;
 	if( savedMins < 1.0f )
 		pev->mins.z = 1.0f;
-	EFW_TraceFeetHull( pev, start, end, &tr );
-	if( tr.fAllSolid || tr.fStartSolid )
+	EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
+	if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
 	{
 		int stepUp;
 		float baseZ = start.z;
@@ -534,19 +555,21 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 			Vector raised = start;
 
 			raised.z = baseZ + stepUp * 2.0f;
-			EFW_TraceFeetHull( pev, raised, raised, &tr );
+			EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
 			if( !tr.fStartSolid && !tr.fAllSolid )
 			{
 				end = raised + wish * step;
-				EFW_TraceFeetHull( pev, raised, end, &tr );
+				EFW_TraceFeetHull( pev, raised, end, &tr, dont_ignore_monsters );
 				break;
 			}
 		}
 	}
 	pev->mins.z = savedMins;
 	/* Same acceptance as the direct chunk: a destination with a floor
-	   counts, even when the feet-level trace started in the ground. */
-	if( EFW_LandMonster( pev, end, &stepLand ) )
+	   counts, even when the feet-level trace started in the ground.
+	   A body in the way is not a stair; landing at the far end would
+	   step through that person. */
+	if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
 	{
 		horiz = ( stepLand - start ).Length2D();
 		if( horiz >= 0.5f )
@@ -561,7 +584,7 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 	{
 		Vector grounded;
 
-		if( EFW_LandMonster( pev, stepLand, &grounded ) )
+		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, stepLand, &grounded ) )
 			stepLand = grounded;
 		else
 			stepLand.z = start.z;
@@ -789,11 +812,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		savedMins = pev->mins.z;
 		if( savedMins < 1.0f )
 			pev->mins.z = 1.0f;
-		EFW_TraceFeetHull( pev, start, end, &tr );
+		EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
 		/* Feet-origin mins.z == 0 sits in the floor and the trace is
 		   startsolid. StartMonster adds 1 to origin.z; DROP_TO_FLOOR
-		   cannot lift an origin already inside the floor. */
-		if( tr.fAllSolid || tr.fStartSolid )
+		   cannot lift an origin already inside the floor. Another
+		   character is not the floor: climbing off their hull is the
+		   bunk pop. */
+		if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
 		{
 			int stepUp;
 			float baseZ = start.z;
@@ -802,12 +827,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				Vector raised = start;
 				raised.z = baseZ + stepUp * 2.0f;
-				EFW_TraceFeetHull( pev, raised, raised, &tr );
+				EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
 				if( !tr.fStartSolid && !tr.fAllSolid )
 				{
 					start = raised;
 					end = start + wish;
-					EFW_TraceFeetHull( pev, start, end, &tr );
+					EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
 					{
 						static int s_lift;
 						if( s_lift < 6 )
@@ -832,8 +857,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 		/* Prefer the step-size landing at the full chunk. A blocked hull
-		   falls back to the partial slide, then lands if a floor is near. */
-		if( EFW_LandMonster( pev, end, &stepLand ) )
+		   falls back to the partial slide, then lands if a floor is near.
+		   The far landing ignores bodies, so a person in the trace must
+		   keep the contact instead of the floor beyond them. */
+		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
 		{
 			float dz = stepLand.z - start.z;
 			if( dz < 0.0f )
@@ -862,7 +889,20 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			stepLand = start + ( end - start ) * tr.flFraction;
 			{
 				Vector grounded;
-				if( EFW_LandMonster( pev, stepLand, &grounded ) )
+				if( EFW_TraceHitBody( pev, &tr ) )
+				{
+					static int s_body;
+					stepLand.z = start.z;
+					if( s_body < 6 )
+					{
+						const char *who = STRING( tr.pHit->v.targetname );
+						s_body++;
+						EFW_DebugPrint( "body stop frac=%.2f at %.0f %.0f hit=%s",
+							tr.flFraction, stepLand.x, stepLand.y,
+							( who && who[0] ) ? who : STRING( tr.pHit->v.classname ) );
+					}
+				}
+				else if( EFW_LandMonster( pev, stepLand, &grounded ) )
 					stepLand = grounded;
 				else
 					stepLand.z = start.z;
