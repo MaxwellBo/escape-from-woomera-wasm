@@ -3399,9 +3399,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 	float frac;
 	int buttons;
 	int pressed;
-	Vector start;
 	Vector dest;
-	TraceResult tr;
 	char line[160];
 	static int s_jumpN;
 
@@ -3619,36 +3617,37 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		s_jumpT += dt;
 		s_vz = s_jumpVz0 - 800.0f * s_jumpT;
 		z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
-		start = pPlayer->pev->origin;
-		start.z = s_floorZ;
-		dest = start;
-		dest.z = z;
-		if( z <= s_floorZ )
+		/* PM_FlyMove traces this frame's vertical segment from the hull,
+		   not from the takeoff height. A deck above the takeoff is a floor
+		   on the way down; starting the trace at s_floorZ put that deck
+		   inside the solid and the hull flew over it. */
 		{
-			/* The parabola comes back to the takeoff height. A lower floor
-			   used to be a 512-unit snap with vz cleared, so PM_CheckFalling
-			   never saw the impact. Keep the same arc until the hull hits. */
 			TraceResult down;
 			Vector top;
 			Vector bot;
-			float fall;
-			float drop;
+			int descending;
 
 			top = pPlayer->pev->origin;
-			if( top.z > s_floorZ )
-				top.z = s_floorZ;
 			bot = top;
 			bot.z = z;
+			descending = ( z <= top.z + 0.05f ) ? 1 : 0;
+			dest = top;
 			UTIL_TraceHull( top, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
 			if( down.fStartSolid )
 			{
 				dest = top;
-				s_airborne = 0;
-				s_vz = 0.0f;
-				pPlayer->pev->flags &= ~FL_ONGROUND;
+				if( descending )
+				{
+					s_airborne = 0;
+					s_vz = 0.0f;
+					pPlayer->pev->flags &= ~FL_ONGROUND;
+				}
 			}
-			else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+			else if( descending && down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
 			{
+				float fall;
+				float drop;
+
 				dest = down.vecEndPos;
 				drop = s_floorZ - dest.z;
 				if( drop < 0.0f )
@@ -3682,21 +3681,11 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 					EFW_LogLine( line );
 				}
 			}
-			else if( down.flFraction < 1.0f )
-			{
-				dest = down.vecEndPos;
-			}
 			else
-				dest = down.vecEndPos;
-		}
-		else
-		{
-			UTIL_TraceHull( start, dest, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &tr );
-			if( !tr.fStartSolid )
 			{
-				if( tr.flFraction < 1.0f && s_vz > 0.0f && tr.vecPlaneNormal.z < 0.7f )
+				if( down.flFraction < 1.0f && s_vz > 0.0f && down.vecPlaneNormal.z < 0.7f )
 					s_vz = 0.0f;
-				dest = tr.vecEndPos;
+				dest = down.vecEndPos;
 			}
 		}
 		pPlayer->pev->origin = dest;
