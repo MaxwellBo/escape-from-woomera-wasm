@@ -3631,19 +3631,30 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 
 	if( s_airborne )
 	{
-		float z;
-		s_jumpT += dt;
-		s_vz = s_jumpVz0 - 800.0f * s_jumpT;
-		z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
-		/* PM_FlyMove steps along the whole displacement. A flat move at the
-		   old height clears a deck, then the drop at the new x,y misses it. */
+		float left;
+		int slices;
+
+		/* A GoldSrc usercmd is about 10ms. One 0.2s diagonal clears a
+		   deck that those short steps land on. */
+		left = dt;
+		slices = 0;
+		dest = pPlayer->pev->origin;
+		while( s_airborne && left > 0.0005f && slices < 25 )
 		{
+			float slice;
+			float z;
 			Vector top;
 			Vector wish;
 			int hit;
 
+			slice = left;
+			if( slice > 0.01f )
+				slice = 0.01f;
+			s_jumpT += slice;
+			s_vz = s_jumpVz0 - 800.0f * s_jumpT;
+			z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
 			top = pPlayer->pev->origin;
-			wish = Vector( s_hvx * dt, s_hvy * dt, z - top.z );
+			wish = Vector( s_hvx * slice, s_hvy * slice, z - top.z );
 			hit = EFW_FlyDisplace( pPlayer, wish, &dest );
 			if( hit < 0 && wish.z <= 0.0f )
 			{
@@ -3689,10 +3700,12 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 					EFW_LogLine( line );
 				}
 			}
+			pPlayer->pev->origin = dest;
+			pPlayer->pev->velocity.z = s_vz;
+			UTIL_SetOrigin( pPlayer->pev, dest );
+			left -= slice;
+			slices++;
 		}
-		pPlayer->pev->origin = dest;
-		pPlayer->pev->velocity.z = s_vz;
-		UTIL_SetOrigin( pPlayer->pev, dest );
 	}
 
 	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
