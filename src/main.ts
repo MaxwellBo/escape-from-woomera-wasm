@@ -195,7 +195,7 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
     btn.style.pointerEvents = 'none';
     const saved = menuHit.get(Number(menu[1]));
     if (saved)
-      placeMenuHit(Number(menu[1]), saved.y, saved.h);
+      placeMenuHit(Number(menu[1]), saved.y, saved.h, btn);
     return;
   }
   btn.classList.remove('efw-menu');
@@ -251,18 +251,18 @@ function parkMenuHits() {
   });
 }
 
-function placeMenuHit(slot: number, y: number, h: number) {
+function placeMenuHit(slot: number, y: number, h: number, btn?: HTMLButtonElement) {
   const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
   const H = canvas?.height || 0;
   menuHit.set(slot, { y, h });
-  const btn = document.querySelector(`#efw-vgui button[data-cmd="menuselect ${slot}"]`);
-  if (!(btn instanceof HTMLButtonElement) || H < 1) return;
+  const node = btn ?? document.querySelector(`#efw-vgui button[data-cmd="menuselect ${slot}"]`);
+  if (!(node instanceof HTMLButtonElement) || H < 1) return;
   const hh = Math.max(15, h);
-  btn.style.left = '0%';
-  btn.style.width = '100%';
-  btn.style.top = `${((y / H) * 100).toFixed(2)}%`;
-  btn.style.height = `${((hh / H) * 100).toFixed(2)}%`;
-  btn.style.pointerEvents = 'auto';
+  node.style.left = '0%';
+  node.style.width = '100%';
+  node.style.top = `${((y / H) * 100).toFixed(2)}%`;
+  node.style.height = `${((hh / H) * 100).toFixed(2)}%`;
+  node.style.pointerEvents = 'auto';
 }
 
 function applyMenuHit(text: string): boolean {
@@ -311,7 +311,8 @@ function applyEfwVgui(text: string): boolean {
   if (idx < 0) return false;
   const msg = text.slice(idx).replace(/\s+$/, '');
   if (msg === 'EFWVGUI CLR') {
-    menuHit.clear();
+    /* Keep the last Press-row positions. The file poll repeats this
+       clear, and the draw log does not repeat the rows. */
     layer.innerHTML = '';
     layer.hidden = true;
     return true;
@@ -370,16 +371,18 @@ function applyEfwVgui(text: string): boolean {
     btn.style.fontSize = layer.style.fontSize;
     btn.style.color = layer.style.color;
   }
+  const activate = () => {
+    log(`> ${cmd}`);
+    runEngineCmd('pausable 0');
+    runGameCmd(cmd);
+  };
   btn.addEventListener('pointerdown', (ev) => {
-    ev.preventDefault();
     ev.stopPropagation();
   });
   btn.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    log(`> ${cmd}`);
-    runEngineCmd('pausable 0');
-    runGameCmd(cmd);
+    activate();
   });
   layer.appendChild(btn);
   layoutPromptColumn(layer);
