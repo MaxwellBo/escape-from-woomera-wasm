@@ -575,6 +575,11 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 		return;
 	}
 	EFW_ShowDllMenu( pPlayer, title, lines, st->menuCount );
+	/* FUN_100c6e60 writes DAT_1013487c from gpGlobals->time. FUN_100c6c10
+	   closes the menu once that clock passes the stamp by 20s. sv.time
+	   stays at the listen-server pause, so stamp the host clock after
+	   ShowDllMenu overwrites the field. */
+	st->talkStart = EFW_HostClock();
 }
 
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
@@ -759,16 +764,18 @@ void EFW_ThinkConversation( void )
 			}
 		}
 		{
-			/* Choice menus compare gpGlobals->time (frozen, so they stay up).
-			   A squark line has no topics. Its 20s (DAT_1011d128) is host
-			   seconds, or it hides once the player is past hideDist. */
-			float now = ( st->menuMode == 0 ) ? EFW_HostClock() : gpGlobals->time;
+			/* FUN_100c6c10: gpGlobals->time >= DAT_1013487c + 20. The
+			   listen server leaves sv.time at 1.00, so both a squark and
+			   a choice menu measure those 20 seconds on the host clock. */
+			float now = EFW_HostClock();
 			if( !pPlayer || !st->talkNpc )
 				EFW_CloseTalk();
 			else if( now >= st->talkStart + EFW_TALK_TIMEOUT )
 			{
 				if( st->menuMode == 0 )
 					EFW_DebugPrint( "efw: squark timeout" );
+				else
+					EFW_DebugPrint( "efw: menu timeout" );
 				EFW_CloseTalk();
 			}
 			else
