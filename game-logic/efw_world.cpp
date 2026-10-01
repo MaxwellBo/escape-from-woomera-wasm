@@ -327,6 +327,82 @@ static int EFW_PosInBox( const Vector &pos, CBaseEntity *pEnt )
 		&& pos.z >= mins.z - 16.0f && pos.z <= maxs.z + 48.0f;
 }
 
+/* trigger_multiple stores the next fire on pev->nextthink as
+   sv.time + wait. ActivateMultiTrigger returns while nextthink is still
+   ahead of that clock. The listen server leaves sv.time put, so a brush
+   that has fired once never fires again. The map wait (the kitchen
+   brushes are 1 second) elapses on the host clock, then nextthink is
+   pulled back to sv.time and MultiTouch can run. */
+void EFW_AdvanceTriggerWaits( void )
+{
+	static struct
+	{
+		edict_t *ed;
+		float at;
+	} arm[16];
+	CBaseEntity *pScan;
+	float now;
+	int i;
+	static int s_log;
+
+	now = EFW_HostClock();
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+	{
+		edict_t *ed;
+		float wait;
+		int slot;
+		int freeSlot;
+
+		ed = pScan->edict();
+		if( !ed )
+			continue;
+		if( pScan->pev->nextthink <= gpGlobals->time )
+		{
+			for( i = 0; i < 16; i++ )
+			{
+				if( arm[i].ed == ed )
+					arm[i].ed = NULL;
+			}
+			continue;
+		}
+		wait = ( (CBaseToggle *)pScan )->m_flWait;
+		if( wait <= 0.0f )
+			continue;
+		slot = -1;
+		freeSlot = -1;
+		for( i = 0; i < 16; i++ )
+		{
+			if( arm[i].ed == ed )
+			{
+				slot = i;
+				break;
+			}
+			if( freeSlot < 0 && !arm[i].ed )
+				freeSlot = i;
+		}
+		if( slot < 0 )
+		{
+			if( freeSlot < 0 )
+				continue;
+			arm[freeSlot].ed = ed;
+			arm[freeSlot].at = now;
+			continue;
+		}
+		if( ( now - arm[slot].at ) >= wait )
+		{
+			pScan->pev->nextthink = gpGlobals->time;
+			arm[slot].ed = NULL;
+			if( s_log < 8 )
+			{
+				s_log++;
+				EFW_DebugPrint( ">>> trigger wait %.2f %s", wait,
+					STRING( pScan->pev->target ) );
+			}
+		}
+	}
+}
+
 /* GoldSrc trigger Touch is AABB. Noclip / deferred studios never fire
    pfnTouch, so FUN_100c7da0 GateFSM never ran while walking the barracks. */
 void EFW_PulseWorld( CBasePlayer *pPlayer )
@@ -346,6 +422,7 @@ void EFW_PulseWorld( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
+	EFW_AdvanceTriggerWaits();
 	pos = pPlayer->pev->origin;
 	pScan = NULL;
 	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )

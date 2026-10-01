@@ -32,6 +32,9 @@ static void EFW_TouchTriggers( CBasePlayer *pPlayer, const Vector &pos )
 	CBaseEntity *pScan = NULL;
 	if( !pPlayer )
 		return;
+	/* Same host-clock wait the pulse uses, so a setpos into a brush that
+	   already finished its map wait can Touch on this command. */
+	EFW_AdvanceTriggerWaits();
 	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
 	{
 		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
