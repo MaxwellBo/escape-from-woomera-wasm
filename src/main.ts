@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll292`;
+    return `${url}?v=efw-dll293`;
   return url;
 }
 
@@ -475,6 +475,25 @@ function dismissLetterbox() {
     runEngineCmd('pausable 0');
     runGameCmd('efw_pause 0');
   }
+}
+
+/* The SPR comic is the engine storyboard. This layer is the click catcher
+   over it, and while it is up the orbit buttons stay visibility:hidden.
+   efw_story_key clears the engine panel on any key. Hide the catcher with
+   that key so the buttons can draw. storyNext stays put so the page can
+   still loadMap the stored changelevel. */
+function hideStoryCatcher(): boolean {
+  const story = document.getElementById('efw-story');
+  const letter = document.getElementById('efw-letter');
+  const storyUp = !!(story && !story.hidden);
+  const letterUp = !!(letter && !letter.hidden);
+  if (!storyUp && !letterUp)
+    return false;
+  if (story)
+    story.hidden = true;
+  if (letter)
+    letter.hidden = true;
+  return true;
 }
 
 function dismissEfwStory() {
@@ -2005,8 +2024,13 @@ canvas.addEventListener('click', () => void captureInput());
 let promptContext = false;
 canvas.addEventListener('pointerdown', (ev) => {
   canvas.focus();
+  const caught = ev.button === 0 && hideStoryCatcher();
   if (ev.button === 0)
     runGameCmd('efw_story_key');
+  if (caught) {
+    dismissEfwStory();
+    return;
+  }
   if (ev.button !== 0 || document.pointerLockElement !== canvas) return;
   promptContext = !promptContext;
   runGameCmd(promptContext ? 'efw_context 1' : 'efw_context 0');
@@ -2158,8 +2182,14 @@ document.addEventListener('mousemove', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
-  if (!e.repeat)
+  if (!e.repeat) {
+    const caught = hideStoryCatcher();
     runGameCmd('efw_story_key');
+    if (caught) {
+      dismissEfwStory();
+      return;
+    }
+  }
   if (e.code === 'Space') {
     e.preventDefault();
     if (e.repeat) return;
