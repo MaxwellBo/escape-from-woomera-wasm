@@ -741,18 +741,47 @@ static void EFW_HudCtor( void )
 	gEngfuncs.Con_Printf( ">>> FUN_100436a0 +0x7ab5c=-1 +0x7ab60=-1\n" );
 }
 
+/* FUN_10044870 is cl.time. Context sets hudInt[6], and EFW_HudPlayTime
+   holds still for that whole pause, which is when FUN_10046550 rises.
+   Seconds since the first sample stay inside float precision. */
+static float EFW_ContextClock( void )
+{
+	static double s_base = -1.0;
+	double now = EFW_WallSeconds();
+
+	if( s_base < 0.0 )
+		s_base = now;
+	return (float)( now - s_base );
+}
+
 /* FUN_10046550: 2*(now - DAT_100bc354), clamp 0.0078125..0.75. */
 static float EFW_ContextPulse( void )
 {
 	float dt;
 	float v;
+	static int s_logged;
 
-	dt = EFW_ClientTime() - g_contextOpenedAt;
+	dt = EFW_ContextClock() - g_contextOpenedAt;
 	v = dt + dt;
 	if( v > 0.75f )
 		v = 0.75f;
 	if( v < 0.0078125f )
 		v = 0.0078125f;
+	if( s_logged < 3 )
+	{
+		int bucket = 0;
+
+		if( v >= 0.75f )
+			bucket = 2;
+		else if( v >= 0.375f )
+			bucket = 1;
+		if( bucket >= s_logged )
+		{
+			s_logged = bucket + 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10046550 v=%.3f a=%d\n",
+				v, (int)( v * 255.0f ) );
+		}
+	}
 	return v;
 }
 
@@ -949,7 +978,7 @@ static int __MsgFunc_EFWData( const char *pszName, int iSize, void *pbuf )
 			if( s_lastPause == 0 && paused == 1 && !g_storyCode && g_captionLen == 0 )
 			{
 				g_contextMode = 1;
-				g_contextOpenedAt = EFW_ClientTime();
+				g_contextOpenedAt = EFW_ContextClock();
 				gEngfuncs.Con_Printf( ">>> FUN_10046370 client context=1\n" );
 			}
 			/* Falling edge of hudInt[6]: Panel dtor DAT_1007ab5c = -1. */
@@ -1187,7 +1216,7 @@ static void EFW_OpenStoryboard( int code )
 			*(int *)( g_panel48 + 0xd0 ) = 0;
 			g_panel48On = 1;
 			g_contextMode = 1;
-			g_contextOpenedAt = now; /* FUN_10046370 DAT_100bc354 */
+			g_contextOpenedAt = EFW_ContextClock(); /* FUN_10046370 DAT_100bc354 */
 			gEngfuncs.Con_Printf( ">>> FUN_10047830 code=0x48\n" );
 			gEngfuncs.Con_Printf(
 				">>> FUN_100483d0 Panel 0,0,%d,%d +0xbc=100\n",
