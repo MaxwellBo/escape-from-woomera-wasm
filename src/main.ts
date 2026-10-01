@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll293`;
+    return `${url}?v=efw-dll294`;
   return url;
 }
 
@@ -278,23 +278,77 @@ function applyMenuHit(text: string): boolean {
   return false;
 }
 
+/* FUN_10045f20 reads cl.time minus DAT_100bc354. That client clock stays
+   near 1, so the open ease would sit at radius 0. The page clock is the
+   stand-in, the same way the host pump stands in for gpGlobals->time.
+   The console and the MEMFS poll both replay CLR plus the same ADDs.
+   Times are remembered per button set so that replay does not jump the
+   icons back to the character. A CLR with no following ADD forgets them. */
+let promptPoseSig = '';
+let promptPoseAt = 0;
+let promptPoseRaf = 0;
+let promptPoseLogged = 0;
+let promptPosePendingClear = false;
+const promptPoseTimes = new Map<string, number>();
+
+function forgetPromptPose() {
+  promptPoseSig = '';
+  promptPoseAt = 0;
+  promptPoseLogged = 0;
+  promptPoseTimes.clear();
+  if (promptPoseRaf) {
+    cancelAnimationFrame(promptPoseRaf);
+    promptPoseRaf = 0;
+  }
+}
+
 function layoutPromptColumn(layer: HTMLElement) {
   const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
   if (!buttons.length)
     return;
-  /* FUN_10045f20 settled pose, in the 640×480 space the server projects into.
-     angle = pi * (1 + 2*index/count); offset = 130 * (sin, cos).
+  /* FUN_10045f20, in the 640×480 space the server projects into.
+     base = pi * (1 + 2*index/count). Over the first 0.5s,
+     u = 1 - min(2*dt, 1), radius = (1-u^3)*130,
+     angle = base - u^3*pi + sin(dt*pi*0.8)*0.01.
      FUN_10044bf0 draws a centered quad. Idle side is 1.5225 * 64 ≈ 97
      (0x10064f80 * 0x1005acb0); the 0.5 in the quad builder is the half-extent. */
+  const sig = buttons.map((b) => b.dataset.cmd || '').join('|');
+  if (sig !== promptPoseSig) {
+    promptPoseSig = sig;
+    let opened = promptPoseTimes.get(sig);
+    if (opened == null) {
+      opened = performance.now();
+      promptPoseTimes.set(sig, opened);
+      promptPoseLogged = 0;
+    }
+    promptPoseAt = opened;
+  }
+  const dt = Math.max(0, (performance.now() - promptPoseAt) / 1000);
+  const clamped = Math.min(1, dt * 2);
+  const u = 1 - clamped;
+  const u3 = u * u * u;
+  const radiusScale = 1 - u3;
+  const wobble = Math.sin(dt * Math.PI * 0.8) * 0.01;
+  const radius = 130 * radiusScale;
+  if (promptPoseLogged === 0) {
+    promptPoseLogged = 1;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+  } else if (promptPoseLogged === 1 && clamped >= 0.5) {
+    promptPoseLogged = 2;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+  } else if (promptPoseLogged === 2 && clamped >= 1) {
+    promptPoseLogged = 3;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+  }
   const n = buttons.length;
   const sprW = 97.44 / 640;
   const sprH = 97.44 / 480;
-  const radiusX = 130 / 640;
-  const radiusY = 130 / 480;
+  const radiusX = (130 / 640) * radiusScale;
+  const radiusY = (130 / 480) * radiusScale;
   buttons.forEach((b, i) => {
     const ax = Number(b.dataset.ax || '0.5');
     const ay = Number(b.dataset.ay || '0.5');
-    const angle = Math.PI * (1 + (2 * i) / n);
+    const angle = Math.PI * (1 + (2 * i) / n) - u3 * Math.PI + wobble;
     const cx = ax + Math.sin(angle) * radiusX;
     const cy = ay + Math.cos(angle) * radiusY;
     b.style.left = `${((cx - sprW / 2) * 100).toFixed(2)}%`;
@@ -302,6 +356,14 @@ function layoutPromptColumn(layer: HTMLElement) {
     b.style.width = `${(sprW * 100).toFixed(2)}%`;
     b.style.height = `${(sprH * 100).toFixed(2)}%`;
   });
+  if (clamped < 1 && promptPoseRaf === 0) {
+    promptPoseRaf = requestAnimationFrame(() => {
+      promptPoseRaf = 0;
+      const live = document.getElementById('efw-vgui');
+      if (live)
+        layoutPromptColumn(live);
+    });
+  }
 }
 
 function applyEfwVgui(text: string): boolean {
@@ -315,6 +377,13 @@ function applyEfwVgui(text: string): boolean {
        clear, and the draw log does not repeat the rows. */
     layer.innerHTML = '';
     layer.hidden = true;
+    promptPosePendingClear = true;
+    queueMicrotask(() => {
+      if (!promptPosePendingClear)
+        return;
+      promptPosePendingClear = false;
+      forgetPromptPose();
+    });
     return true;
   }
   if (msg.startsWith('EFWVGUI SCHEME ')) {
@@ -341,6 +410,7 @@ function applyEfwVgui(text: string): boolean {
     return true;
   }
   if (!msg.startsWith('EFWVGUI ADD ')) return true;
+  promptPosePendingClear = false;
   const rest = msg.slice('EFWVGUI ADD '.length);
   const tab = rest.indexOf('\t');
   const head = tab >= 0 ? rest.slice(0, tab) : rest;
@@ -1097,6 +1167,14 @@ function startHostPumps() {
     const dt = lastPumpMs ? Math.min(0.25, (now - lastPumpMs) / 1000) : 0.12;
     lastPumpMs = now;
     runEngineCmd(`efw_pump ${dt.toFixed(3)}`);
+    /* FUN_10045f20 keeps moving for half a second after the buttons exist.
+       The vgui file does not rewrite, so the pump is what steps the ease
+       when a paint callback does not land between wasm frames. */
+    if (promptPoseSig && promptPoseLogged < 3) {
+      const poseLayer = document.getElementById('efw-vgui');
+      if (poseLayer)
+        layoutPromptColumn(poseLayer);
+    }
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
       log(`listen: hostpump n=${pumps}`);
