@@ -851,12 +851,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 		else if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
 		{
-			Vector chest = start + Vector( 0, 0, 36 );
-			UTIL_TraceHull( chest, chest + wish, ignore_monsters, point_hull, ENT( pev ), &tr );
-			if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
-				break;
-			stepLand = start + wish * tr.flFraction;
-			stepLand.z = start.z;
+			/* The hull is flush with a face. A point trace from the chest
+			   misses a thin func_wall and the next origin starts inside
+			   it, so every chase heading is startsolid. Stay on the face
+			   and let the heading search slide along it. */
+			stepLand = start;
 		}
 		else
 		{
