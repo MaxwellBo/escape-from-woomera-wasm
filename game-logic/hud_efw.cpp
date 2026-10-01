@@ -112,32 +112,8 @@ static HSPRITE EFW_LoadSpr( const char *path )
 	return SPR_Load( path );
 }
 
-/* FUN_10042140: client RegisterDefaults map at DAT_100baee8. */
-static const struct
-{
-	const char *target;
-	const char *display;
-} kClientDisplay[] = {
-	{ "efw_compound_gate_guard", "Gate Guard" },
-	{ "efw_electrician", "Electrician" },
-	{ "detainee", "Detainee" },
-	{ "detainee_queue", "Detainee in queue" },
-	{ NULL, NULL }
-};
-
-static const char *EFW_ClientDisplayName( const char *target )
-{
-	int i;
-	if( !target || !target[0] )
-		return target;
-	for( i = 0; kClientDisplay[i].target; i++ )
-	{
-		if( !stricmp( target, kClientDisplay[i].target ) )
-			return kClientDisplay[i].display;
-	}
-	return target;
-}
-
+/* FUN_10042140 registers four keys at DAT_100baee8. The plate and the
+   talk caption both resolve through FUN_10041fb0, not a second table. */
 static void EFW_ClientRegisterDefaults( void )
 {
 	gEngfuncs.Con_Printf( ">>> FUN_10042140 n=4 Gate Guard Electrician Detainee Detainee in queue\n" );
@@ -2357,10 +2333,12 @@ static void EFW_DrawInteractPrompt( void )
 		s_wasStory = 0;
 		s_interact[0] = '\0';
 	}
-	/* FUN_10044f70 tail writes DAT_100bc38c. A slot has to project inside
+	/* FUN_10044950 writes DAT_100bc38c. A slot has to project inside
 	   the 90px margin before the bar appears. The name is the last type-0
-	   slot that does, and a raw name of "Detainee" is left blank. Markers
-	   turn the bar on and do not replace that name. */
+	   slot that does. A raw name of "Detainee" is left blank. Anything
+	   else goes through FUN_10041fb0: a map hit is the display string,
+	   and a miss turns '_' into a space. Markers turn the bar on and
+	   do not replace that name. */
 	if( g_scanCount <= 0 )
 	{
 		if( s_interact[0] )
@@ -2374,6 +2352,7 @@ static void EFW_DrawInteractPrompt( void )
 		int i;
 		int show = 0;
 		const char *picked = "";
+		static char s_plate[64];
 		for( i = 0; i < g_scanCount; i++ )
 		{
 			int sx, sy;
@@ -2384,7 +2363,7 @@ static void EFW_DrawInteractPrompt( void )
 				continue;
 			if( !g_scan[i].name[0] || !strcmp( g_scan[i].name, "Detainee" ) )
 				continue;
-			picked = EFW_ClientDisplayName( g_scan[i].name );
+			picked = g_scan[i].name;
 		}
 		if( !show )
 		{
@@ -2395,7 +2374,12 @@ static void EFW_DrawInteractPrompt( void )
 			}
 			return;
 		}
-		name = picked ? picked : "";
+		/* Empty stays empty. FUN_10041fb0 would turn that into "them",
+		   which is the talk-caption fallback, not the name plate. */
+		s_plate[0] = '\0';
+		if( picked[0] )
+			EFW_PercentC( s_plate, sizeof( s_plate ), picked );
+		name = s_plate;
 	}
 	w = 240;
 	x = ScreenWidth / 2 - 120;
