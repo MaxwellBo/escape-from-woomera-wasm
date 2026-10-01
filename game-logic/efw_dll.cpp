@@ -2790,18 +2790,45 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 			if( over.fStartSolid )
 				return 0;
 			dest = over.vecEndPos;
-			/* PM_ClipVelocity overbounce 1. The 4-unit stand-off keeps the
-			   hull out of the plane. Dividing that nudge by the 10ms slice
-			   was storing it as speed and launching the hull off the wall. */
+			/* PM_ClipVelocity overbounce 1. The 4-unit stand-off keeps a
+			   slide out of the plane. A head-on stop has no speed left
+			   along the wall, and that same nudge was walking the hull
+			   back out so the next slice hit the face again. */
 			wallClip = 1;
 			wallN = tr.vecPlaneNormal;
-			if( tr.vecPlaneNormal.z < 0.5f && tr.vecPlaneNormal.z > -0.5f )
 			{
-				TraceResult gap;
-				Vector back = dest + tr.vecPlaneNormal * 4.0f;
-				UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
-				if( !gap.fStartSolid )
-					dest = gap.vecEndPos;
+				float cx = s_hvx;
+				float cy = s_hvy;
+				float intoV = cx * wallN.x + cy * wallN.y;
+				float slide;
+				if( intoV < 0.0f )
+				{
+					cx -= intoV * wallN.x;
+					cy -= intoV * wallN.y;
+				}
+				slide = sqrtf( cx * cx + cy * cy );
+				if( slide > 1.0f
+					&& wallN.z < 0.5f && wallN.z > -0.5f )
+				{
+					TraceResult gap;
+					Vector back = dest + wallN * 4.0f;
+					UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
+					if( !gap.fStartSolid )
+						dest = gap.vecEndPos;
+				}
+				else if( slide <= 1.0f )
+				{
+					static int s_holdLog;
+					if( s_holdLog < 6 )
+					{
+						char line[128];
+						s_holdLog++;
+						snprintf( line, sizeof( line ),
+							"efw: wall hold at %.0f %.0f z=%.1f\n",
+							dest.x, dest.y, dest.z );
+						EFW_LogLine( line );
+					}
+				}
 			}
 		}
 	}
