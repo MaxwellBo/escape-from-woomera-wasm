@@ -535,9 +535,9 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	/* FUN_100b9bb9: speech younger than 20s replaces the empty title.
-	   A fresh efw_Talk clears speech in EFW_StartTalk, so the first
-	   open stays "Talk to %s". */
+	/* FUN_100b9bb9: time-speechAt < 20 uses the speech string. Otherwise
+	   the title is the empty global at 0x10121c38. A fresh efw_Talk
+	   clears speech, so the first open has no "Talk to" line. */
 	if( st->speech[0] && gpGlobals->time - st->speechAt < EFW_TALK_TIMEOUT )
 	{
 		strncpy( title, st->speech, sizeof( title ) - 1 );
@@ -546,8 +546,15 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 	else
 	{
-		snprintf( title, sizeof( title ), "Talk to %s",
-			EFW_DisplayName( STRING( pNpc->pev->targetname ) ) );
+		title[0] = '\0';
+		{
+			static int s_emptyTitle;
+			if( s_emptyTitle < 4 )
+			{
+				s_emptyTitle++;
+				EFW_DebugPrint( "efw: menu title empty" );
+			}
+		}
 	}
 	slot = 0;
 	for( i = 0; i < script->questionCount && slot < 6; i++ )
