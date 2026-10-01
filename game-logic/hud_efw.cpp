@@ -92,6 +92,7 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 
 static void EFW_StartIconFly( float x, float y, HSPRITE spr ); /* FUN_100464c0 */
 static void EFW_FlyDismissedButton( void );
+static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b );
 static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	float r, float g, float b, float v, HSPRITE spr );
 
@@ -2140,7 +2141,9 @@ static void EFW_DrawInventoryStrip( float fade )
 	}
 	/* FUN_10043dd0: fild(ScreenHeight) minus the float at 0x10064d44
 	   (108.8), then ftol. The grey strip still starts at height-190.
-	   Names are DrawHudString 45px above that icon row. */
+	   Names are FUN_1001e7d0 45px above that icon row, xmax = x+64.
+	   A space once the pen passes xmax-100 starts the next 15px line,
+	   so "Phone Card" is two lines above the icon. */
 	x = 60;
 	y = (int)( (float)ScreenHeight - 108.8f );
 	n = 0;
@@ -2153,7 +2156,7 @@ static void EFW_DrawInventoryStrip( float fade )
 			continue;
 		icon = EFW_ItemIcon( id );
 		EFW_DrawInvIcon( x, y, icon );
-		gHUD.DrawHudString( x, y - 45, x + 64, EFW_WepLabel( id ), 255, 255, 255 );
+		EFW_DrawWrapped( x, y - 45, x + 64, EFW_WepLabel( id ), 255, 255, 255 );
 		if( namesN < (int)sizeof( names ) - 24 )
 			namesN += snprintf( names + namesN, sizeof( names ) - namesN, "%s%s:%d",
 				n ? "," : "", EFW_WepLabel( id ), (int)icon );
