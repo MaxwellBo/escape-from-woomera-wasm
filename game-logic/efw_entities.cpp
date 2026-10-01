@@ -1649,7 +1649,11 @@ void CPatrolGuard::PatrolThink( void )
 	const char *tn = STRING( pev->targetname );
 	int see = 0;
 	int hear = 0;
-	float now = gpGlobals->time;
+	/* FUN_100c5b60 reads gpGlobals->time. The listen server stays paused,
+	   so that clock never reaches the 0.7s notice or the later 1s and 5s
+	   waits. The pump clock is those seconds. nextthink stays on sv.time;
+	   the StartFrame pulse is what runs this think. */
+	float now = EFW_HostClock();
 	{
 		static int s_patrol;
 		if( !s_patrol )
@@ -1659,7 +1663,7 @@ void CPatrolGuard::PatrolThink( void )
 		}
 	}
 
-	pev->nextthink = now + 0.1f;
+	pev->nextthink = gpGlobals->time + 0.1f;
 	if( !pev->modelindex )
 		return;
 	/* FUN_100c7490 / DAT_101348ac pause. */
@@ -1717,6 +1721,8 @@ void CPatrolGuard::PatrolThink( void )
 		}
 		if( now - m_flAlertTime >= 0.7f )
 		{
+			EFW_DebugPrint( "efw: patrol notice %s dt=%.2f",
+				( tn && tn[0] ) ? tn : "?", now - m_flAlertTime );
 			EFW_Squark( tn, "Hey, what was that? I thought I saw something.", 10 );
 			if( pPlayer )
 				m_vecLastSeen = pPlayer->pev->origin;
