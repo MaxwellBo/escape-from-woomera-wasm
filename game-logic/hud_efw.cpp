@@ -3139,27 +3139,49 @@ int CHudEfw::Draw( float flTime )
 		/* FUN_1001de18 pushes 200, 200, 0. That is the yellow body line. */
 		y = EFW_DrawWrapped( x, y, xmax, body, 200, 200, 0 ) + 0x23;
 		choices = ( reveal >= fullLen ) ? 1 : 0;
-		if( choices )
 		{
-			for( li = 1; li <= 6; li++ )
+			int choiceY[7] = {};
+			int choiceH[7] = {};
+			if( choices )
 			{
-				char press[320];
-				if( !g_menuLine[li][0] )
-					continue;
-				snprintf( press, sizeof( press ), "Press [%d]     %s", li, g_menuLine[li] );
-				y = EFW_DrawWrapped( x, y, xmax, press, 100, 200, 100 ) + 0x0a;
+				for( li = 1; li <= 6; li++ )
+				{
+					char press[320];
+					int rowY;
+					if( !g_menuLine[li][0] )
+						continue;
+					snprintf( press, sizeof( press ), "Press [%d]     %s", li, g_menuLine[li] );
+					rowY = y;
+					y = EFW_DrawWrapped( x, y, xmax, press, 100, 200, 100 ) + 0x0a;
+					choiceY[li] = rowY;
+					choiceH[li] = y - rowY;
+				}
 			}
-		}
-		{
-			int key = choices ? ( 100000 + fullLen ) : reveal;
-			if( s_menuLog >= 100000 && reveal <= 3 )
-				s_menuLog = -1;
-			if( key != s_menuLog && ( reveal <= 9 || choices ) )
 			{
-				s_menuLog = key;
-				gEngfuncs.Con_Printf(
-					">>> FUN_1001db00 menu reveal=%d/%d choices=%d y0=%d body=200,200,0\n",
-					reveal, fullLen, choices, ScreenHeight - 295 );
+				int key = choices ? ( 100000 + fullLen ) : reveal;
+				if( s_menuLog >= 100000 && reveal <= 3 )
+					s_menuLog = -1;
+				if( key != s_menuLog && ( reveal <= 9 || choices ) )
+				{
+					s_menuLog = key;
+					gEngfuncs.Con_Printf(
+						">>> FUN_1001db00 menu reveal=%d/%d choices=%d y0=%d body=200,200,0\n",
+						reveal, fullLen, choices, ScreenHeight - 295 );
+					/* The page parks the menuselect strips until these
+					   rows exist. y is the DrawHudString pen for that
+					   Press line; h includes the 0x0a gap. */
+					if( choices )
+					{
+						for( li = 1; li <= 6; li++ )
+						{
+							if( !g_menuLine[li][0] )
+								continue;
+							gEngfuncs.Con_Printf(
+								">>> FUN_1001db00 hit %d y=%d h=%d\n",
+								li, choiceY[li], choiceH[li] );
+						}
+					}
+				}
 			}
 		}
 	}

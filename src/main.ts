@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll277`;
+    return `${url}?v=efw-dll278`;
   return url;
 }
 
@@ -179,10 +179,6 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
   if (menu) {
     /* FUN_100c6e60 draws the topic list in the HUD. The HTML control is only
        the click target over those lines. */
-    const screenH = canvas.height || 720;
-    const n = Number(menu[1]);
-    const y = (48 + 16 * n) / screenH;
-    const h = 16 / screenH;
     btn.classList.remove('efw-prompt');
     btn.classList.add('efw-menu');
     btn.setAttribute('aria-label', btn.textContent || cmd);
@@ -190,10 +186,16 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
     btn.style.backgroundImage = '';
     delete btn.dataset.ax;
     delete btn.dataset.ay;
+    /* FUN_1001db00 draws the Press rows on the lower panel. Keep the
+       strip off the console until that draw reports the pen. */
     btn.style.left = '0%';
-    btn.style.top = `${(y * 100).toFixed(2)}%`;
     btn.style.width = '100%';
-    btn.style.height = `${(h * 100).toFixed(2)}%`;
+    btn.style.top = '-20%';
+    btn.style.height = '0%';
+    btn.style.pointerEvents = 'none';
+    const saved = menuHit.get(Number(menu[1]));
+    if (saved)
+      placeMenuHit(Number(menu[1]), saved.y, saved.h);
     return;
   }
   btn.classList.remove('efw-menu');
@@ -235,6 +237,47 @@ function mountPromptLabel(btn: HTMLButtonElement) {
   cap.textContent = label;
 }
 
+/* FUN_1001db00 hit: Press-line pen, in engine pixels. The strip stays
+   parked until a choices=1 draw reports the row. */
+const menuHit = new Map<number, { y: number; h: number }>();
+
+function parkMenuHits() {
+  menuHit.clear();
+  document.querySelectorAll('#efw-vgui button.efw-menu').forEach((node) => {
+    if (!(node instanceof HTMLButtonElement)) return;
+    node.style.top = '-20%';
+    node.style.height = '0%';
+    node.style.pointerEvents = 'none';
+  });
+}
+
+function placeMenuHit(slot: number, y: number, h: number) {
+  const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
+  const H = canvas?.height || 0;
+  menuHit.set(slot, { y, h });
+  const btn = document.querySelector(`#efw-vgui button[data-cmd="menuselect ${slot}"]`);
+  if (!(btn instanceof HTMLButtonElement) || H < 1) return;
+  const hh = Math.max(15, h);
+  btn.style.left = '0%';
+  btn.style.width = '100%';
+  btn.style.top = `${((y / H) * 100).toFixed(2)}%`;
+  btn.style.height = `${((hh / H) * 100).toFixed(2)}%`;
+  btn.style.pointerEvents = 'auto';
+}
+
+function applyMenuHit(text: string): boolean {
+  const menu = text.match(/>>> FUN_1001db00 menu reveal=(-?\d+)\/(\d+) choices=(\d+)/);
+  if (menu) {
+    if (menu[3] === '0')
+      parkMenuHits();
+    return false;
+  }
+  const hit = text.match(/>>> FUN_1001db00 hit (\d+) y=(\d+) h=(\d+)/);
+  if (!hit) return false;
+  placeMenuHit(Number(hit[1]), Number(hit[2]), Number(hit[3]));
+  return false;
+}
+
 function layoutPromptColumn(layer: HTMLElement) {
   const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
   if (!buttons.length)
@@ -268,6 +311,7 @@ function applyEfwVgui(text: string): boolean {
   if (idx < 0) return false;
   const msg = text.slice(idx).replace(/\s+$/, '');
   if (msg === 'EFWVGUI CLR') {
+    menuHit.clear();
     layer.innerHTML = '';
     layer.hidden = true;
     return true;
@@ -738,6 +782,7 @@ function log(text: string) {
   applyInvHud(normalized);
   applyLetterHud(normalized);
   applyPrevQuestion(normalized);
+  applyMenuHit(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
