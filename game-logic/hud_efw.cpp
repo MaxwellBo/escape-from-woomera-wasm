@@ -1296,8 +1296,10 @@ static void EFW_OrbitCenter( int i, int n, float *ox, float *oy )
 
 	b = &g_vgui[i];
 	angle = 3.14159265f * ( 1.0f + ( 2.0f * (float)i ) / (float)n );
-	rx = 130.0f * (float)ScreenWidth / 640.0f;
-	ry = 130.0f * (float)ScreenHeight / 480.0f;
+	/* FUN_10045f20 multiplies the eased fraction by 130 (0x10064f7c).
+	   That radius is screen pixels, the same space as the anchor. */
+	rx = 130.0f;
+	ry = 130.0f;
 	*ox = (float)( b->x + b->w / 2 ) + sinf( angle ) * rx;
 	*oy = (float)( b->y + b->h ) + cosf( angle ) * ry;
 }
@@ -1322,7 +1324,7 @@ static void EFW_IconFly_f( void )
 		idx, ox, oy, spr != 0 );
 }
 
-/* FUN_10045f20 orbit, then FUN_10046900 vtable+0x10 (point inside the sprite).
+/* FUN_10045f20 orbit, then FUN_10046900 vtable+0x10 (32px square).
    The shared anchor is the VGUI box top-left. A miss leaves DAT_100bc350
    clear, so FUN_100463c0 does not start the fly. */
 static int EFW_HitOrbitButton( int cx, int cy, float *ox, float *oy )
@@ -1334,8 +1336,9 @@ static int EFW_HitOrbitButton( int cx, int cy, float *ox, float *oy )
 
 	if( n < 1 )
 		return -1;
-	hx = 97.44f * (float)ScreenWidth / 640.0f * 0.5f;
-	hy = 97.44f * (float)ScreenHeight / 480.0f * 0.5f;
+	/* FUN_10045ff0: |dx| and |dy| both <= 32 (0x10059cf8). */
+	hx = 32.0f;
+	hy = 32.0f;
 	for( i = 0; i < n; i++ )
 	{
 		float x;

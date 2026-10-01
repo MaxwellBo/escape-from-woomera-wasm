@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll297`;
+    return `${url}?v=efw-dll298`;
   return url;
 }
 
@@ -291,6 +291,21 @@ let promptPoseLogged = 0;
 let promptHoverLogged = 0;
 let promptPosePendingClear = false;
 const promptPoseTimes = new Map<string, number>();
+/* FUN_10046900 feeds mouse pixels to FUN_10045ff0. The hotspot is a
+   32px square on the orbit center, in the same pixels as ScreenWidth. */
+let promptPointerX = -9999;
+let promptPointerY = -9999;
+
+function notePromptPointer(ev: PointerEvent) {
+  const canvas = document.getElementById('canvas');
+  if (!(canvas instanceof HTMLCanvasElement))
+    return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1)
+    return;
+  promptPointerX = (ev.clientX - rect.left) * (canvas.width / rect.width);
+  promptPointerY = (ev.clientY - rect.top) * (canvas.height / rect.height);
+}
 
 function forgetPromptPose() {
   promptPoseSig = '';
@@ -308,12 +323,12 @@ function layoutPromptColumn(layer: HTMLElement) {
   const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
   if (!buttons.length)
     return;
-  /* FUN_10045f20, in the 640×480 space the server projects into.
-     base = pi * (1 + 2*index/count). Over the first 0.5s,
+  /* FUN_10045f20 adds pixels to the projected anchor, not a 640-wide
+     fraction. base = pi * (1 + 2*index/count). Over the first 0.5s,
      u = 1 - min(2*dt, 1), radius = (1-u^3)*130,
      angle = base - u^3*pi + sin(dt*pi*0.8)*0.01.
-     FUN_10044bf0 draws a centered quad. Idle side is 1.5225 * 64 ≈ 97
-     (0x10064f80 * 0x1005acb0); the 0.5 in the quad builder is the half-extent. */
+     FUN_10044bf0 draws a centered quad of that side in screen pixels.
+     FUN_10046040 drops the quad when the center is within 32px of an edge. */
   const sig = buttons.map((b) => b.dataset.cmd || '').join('|');
   if (sig !== promptPoseSig) {
     promptPoseSig = sig;
@@ -332,6 +347,13 @@ function layoutPromptColumn(layer: HTMLElement) {
   const radiusScale = 1 - u3;
   const wobble = Math.sin(dt * Math.PI * 0.8) * 0.01;
   const radius = 130 * radiusScale;
+  const canvas = document.getElementById('canvas');
+  const sw = canvas instanceof HTMLCanvasElement && canvas.width > 0 ? canvas.width : 640;
+  const sh = canvas instanceof HTMLCanvasElement && canvas.height > 0 ? canvas.height : 480;
+  /* FUN_10046040: sin(cl.time * pi * 10/7). Idle side is
+     (sin*0.0225+1.5225)*64. Hover is (sin*0.15+1.65)*64, white.
+     FUN_10045ff0 sets that hover flag only inside the 32px square. */
+  const wave = Math.sin((performance.now() / 1000) * Math.PI * 1.4285715);
   if (promptPoseLogged === 0) {
     promptPoseLogged = 1;
     log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
@@ -340,14 +362,12 @@ function layoutPromptColumn(layer: HTMLElement) {
     log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
   } else if (promptPoseLogged === 2 && clamped >= 1) {
     promptPoseLogged = 3;
-    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+    const idle = (wave * 0.0225 + 1.5225) * 64;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)} side=${idle.toFixed(1)} sw=${sw} hot=32`);
   }
   const n = buttons.length;
-  const radiusX = (130 / 640) * radiusScale;
-  const radiusY = (130 / 480) * radiusScale;
-  /* FUN_10046040: sin(cl.time * pi * 10/7). Idle side is
-     (sin*0.0225+1.5225)*64. Hover is (sin*0.15+1.65)*64, white. */
-  const wave = Math.sin((performance.now() / 1000) * Math.PI * 1.4285715);
+  const radiusX = (130 * radiusScale) / sw;
+  const radiusY = (130 * radiusScale) / sh;
   let hovering = false;
   buttons.forEach((b, i) => {
     const ax = Number(b.dataset.ax || '0.5');
@@ -355,13 +375,20 @@ function layoutPromptColumn(layer: HTMLElement) {
     const angle = Math.PI * (1 + (2 * i) / n) - u3 * Math.PI + wobble;
     const cx = ax + Math.sin(angle) * radiusX;
     const cy = ay + Math.cos(angle) * radiusY;
-    const hover = b.matches(':hover');
+    const cxPx = cx * sw;
+    const cyPx = cy * sh;
+    const onScreen = cxPx - 32 > 0 && cxPx + 32 < sw && cyPx - 32 > 0 && cyPx + 32 < sh;
+    const dx = promptPointerX - cxPx;
+    const dy = promptPointerY - cyPx;
+    const hover = onScreen && Math.abs(dx) <= 32 && Math.abs(dy) <= 32;
     if (hover)
       hovering = true;
+    b.classList.toggle('efw-hot', hover);
+    b.style.visibility = onScreen ? 'visible' : 'hidden';
     const mul = hover ? wave * 0.15 + 1.65 : wave * 0.0225 + 1.5225;
     const side = mul * 64;
-    const sprW = side / 640;
-    const sprH = side / 480;
+    const sprW = side / sw;
+    const sprH = side / sh;
     b.style.left = `${((cx - sprW / 2) * 100).toFixed(2)}%`;
     b.style.top = `${((cy - sprH / 2) * 100).toFixed(2)}%`;
     b.style.width = `${(sprW * 100).toFixed(2)}%`;
@@ -1209,7 +1236,7 @@ function startHostPumps() {
        The vgui file does not rewrite, so the pump is what steps the ease
        when a paint callback does not land between wasm frames. */
     const poseLayer = document.getElementById('efw-vgui');
-    if (poseLayer && promptPoseSig && (promptPoseLogged < 3 || poseLayer.querySelector('button.efw-prompt:hover')))
+    if (poseLayer?.querySelector('button.efw-prompt'))
       layoutPromptColumn(poseLayer);
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
@@ -2286,6 +2313,8 @@ function queueLook(yaw: number, pitch: number) {
     runGameCmd(`efw_plook ${y.toFixed(3)} ${p.toFixed(3)}`);
   });
 }
+
+document.addEventListener('pointermove', notePromptPointer);
 
 document.addEventListener('mousemove', (e) => {
   if (!inputCaptured()) return;
