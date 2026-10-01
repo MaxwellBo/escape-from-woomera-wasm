@@ -1889,14 +1889,67 @@ static void EFW_LoadTextScheme( void )
 	EFW_VguiEmit( NULL, line );
 }
 
+/* FUN_10041fb0 (%C): a map hit is the display string. A miss copies the
+   targetname and turns '_' into a space. "Talk to %C" / "Give %i to %C". */
+static void EFW_PercentC( char *out, size_t n, const char *raw )
+{
+	static const struct
+	{
+		const char *key;
+		const char *disp;
+	} map[] = {
+		{ "efw_compound_gate_guard", "Gate Guard" },
+		{ "efw_electrician", "Electrician" },
+		{ "detainee", "Detainee" },
+		{ "detainee queue", "Detainee in queue" },
+	};
+	size_t i;
+
+	if( !out || n < 1 )
+		return;
+	out[0] = '\0';
+	if( !raw || !raw[0] )
+	{
+		strncpy( out, "them", n - 1 );
+		out[n - 1] = '\0';
+		return;
+	}
+	for( i = 0; i < sizeof( map ) / sizeof( map[0] ); i++ )
+	{
+		if( !strcmp( raw, map[i].key ) )
+		{
+			strncpy( out, map[i].disp, n - 1 );
+			out[n - 1] = '\0';
+			return;
+		}
+	}
+	strncpy( out, raw, n - 1 );
+	out[n - 1] = '\0';
+	for( i = 0; out[i]; i++ )
+	{
+		if( out[i] == '_' )
+			out[i] = ' ';
+	}
+}
+
 static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 {
 	char label[64];
 	char cmd[96];
+	char who[64];
 	if( s->type == 0 )
 	{
 		int id;
-		snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
+		EFW_PercentC( who, sizeof( who ), s->name );
+		{
+			static int s_pc;
+			if( s_pc < 4 && s->name[0] && strcmp( s->name, who ) )
+			{
+				s_pc++;
+				gEngfuncs.Con_Printf( "efw: percentC %s -> %s\n", s->name, who );
+			}
+		}
+		snprintf( label, sizeof( label ), "Talk to %s", who );
 		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
 		EFW_VguiAdd( x, y, label, cmd, g_hBubble );
 		/* FUN_10044f70 walks DAT_100a37a8 weapon slots 16..24, not just FirstWep. */
@@ -1904,7 +1957,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		{
 			if( !EFW_HasWep( id ) )
 				continue;
-			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), s->name[0] ? s->name : "them" );
+			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), who );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
 			EFW_VguiAdd( x, y, label, cmd, g_hGive );
 		}
