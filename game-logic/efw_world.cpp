@@ -11,6 +11,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value )
 {
@@ -397,7 +398,7 @@ struct EfwCue
 struct EfwPA
 {
 	EfwCue slot[5];
-	float gap;       /* +0x50 init 120, unused by think */
+	float gap;       /* +0x50 init 120; FUN_100c7740 fmod modulus */
 	float timer;     /* +0x54 init 5 */
 	float lastTime;  /* +0x58 */
 	int index;       /* +0x5c */
@@ -475,25 +476,25 @@ void EFW_ThinkPA( void )
 {
 	float now;
 	float elapsed;
+	float phase;
 	const char *sample;
 	if( !g_pa.inited )
 		EFW_InitPA();
 	if( EFW_MapLevel() != 0 )
 		return;
 	now = gpGlobals->time;
-	elapsed = now - g_pa.lastTime;
-	if( elapsed <= 0.0f )
+	/* FUN_100c7740: fmod(time, gap) compared with 0.5, then timer > 5.
+	   gap is 120, so a cue is allowed for half a second every two minutes.
+	   The timer adds this same sv.time delta after the test. A stuck clock
+	   adds nothing, and the old 0.05s fallback no longer fires the cue. */
+	phase = now;
+	if( g_pa.gap > 0.0f )
 	{
-		elapsed = gpGlobals->frametime;
-		if( elapsed <= 0.0f )
-			elapsed = 0.05f;
+		phase = fmodf( now, g_pa.gap );
+		if( phase < 0.0f )
+			phase += g_pa.gap;
 	}
-	if( elapsed > 0.2f )
-		elapsed = 0.2f;
-	g_pa.timer += elapsed;
-	g_pa.lastTime = now;
-	/* FUN_100c7740: play when timer>5; rarLock uses slot 0 else slot[index+1]. */
-	if( g_pa.timer > 5.0f )
+	if( phase <= 0.5f && g_pa.timer > 5.0f )
 	{
 		if( g_pa.rarLock == 1 )
 			sample = g_pa.slot[0].sample;
@@ -501,7 +502,8 @@ void EFW_ThinkPA( void )
 			sample = g_pa.slot[g_pa.index + 1].sample;
 		EFW_PlayCue( sample );
 		EFW_DebugPrint( ">>> FUN_100c75e0 %s", sample ? sample : "?" );
-		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d", g_pa.rarLock, g_pa.index );
+		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d phase=%.2f",
+			g_pa.rarLock, g_pa.index, phase );
 		EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
 			sample ? sample : "?", g_pa.rarLock, g_pa.index );
 		g_pa.timer = 0.0f;
@@ -509,6 +511,19 @@ void EFW_ThinkPA( void )
 		if( g_pa.index > 3 )
 			g_pa.index = 0;
 	}
+	else if( g_pa.timer > 5.0f )
+	{
+		static int s_hold;
+		if( s_hold < 4 )
+		{
+			s_hold++;
+			EFW_DebugPrint( ">>> FUN_100c7740 hold phase=%.2f timer=%.1f t=%.2f",
+				phase, g_pa.timer, now );
+		}
+	}
+	elapsed = now - g_pa.lastTime;
+	g_pa.lastTime = now;
+	g_pa.timer += elapsed;
 }
 
 void EFW_PALockRAR( void )
