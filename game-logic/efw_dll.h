@@ -92,6 +92,7 @@ int EFW_GetHudInt( int slot ); /* 0x100c81b0 */
 void EFW_ThinkDt( void ); /* 0x100c6a70 */
 void EFW_ThinkHope( void ); /* 0x100c6ad0 */
 float EFW_HostInterval( void ); /* wall seconds since the previous host pump */
+float EFW_HostClock( void ); /* accumulated pump seconds; sv.time stays put */
 void EFW_SendHudState( void ); /* 0x100c6b60 */
 void EFW_SendEfwData( void ); /* 0x100c6dd0 */
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code ); /* 0x100c81d0 */

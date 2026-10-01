@@ -357,6 +357,12 @@ void EFW_AdjustHope( float delta )
 
 static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
 static float s_hostInterval; /* same pump delta, read by MoveExecute steps */
+static float s_hostClock; /* sum of those deltas; Squark's 1s gate reads this */
+
+float EFW_HostClock( void )
+{
+	return s_hostClock;
+}
 
 float EFW_HostInterval( void )
 {
@@ -1862,6 +1868,7 @@ static void EFW_HostPump( void )
 			wall = 0.25f;
 		s_hopeWall += wall;
 		s_hostInterval = wall;
+		s_hostClock += wall;
 	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();

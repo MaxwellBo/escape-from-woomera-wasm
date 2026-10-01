@@ -208,12 +208,50 @@ void EFW_LoadAllConversations( void )
 	EFW_RegisterDefaults();
 }
 
+/* FUN_100ba080: bit 8 skips the 1.0s gate at 0x100dd618. The stamp lives
+   on the character record, so a second speaker is not blocked by the first.
+   sv.time does not move here; the pump clock does. force still writes the stamp. */
+static int EFW_SquarkCooling( edict_t *ed, int force )
+{
+	static struct
+	{
+		edict_t *ed;
+		float at;
+	} slot[16];
+	int i;
+	int freeSlot;
+	float now;
+	if( !ed )
+		return 0;
+	now = EFW_HostClock();
+	freeSlot = -1;
+	for( i = 0; i < 16; i++ )
+	{
+		if( slot[i].ed == ed )
+		{
+			/* fcomp 1.0; test ah,0x41; jne return. Equal to 1.0 still holds. */
+			if( !force && ( now - slot[i].at ) <= 1.0f )
+				return 1;
+			slot[i].at = now;
+			return 0;
+		}
+		if( freeSlot < 0 && !slot[i].ed )
+			freeSlot = i;
+	}
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	slot[freeSlot].ed = ed;
+	slot[freeSlot].at = now;
+	return 0;
+}
+
 void EFW_Squark( const char *targetname, const char *text, int flags )
 {
 	CBaseEntity *pEnt;
 	CBasePlayer *pPlayer;
+	EfwDllState *st;
 	char line[512];
-	(void)flags;
+	float range;
 	if( !targetname || !targetname[0] )
 		return;
 	{
@@ -232,6 +270,8 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 	}
 	if( !text || !text[0] )
 		return;
+	if( EFW_SquarkCooling( pEnt->edict(), flags & 8 ) )
+		return;
 	{
 		static int s_show;
 		if( !s_show )
@@ -240,6 +280,29 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 			EFW_DebugPrint( ">>> FUN_100ba080 flags=%d", flags );
 		}
 	}
+	/* 0x100ba164: bit 2 → 1024, bit 4 → 256, else 128. Stored at DAT_1011d130. */
+	if( flags & 2 )
+		range = 1024.0f;
+	else if( flags & 4 )
+		range = 256.0f;
+	else
+		range = 128.0f;
+	{
+		static int s_range;
+		if( s_range < 4 )
+		{
+			s_range++;
+			EFW_DebugPrint( "efw: squark range=%.0f flags=%d", range, flags );
+		}
+	}
+	/* 0x100ba15a closes the previous line, then 0x100c6e60 shows this one
+	   on the speaker so FUN_100c6c10 can hide it past the range. */
+	EFW_CloseTalk();
+	st = EFW_Dll();
+	st->talkNpc = pEnt;
+	st->talkActive = 1;
+	st->menuMode = 0;
+	st->hideDist = range;
 	pPlayer = EFW_Player();
 	snprintf( line, sizeof( line ), "%s: %s", targetname, text );
 	if( pPlayer )
@@ -247,6 +310,7 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 		EFW_Print( pPlayer, line );
 		EFW_ShowDllMenu( pPlayer, text, NULL, 0 );
 	}
+	st->talkStart = EFW_HostClock();
 }
 
 static int EFW_Ieq( const char *a, const char *b )
@@ -687,17 +751,27 @@ void EFW_ThinkConversation( void )
 				EFW_DebugPrint( ">>> FUN_100c5b60 t=%.2f", gpGlobals->time );
 			}
 		}
-		if( !pPlayer || !st->talkNpc )
-			EFW_CloseTalk();
-		else if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
-			EFW_CloseTalk();
-		else
 		{
-			dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
-			if( dist >= st->hideDist )
-			{
-				EFW_DebugPrint( "Conversation hidden, partner too far" );
+			/* Choice menus compare gpGlobals->time (frozen, so they stay up).
+			   A squark line has no topics. Its 20s (DAT_1011d128) is host
+			   seconds, or it hides once the player is past hideDist. */
+			float now = ( st->menuMode == 0 ) ? EFW_HostClock() : gpGlobals->time;
+			if( !pPlayer || !st->talkNpc )
 				EFW_CloseTalk();
+			else if( now >= st->talkStart + EFW_TALK_TIMEOUT )
+			{
+				if( st->menuMode == 0 )
+					EFW_DebugPrint( "efw: squark timeout" );
+				EFW_CloseTalk();
+			}
+			else
+			{
+				dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
+				if( dist >= st->hideDist )
+				{
+					EFW_DebugPrint( "Conversation hidden, partner too far" );
+					EFW_CloseTalk();
+				}
 			}
 		}
 		st->talkIdleTicks = 0;
