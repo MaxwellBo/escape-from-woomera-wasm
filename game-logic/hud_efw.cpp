@@ -463,9 +463,11 @@ static void EFW_IPitch_f( void )
 }
 
 /* V_DriftPitch 0x1003fe00. nodrift starts clear, so a pitch that is not
-   idealpitch moves. Mouse look calls V_StopPitchDrift; walking forward
-   at cl_forwardspeed for v_centermove seconds calls V_StartPitchDrift.
-   Xash copies cl_viewangles back onto the client view after CalcRefdef. */
+   idealpitch moves. The original leaves +mlook alone, so a held look
+   button still lets the walk level the view. A look delta still calls
+   V_StopPitchDrift. Walking forward at cl_forwardspeed for v_centermove
+   seconds calls V_StartPitchDrift. Xash copies cl_viewangles back onto
+   the client view after CalcRefdef. */
 static float s_pitchVel;
 static int s_noDrift;
 static float s_driftMove;
@@ -517,8 +519,6 @@ void EFW_DriftPitch( struct ref_params_s *pparams )
 	if( !pparams )
 		return;
 	s_driftFrame++;
-	if( in_mlook.state & 1 )
-		EFW_StopPitchDrift();
 	if( ( gEngfuncs.IsNoClipping && gEngfuncs.IsNoClipping() )
 		|| !pparams->onground || pparams->demoplayback || pparams->spectator )
 	{
