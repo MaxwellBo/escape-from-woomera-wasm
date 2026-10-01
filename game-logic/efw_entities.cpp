@@ -95,7 +95,7 @@ public:
 	void Precache( void );
 	void SetYawSpeed( void );
 	int Classify( void );
-	void SetObjectCollisionBox( void ); /* FUN_100c6320 */
+	void SetObjectCollisionBox( void ); /* base abs box; FUN_100c6320 is unreferenced */
 	int ObjectCaps( void ) { return CBaseMonster::ObjectCaps() | FCAP_IMPULSE_USE; }
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
@@ -138,48 +138,11 @@ static void EFW_WriteLinkedHull( entvars_t *pev, const Vector &mins, const Vecto
 
 void CRefugee::SetObjectCollisionBox( void )
 {
-	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c.
-	   Spawn still hardcodes -16/-16/0 .. 16/16/72; only trust the studio
-	   bbox when the header is IDST and the box is finite. */
-	studiohdr_t *hdr;
-	mstudioseqdesc_t *seq;
-	int index;
-	int i;
-	Vector mins, maxs;
-	{
-		static int s_hull;
-		if( !s_hull )
-		{
-			s_hull = 1;
-			EFW_DebugPrint( ">>> FUN_100c6320" );
-		}
-	}
-
-	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
-	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
-	{
-		EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-		return;
-	}
-	index = pev->sequence;
-	if( index < 0 || index >= hdr->numseq )
-		index = 0;
-	seq = (mstudioseqdesc_t *)( (unsigned char *)hdr + hdr->seqindex ) + index;
-	mins = Vector( seq->bbmin[0], seq->bbmin[1], seq->bbmin[2] );
-	maxs = Vector( seq->bbmax[0], seq->bbmax[1], seq->bbmax[2] );
-	for( i = 0; i < 3; i++ )
-	{
-		if( mins[i] < -128.0f )
-			mins[i] = -128.0f;
-		if( maxs[i] > 128.0f )
-			maxs[i] = 128.0f;
-		if( mins[i] > maxs[i] )
-		{
-			EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-			return;
-		}
-	}
-	EFW_WriteLinkedHull( pev, mins, maxs );
+	/* IdleThink 0x100c6440 calls SET_SIZE (-16,-16,0)-(16,16,72) every
+	   think. FUN_100c6320 would replace that with the raw sequence bbox,
+	   but it has no vtable slot and no callers, so the link keeps the
+	   standing box. Writing it here avoids pfnSetSize re-entering the think. */
+	EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 }
 
 void CRefugee::SetYawSpeed( void )
@@ -1112,6 +1075,10 @@ void CRefugee::IdleThink( void )
 		}
 	}
 	pev->framerate = 1.0f;
+	/* 0x100c64c0 SET_SIZE (-16,-16,0)-(16,16,72) every think, including
+	   the deadflag==2 path after it zeroes the box. The link virtual is
+	   the base abs box, so this write is the hull the player stops on. */
+	EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
 	   every ServerFrame (same function; denser ticks). */
 	pev->nextthink = gpGlobals->time;
@@ -1124,8 +1091,8 @@ void CRefugee::IdleThink( void )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
-	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
-	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
+	/* The standing box was written above. pfnSetSize from the think
+	   re-enters the link virtual and stalls the frame. */
 	pPlayer = EFW_Player();
 	/* 0x100c8160 is strstr(targetname, "queue"), not exact equality.
 	   The yard line is named detainee_queue and must not approach. */

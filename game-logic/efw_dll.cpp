@@ -2855,6 +2855,25 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	wallClip = 0;
 	wallN = Vector( 0, 0, 0 );
 	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+	if( tr.flFraction < 1.0f && tr.pHit && !tr.pHit->free && tr.pHit->v.solid != SOLID_BSP )
+	{
+		static int s_body;
+		if( s_body < 6 )
+		{
+			char line[192];
+			const char *cn = STRING( tr.pHit->v.classname );
+			float dx = tr.pHit->v.origin.x - start.x;
+			float dy = tr.pHit->v.origin.y - start.y;
+			s_body++;
+			snprintf( line, sizeof( line ),
+				"efw: body %s mins=%.0f %.0f %.0f maxs=%.0f %.0f %.0f dist=%.0f at %.0f %.0f\n",
+				cn[0] ? cn : "?",
+				tr.pHit->v.mins.x, tr.pHit->v.mins.y, tr.pHit->v.mins.z,
+				tr.pHit->v.maxs.x, tr.pHit->v.maxs.y, tr.pHit->v.maxs.z,
+				sqrtf( dx * dx + dy * dy ), start.x, start.y );
+			EFW_LogLine( line );
+		}
+	}
 	if( tr.fStartSolid )
 	{
 		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
