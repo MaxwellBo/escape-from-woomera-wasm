@@ -411,29 +411,43 @@ static EfwPA g_pa;
 void EFW_PlayCue( const char *sample )
 {
 	CBaseEntity *pSrc;
-	edict_t *ed;
 	int pitch;
 
+	/* FUN_100c75e0: a null sample prints and does not emit. */
 	if( !sample || !sample[0] )
 	{
-		EFW_DebugPrint( "efw: play (null)" );
+		EFW_DebugPrint( "trying to play sound that isn't loaded!!" );
 		return;
 	}
 	pSrc = UTIL_FindEntityByTargetname( NULL, sample );
 	if( pSrc )
-		ed = pSrc->edict();
-	else if( EFW_Player() )
-		ed = EFW_Player()->edict();
-	else
-		return;
-	pitch = 100 - RANDOM_LONG( 0, 19 );
-	EMIT_SOUND_DYN( ed, CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
-	EFW_DebugPrint( "efw: play %s", sample );
-	if( EFW_Player() )
 	{
-		char line[96];
-		snprintf( line, sizeof( line ), "efw: play %s", sample );
-		EFW_Print( EFW_Player(), line );
+		/* Named speaker: CHAN_ITEM, volume 1, attenuation 1.25,
+		   pitch 100 minus rand()%20. */
+		pitch = 100 - RANDOM_LONG( 0, 19 );
+		EMIT_SOUND_DYN( pSrc->edict(), CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
+		EFW_DebugPrint( "play on loudspeaker x" );
+		EFW_DebugPrint( ">>> FUN_100c75e0 speaker %s pitch=%d", sample, pitch );
+		return;
+	}
+	/* No entity with that targetname. FUN_10094bb0 plays on the player
+	   edict: suitvolume, CHAN_STATIC, attenuation 0.8. Volume at or
+	   below 0.05 stays silent. Half the calls leave pitch at 100; the
+	   rest use 98..104. */
+	if( !EFW_Player() )
+		return;
+	{
+		float vol = CVAR_GET_FLOAT( "suitvolume" );
+		pitch = 100;
+		if( RANDOM_LONG( 0, 1 ) )
+			pitch = 98 + RANDOM_LONG( 0, 6 );
+		if( vol > 0.05f )
+		{
+			EMIT_SOUND_DYN( EFW_Player()->edict(), CHAN_STATIC, sample, vol, 0.8f, 0, pitch );
+			EFW_DebugPrint( ">>> FUN_100c75e0 suit %s vol=%.2f pitch=%d", sample, vol, pitch );
+		}
+		else
+			EFW_DebugPrint( ">>> FUN_100c75e0 suit skip %s vol=%.2f", sample, vol );
 	}
 }
 
