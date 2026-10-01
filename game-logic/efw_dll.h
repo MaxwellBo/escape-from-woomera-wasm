@@ -148,6 +148,7 @@ int EFW_IsTalkNpc( CBaseEntity *pEnt );
 
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value ); /* 0x100c7da0 */
 void EFW_AdvanceTriggerWaits( void ); /* host clock finishes trigger_multiple wait */
+void EFW_AdvancePushers( void ); /* host clock steps MOVETYPE_PUSH; sv ltime stays put */
 void EFW_PulseWorld( CBasePlayer *pPlayer ); /* trigger AABB + GateFSM while noclip */
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b969 */
 void EFW_SetPause( int on ); /* 0x100c7510 */

@@ -403,6 +403,92 @@ void EFW_AdvanceTriggerWaits( void )
 	}
 }
 
+/* SV_Physics_Pusher moves a door by velocity over pev->ltime and calls
+   LinearMoveDone / AngularMoveDone when ltime reaches nextthink. This
+   listen server leaves ltime put, so Use arms the swing and the brush
+   stays shut. The host pump is that frametime. */
+void EFW_AdvancePushers( void )
+{
+	int i;
+	int maxEnts;
+	float dt;
+	static int s_step;
+	static int s_arrive;
+
+	dt = EFW_HostInterval();
+	if( dt < 0.001f || !gpGlobals )
+		return;
+	maxEnts = gpGlobals->maxEntities;
+	if( maxEnts > 1200 )
+		maxEnts = 1200;
+	for( i = 1; i < maxEnts; i++ )
+	{
+		edict_t *e = INDEXENT( i );
+		CBaseEntity *pEnt;
+		Vector vel;
+		Vector avel;
+		float old;
+		float think;
+		float movetime;
+		int moving;
+		const char *cn;
+		const char *tn;
+
+		if( !e || e->free || !e->pvPrivateData )
+			continue;
+		if( e->v.movetype != MOVETYPE_PUSH )
+			continue;
+		vel = e->v.velocity;
+		avel = e->v.avelocity;
+		moving = ( vel.Length() > 0.01f ) || ( avel.Length() > 0.01f );
+		old = e->v.ltime;
+		think = e->v.nextthink;
+		if( think <= 0.0f && !moving )
+			continue;
+		movetime = dt;
+		if( think > old && think < old + movetime )
+			movetime = think - old;
+		if( movetime < 0.0f )
+			movetime = 0.0f;
+		if( movetime > 0.0f && moving )
+		{
+			Vector org = e->v.origin + vel * movetime;
+			e->v.angles = e->v.angles + avel * movetime;
+			UTIL_SetOrigin( &e->v, org );
+			if( s_step < 6 )
+			{
+				s_step++;
+				cn = e->v.classname ? STRING( e->v.classname ) : "?";
+				tn = e->v.targetname ? STRING( e->v.targetname ) : "";
+				EFW_DebugPrint( ">>> push step %s %s ang=%.0f %.0f %.0f org=%.0f %.0f %.0f",
+					cn, ( tn && tn[0] ) ? tn : "-",
+					e->v.angles.x, e->v.angles.y, e->v.angles.z,
+					e->v.origin.x, e->v.origin.y, e->v.origin.z );
+			}
+		}
+		e->v.ltime = old + movetime;
+		if( think > old && think <= e->v.ltime + 0.001f )
+		{
+			e->v.nextthink = 0.0f;
+			pEnt = CBaseEntity::Instance( e );
+			if( pEnt )
+				pEnt->Think();
+			/* Move-done snaps angles, then the brush has to relink. */
+			UTIL_SetOrigin( &e->v, e->v.origin );
+			if( s_arrive < 8 )
+			{
+				s_arrive++;
+				cn = e->v.classname ? STRING( e->v.classname ) : "?";
+				tn = e->v.targetname ? STRING( e->v.targetname ) : "";
+				EFW_DebugPrint( ">>> push arrive %s %s ang=%.0f %.0f %.0f org=%.0f %.0f %.0f",
+					cn, ( tn && tn[0] ) ? tn : "-",
+					e->v.angles.x, e->v.angles.y, e->v.angles.z,
+					e->v.origin.x, e->v.origin.y, e->v.origin.z );
+			}
+		}
+	}
+}
+
 /* GoldSrc trigger Touch is AABB. Noclip / deferred studios never fire
    pfnTouch, so FUN_100c7da0 GateFSM never ran while walking the barracks. */
 void EFW_PulseWorld( CBasePlayer *pPlayer )
@@ -422,6 +508,7 @@ void EFW_PulseWorld( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
+	EFW_AdvancePushers();
 	EFW_AdvanceTriggerWaits();
 	pos = pPlayer->pev->origin;
 	pScan = NULL;
