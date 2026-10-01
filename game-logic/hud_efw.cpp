@@ -75,6 +75,7 @@ static int g_captionLen; /* DAT_100baf08 */
 static float g_captionAt; /* DAT_100baf14 */
 static float g_captionAge;
 static int g_iconFlyOn; /* DAT_100bc384; FUN_100464c0 +0x24 */
+static int g_iconFlyLog;
 static float g_iconFlyAt; /* DAT_100bc388 */
 static float g_iconFlyFrom[3]; /* DAT_100bc360 / 364 / 368 */
 static float g_iconFlyTo[3]; /* DAT_100bc36c / 370 / 374 */
@@ -92,6 +93,7 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 
 static void EFW_StartIconFly( float x, float y, HSPRITE spr ); /* FUN_100464c0 */
 static void EFW_FlyDismissedButton( void );
+static void EFW_IconFly_f( void );
 static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b );
 static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	float r, float g, float b, float v, HSPRITE spr );
@@ -1276,8 +1278,48 @@ static void EFW_StartIconFly( float x, float y, HSPRITE spr )
 	g_iconFlyTo[2] = 0.5f;
 	g_iconFlySize0 = 40.0f; /* FUN_100463c0 stack 0x42200000 */
 	g_iconFlySize1 = 10.0f; /* 0x41200000 */
-	g_iconFlyAt = EFW_ClientTime();
+	/* FUN_10044870 is cl.time. That clock stays near 1, so a 2s ease
+	   never left the start quad. The context clock still moves. */
+	g_iconFlyAt = EFW_ContextClock();
 	g_iconFlyOn = 1;
+	g_iconFlyLog = 0;
+}
+
+/* Settled FUN_10045f20 center. FUN_100463c0 reads that point from the
+   button under the cursor (vtable+0x14) and stores it as the fly start. */
+static void EFW_OrbitCenter( int i, int n, float *ox, float *oy )
+{
+	EfwVguiBtn *b;
+	float angle;
+	float rx;
+	float ry;
+
+	b = &g_vgui[i];
+	angle = 3.14159265f * ( 1.0f + ( 2.0f * (float)i ) / (float)n );
+	rx = 130.0f * (float)ScreenWidth / 640.0f;
+	ry = 130.0f * (float)ScreenHeight / 480.0f;
+	*ox = (float)( b->x + b->w / 2 ) + sinf( angle ) * rx;
+	*oy = (float)( b->y + b->h ) + cosf( angle ) * ry;
+}
+
+/* Page click is the cursor hit. FUN_100463c0 copies that button. */
+static void EFW_IconFly_f( void )
+{
+	int idx;
+	float ox;
+	float oy;
+	HSPRITE spr;
+
+	if( gEngfuncs.Cmd_Argc() < 2 || g_vguiN < 1 )
+		return;
+	idx = atoi( gEngfuncs.Cmd_Argv( 1 ) );
+	if( idx < 0 || idx >= g_vguiN )
+		return;
+	EFW_OrbitCenter( idx, g_vguiN, &ox, &oy );
+	spr = g_vgui[idx].icon ? g_vgui[idx].icon : g_hBubble;
+	EFW_StartIconFly( ox, oy, spr );
+	gEngfuncs.Con_Printf( ">>> FUN_100464c0 i=%d x=%.1f y=%.1f spr=%d\n",
+		idx, ox, oy, spr != 0 );
 }
 
 /* FUN_10045f20 orbit, then FUN_10046900 vtable+0x10 (point inside the sprite).
@@ -1296,14 +1338,11 @@ static int EFW_HitOrbitButton( int cx, int cy, float *ox, float *oy )
 	hy = 97.44f * (float)ScreenHeight / 480.0f * 0.5f;
 	for( i = 0; i < n; i++ )
 	{
-		EfwVguiBtn *b = &g_vgui[i];
-		float angle = 3.14159265f * ( 1.0f + ( 2.0f * (float)i ) / (float)n );
-		float rx = 130.0f * (float)ScreenWidth / 640.0f;
-		float ry = 130.0f * (float)ScreenHeight / 480.0f;
+		float x;
+		float y;
 		/* Same anchor layoutPromptColumn stores: projected point, which is
 		   the VGUI box center-x and the box bottom. */
-		float x = (float)( b->x + b->w / 2 ) + sinf( angle ) * rx;
-		float y = (float)( b->y + b->h ) + cosf( angle ) * ry;
+		EFW_OrbitCenter( i, n, &x, &y );
 		if( (float)cx >= x - hx && (float)cx <= x + hx
 			&& (float)cy >= y - hy && (float)cy <= y + hy )
 		{
@@ -1568,6 +1607,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnAddCommand( "efw_story_key", EFW_StoryKey_f );
 	gEngfuncs.pfnAddCommand( "efw_pmove", EFW_PMove_f );
 	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
+	gEngfuncs.pfnAddCommand( "efw_iconfly", EFW_IconFly_f );
 	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );
 	gEngfuncs.pfnAddCommand( "efw_pduck", EFW_PDuck_f );
 	gEngfuncs.pfnAddCommand( "efw_vroll", EFW_VRoll_f );
@@ -2199,37 +2239,62 @@ static void EFW_DrawInventoryStrip( float fade )
 	}
 }
 
-/* FUN_10044bf0: TRIAPI SpriteTexture centered quad of the button sprite. */
+/* FUN_10044bf0: half extents, SpriteTexture, RenderMode 4, CullFace TRI_NONE,
+   TRI_QUADS centered on the fly point. */
 static void EFW_DrawCenteredSpr( float cx, float cy, float w, float h )
 {
-	wrect_t rc;
-	int dw, dh, x, y;
+	struct model_s *model;
+	float hx;
+	float hy;
 	static int s_logged;
 
-	(void)w;
-	(void)h;
 	if( !g_iconFlySpr )
 		return;
-	dw = SPR_Width( g_iconFlySpr, 0 );
-	dh = SPR_Height( g_iconFlySpr, 0 );
-	if( dw < 1 )
-		dw = 64;
-	if( dh < 1 )
-		dh = 64;
-	x = (int)( cx - (float)dw * 0.5f );
-	y = (int)( cy - (float)dh * 0.5f );
+	if( w < 1.0f )
+		w = 1.0f;
+	if( h < 1.0f )
+		h = 1.0f;
+	hx = w * 0.5f;
+	hy = h * 0.5f;
 	if( !s_logged )
 	{
 		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_10044bf0 x=%.1f y=%.1f spr=%d\n",
-			cx, cy, g_iconFlySpr != 0 );
+		gEngfuncs.Con_Printf( ">>> FUN_10044bf0 x=%.1f y=%.1f w=%.1f h=%.1f spr=%d\n",
+			cx, cy, w, h, g_iconFlySpr != 0 );
 	}
-	rc.left = 0;
-	rc.top = 0;
-	rc.right = dw;
-	rc.bottom = dh;
-	SPR_Set( g_iconFlySpr, 255, 255, 255 );
-	SPR_DrawHoles( 0, x, y, &rc );
+	model = (struct model_s *)gEngfuncs.GetSpritePointer( g_iconFlySpr );
+	if( gEngfuncs.pTriAPI && model && gEngfuncs.pTriAPI->SpriteTexture( model, 0 ) )
+	{
+		gEngfuncs.pTriAPI->RenderMode( kRenderTransAlpha );
+		gEngfuncs.pTriAPI->CullFace( TRI_NONE );
+		gEngfuncs.pTriAPI->Color4f( 1.0f, 1.0f, 1.0f, 1.0f );
+		gEngfuncs.pTriAPI->Begin( TRI_QUADS );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 0.0f );
+		gEngfuncs.pTriAPI->Vertex3f( cx - hx, cy - hy, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 0.0f );
+		gEngfuncs.pTriAPI->Vertex3f( cx + hx, cy - hy, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 1.0f );
+		gEngfuncs.pTriAPI->Vertex3f( cx + hx, cy + hy, 0.5f );
+		gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 1.0f );
+		gEngfuncs.pTriAPI->Vertex3f( cx - hx, cy + hy, 0.5f );
+		gEngfuncs.pTriAPI->End();
+		return;
+	}
+	{
+		wrect_t rc;
+		int dw = (int)w;
+		int dh = (int)h;
+		if( dw < 1 )
+			dw = 1;
+		if( dh < 1 )
+			dh = 1;
+		rc.left = 0;
+		rc.top = 0;
+		rc.right = dw;
+		rc.bottom = dh;
+		SPR_Set( g_iconFlySpr, 255, 255, 255 );
+		SPR_DrawHoles( 0, (int)( cx - hx ), (int)( cy - hy ), &rc );
+	}
 }
 
 /* FUN_10046590 tail: 2s cubic ease from DAT_100bc360 to DAT_100bc36c. */
@@ -2244,7 +2309,7 @@ static void EFW_DrawIconFly( void )
 
 	if( !g_iconFlyOn )
 		return;
-	now = EFW_ClientTime();
+	now = EFW_ContextClock();
 	if( now < g_iconFlyAt )
 	{
 		g_iconFlyOn = 0;
@@ -2259,6 +2324,7 @@ static void EFW_DrawIconFly( void )
 		if( dt > 2.0f )
 		{
 			g_iconFlyOn = 0;
+			g_iconFlyLog = 0;
 			s_stuck = 0;
 			return;
 		}
@@ -2268,6 +2334,7 @@ static void EFW_DrawIconFly( void )
 			if( s_stuck > 90 )
 			{
 				g_iconFlyOn = 0;
+				g_iconFlyLog = 0;
 				s_stuck = 0;
 				return;
 			}
@@ -2289,6 +2356,21 @@ static void EFW_DrawIconFly( void )
 	cy = ( g_iconFlyTo[1] - g_iconFlyFrom[1] ) * t + g_iconFlyFrom[1];
 	sz = ( g_iconFlySize1 - g_iconFlySize0 ) * t + g_iconFlySize0;
 	sz = sz + sz;
+	if( g_iconFlyLog < 3 )
+	{
+		int bucket = 0;
+
+		if( t >= 0.99f )
+			bucket = 2;
+		else if( t >= 0.5f )
+			bucket = 1;
+		if( bucket >= g_iconFlyLog )
+		{
+			g_iconFlyLog = bucket + 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10046590 fly t=%.2f x=%.1f y=%.1f sz=%.1f\n",
+				t, cx, cy, sz );
+		}
+	}
 	EFW_DrawCenteredSpr( cx, cy, sz, sz );
 }
 
@@ -2334,9 +2416,6 @@ static void EFW_DrawInteractPrompt( void )
 	static char s_interact[32];
 	static int s_wasStory;
 	static int s_noneLog;
-
-	/* FUN_10046590 draws the fly only after FUN_100463c0 has armed it. */
-	EFW_DrawIconFly();
 
 	if( g_contextMode )
 	{
@@ -3262,5 +3341,8 @@ int CHudEfw::Draw( float flTime )
 
 	EFW_DrawInventoryStrip( g_invFade );
 	EFW_DrawDiaryWipe();
+	/* FUN_1001db00 calls FUN_10046590 after the menu panel, so the
+	   shrinking quad sits on top of that veil. */
+	EFW_DrawIconFly();
 	return 1;
 }

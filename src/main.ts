@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll296`;
+    return `${url}?v=efw-dll297`;
   return url;
 }
 
@@ -469,6 +469,19 @@ function applyEfwVgui(text: string): boolean {
   const activate = () => {
     log(`> ${cmd}`);
     runEngineCmd('pausable 0');
+    /* FUN_100463c0 flies the button under the cursor, then drops the panel. */
+    if (btn.classList.contains('efw-prompt')) {
+      const prompts = [...layer.querySelectorAll('button.efw-prompt')];
+      const idx = prompts.indexOf(btn);
+      if (idx >= 0)
+        runEngineCmd(`efw_iconfly ${idx}`);
+      promptContext = false;
+      for (const node of prompts)
+        node.remove();
+      layer.hidden = true;
+      forgetPromptPose();
+      runGameCmd('efw_context 0');
+    }
     runGameCmd(cmd);
   };
   btn.addEventListener('pointerdown', (ev) => {
