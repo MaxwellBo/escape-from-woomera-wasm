@@ -81,6 +81,11 @@ static float g_iconFlyFrom[3]; /* DAT_100bc360 / 364 / 368 */
 static float g_iconFlyTo[3]; /* DAT_100bc36c / 370 / 374 */
 static float g_iconFlySize0; /* DAT_100bc378 */
 static float g_iconFlySize1; /* DAT_100bc37c */
+/* FUN_10046040 hover caption. The page reports the 32px-square hit;
+   the glyphs are pfnDrawCharacter, not the VGUI scheme face. */
+static char g_hotCap[192];
+static int g_hotCapX;
+static int g_hotCapY;
 static float g_menuVeil; /* DAT_100a95b8; FUN_1001db00 conversation veil */
 static float g_invFade; /* DAT_100a95bc; FUN_10043dd0(fade) */
 static float g_diaryFade; /* DAT_100a95c4; diary SPR wipe */
@@ -1324,6 +1329,67 @@ static void EFW_IconFly_f( void )
 		idx, ox, oy, spr != 0 );
 }
 
+/* FUN_10045ff0's hover flag. The page owns the cursor while the HTML
+   quads are up, so it reports the orbit center under that 32px square. */
+static void EFW_HotCap_f( void )
+{
+	int i;
+	int n;
+	char buf[192];
+
+	if( gEngfuncs.Cmd_Argc() < 4 )
+	{
+		g_hotCap[0] = '\0';
+		return;
+	}
+	g_hotCapX = atoi( gEngfuncs.Cmd_Argv( 1 ) );
+	g_hotCapY = atoi( gEngfuncs.Cmd_Argv( 2 ) );
+	buf[0] = '\0';
+	n = 0;
+	for( i = 3; i < gEngfuncs.Cmd_Argc(); i++ )
+	{
+		const char *w = gEngfuncs.Cmd_Argv( i );
+		if( !w )
+			continue;
+		if( n && n < (int)sizeof( buf ) - 1 )
+			buf[n++] = ' ';
+		while( *w && n < (int)sizeof( buf ) - 1 )
+		{
+			if( *w != ';' && *w != '\n' && *w != '\r' )
+				buf[n++] = *w;
+			w++;
+		}
+	}
+	buf[n] = '\0';
+	strncpy( g_hotCap, buf, sizeof( g_hotCap ) - 1 );
+	g_hotCap[sizeof( g_hotCap ) - 1] = '\0';
+}
+
+/* FUN_10046040: ftol(center-64), ftol(center+48), xmax = x+256,
+   DrawHudString 255,255,255. */
+static void EFW_DrawHotCaption( void )
+{
+	int x;
+	int y;
+	int xmax;
+	static int s_log = -1;
+	int key;
+
+	if( !g_contextMode || !g_hotCap[0] )
+		return;
+	x = g_hotCapX - 64;
+	y = g_hotCapY + 48;
+	xmax = x + 256;
+	EFW_DrawWrapped( x, y, xmax, g_hotCap, 255, 255, 255 );
+	key = g_hotCapX * 10000 + g_hotCapY;
+	if( key != s_log )
+	{
+		s_log = key;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e7d0 cap x=%d y=%d xmax=%d h=%d %s\n",
+			x, y, xmax, gHUD.m_scrinfo.iCharHeight, g_hotCap );
+	}
+}
+
 /* FUN_10045f20 orbit, then FUN_10046900 vtable+0x10 (32px square).
    The shared anchor is the VGUI box top-left. A miss leaves DAT_100bc350
    clear, so FUN_100463c0 does not start the fly. */
@@ -1611,6 +1677,7 @@ int CHudEfw::Init( void )
 	gEngfuncs.pfnAddCommand( "efw_pmove", EFW_PMove_f );
 	gEngfuncs.pfnAddCommand( "efw_plook", EFW_PLook_f );
 	gEngfuncs.pfnAddCommand( "efw_iconfly", EFW_IconFly_f );
+	gEngfuncs.pfnAddCommand( "efw_hotcap", EFW_HotCap_f );
 	gEngfuncs.pfnAddCommand( "efw_pjump", EFW_PJump_f );
 	gEngfuncs.pfnAddCommand( "efw_pduck", EFW_PDuck_f );
 	gEngfuncs.pfnAddCommand( "efw_vroll", EFW_VRoll_f );
@@ -2434,6 +2501,8 @@ static void EFW_DrawInteractPrompt( void )
 		}
 		else
 			s_noneLog = 0;
+		/* FUN_10046040 draws this after the quad, with the HUD glyphs. */
+		EFW_DrawHotCaption();
 		return;
 	}
 	s_noneLog = 0;

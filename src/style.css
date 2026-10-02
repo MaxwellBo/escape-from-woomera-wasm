@@ -264,9 +264,8 @@ canvas#canvas {
   pointer-events: none;
 }
 
-.efw-vgui button.efw-prompt.efw-hot .efw-prompt-label {
-  display: block;
-}
+/* FUN_10046040 draws the caption with pfnDrawCharacter (FUN_1001e7d0)
+   at center-64, center+48. The span stays for the accessible name. */
 
 .efw-hint {
   position: absolute;

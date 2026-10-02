@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll298`;
+    return `${url}?v=efw-dll299`;
   return url;
 }
 
@@ -295,6 +295,10 @@ const promptPoseTimes = new Map<string, number>();
    32px square on the orbit center, in the same pixels as ScreenWidth. */
 let promptPointerX = -9999;
 let promptPointerY = -9999;
+/* FUN_10046040 caption. The engine draws it with pfnDrawCharacter once
+   the 32px square is hot. Empty clears the line. */
+let hotCapLine = '';
+let hotCapSent = '';
 
 function notePromptPointer(ev: PointerEvent) {
   const canvas = document.getElementById('canvas');
@@ -321,8 +325,10 @@ function forgetPromptPose() {
 
 function layoutPromptColumn(layer: HTMLElement) {
   const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
-  if (!buttons.length)
+  if (!buttons.length) {
+    hotCapLine = '';
     return;
+  }
   /* FUN_10045f20 adds pixels to the projected anchor, not a 640-wide
      fraction. base = pi * (1 + 2*index/count). Over the first 0.5s,
      u = 1 - min(2*dt, 1), radius = (1-u^3)*130,
@@ -369,6 +375,7 @@ function layoutPromptColumn(layer: HTMLElement) {
   const radiusX = (130 * radiusScale) / sw;
   const radiusY = (130 * radiusScale) / sh;
   let hovering = false;
+  let hotLine = '';
   buttons.forEach((b, i) => {
     const ax = Number(b.dataset.ax || '0.5');
     const ay = Number(b.dataset.ay || '0.5');
@@ -381,8 +388,12 @@ function layoutPromptColumn(layer: HTMLElement) {
     const dx = promptPointerX - cxPx;
     const dy = promptPointerY - cyPx;
     const hover = onScreen && Math.abs(dx) <= 32 && Math.abs(dy) <= 32;
-    if (hover)
+    if (hover) {
       hovering = true;
+      const label = (b.getAttribute('aria-label') || '').replace(/[\n\r;"]/g, ' ').trim();
+      if (label)
+        hotLine = `${Math.round(cxPx)} ${Math.round(cyPx)} ${label}`;
+    }
     b.classList.toggle('efw-hot', hover);
     b.style.visibility = onScreen ? 'visible' : 'hidden';
     const mul = hover ? wave * 0.15 + 1.65 : wave * 0.0225 + 1.5225;
@@ -408,6 +419,7 @@ function layoutPromptColumn(layer: HTMLElement) {
   } else if (!hovering && promptHoverLogged >= 3) {
     promptHoverLogged = 0;
   }
+  hotCapLine = hotLine;
   if ((clamped < 1 || hovering) && promptPoseRaf === 0) {
     promptPoseRaf = requestAnimationFrame(() => {
       promptPoseRaf = 0;
@@ -507,6 +519,11 @@ function applyEfwVgui(text: string): boolean {
         node.remove();
       layer.hidden = true;
       forgetPromptPose();
+      hotCapLine = '';
+      if (hotCapSent) {
+        runEngineCmd('efw_hotcap');
+        hotCapSent = '';
+      }
       runGameCmd('efw_context 0');
     }
     runGameCmd(cmd);
@@ -1238,6 +1255,12 @@ function startHostPumps() {
     const poseLayer = document.getElementById('efw-vgui');
     if (poseLayer?.querySelector('button.efw-prompt'))
       layoutPromptColumn(poseLayer);
+    else
+      hotCapLine = '';
+    if (hotCapLine !== hotCapSent) {
+      runEngineCmd(hotCapLine ? `efw_hotcap ${hotCapLine}` : 'efw_hotcap');
+      hotCapSent = hotCapLine;
+    }
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
       log(`listen: hostpump n=${pumps}`);
