@@ -1844,6 +1844,22 @@ function nativeScreenSize(): ViewSize {
   };
 }
 
+function pinDevicePixelRatio() {
+  /* Xash multiplies the -width/-height client area by devicePixelRatio.
+     This display reports 0.984375, so the 800×600 wrap became a 787×590
+     backing store. FUN_10043750 then centers the 800×600 storyboard at
+     ox=-6, oy=-5 and the page stretches that buffer back to the wrap,
+     clipping the comic. The client area is the CSS box. */
+  try {
+    Object.defineProperty(window, 'devicePixelRatio', {
+      configurable: true,
+      get: () => 1,
+    });
+  } catch (err) {
+    log(`dpr shim failed: ${formatErr(err)}`);
+  }
+}
+
 function viewBox(): ViewSize {
   const wrap = canvas.parentElement;
   const fallback = { width: 960, height: 720 };
@@ -1974,6 +1990,7 @@ async function captureInput() {
 
 async function boot() {
   if (engine || btnLaunch.disabled) return;
+  pinDevicePixelRatio();
   btnLaunch.disabled = true;
   launchStatus.textContent = 'starting engine…';
   engineStatus.textContent = 'initializing WASM';
