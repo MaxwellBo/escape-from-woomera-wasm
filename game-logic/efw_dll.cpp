@@ -415,11 +415,20 @@ void EFW_ThinkHope( void )
 	s_hopeN++;
 	if( s_hopeN == 1 || ( s_hopeN % 40 ) == 0 )
 		EFW_DebugPrint( ">>> hope %.1f time=%.2f", hope, now );
-	if( hope <= 0.0f && g_efw.player && !g_efw.hopeFailed )
+	/* FUN_100c6ad0 has no latch: hope <= 0 pushes 0x4d, then
+	   FUN_100c81d0, on every think. A one-shot flag let a key clear
+	   the isolation comic and leave the yard in view. */
+	if( hope <= 0.0f && g_efw.player )
 	{
-		g_efw.hopeFailed = 1;
 		EFW_FailOrNarrate( g_efw.player, 0x4d );
-		EFW_DebugPrint( "Run out of hope!" );
+		{
+			static int s_out;
+			if( !s_out )
+			{
+				s_out = 1;
+				EFW_DebugPrint( "Run out of hope!" );
+			}
+		}
 	}
 }
 
