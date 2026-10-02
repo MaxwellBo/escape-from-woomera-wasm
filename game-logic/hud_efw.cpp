@@ -99,6 +99,7 @@ static int g_diaryFadePage; /* DAT_100a95c0 */
 static void EFW_StartIconFly( float x, float y, HSPRITE spr ); /* FUN_100464c0 */
 static void EFW_FlyDismissedButton( void );
 static void EFW_IconFly_f( void );
+static HSPRITE EFW_ItemIcon( int id ); /* weapon+0xbc, the "weapon" line */
 static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b );
 static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	float r, float g, float b, float v, HSPRITE spr );
@@ -1326,8 +1327,8 @@ static void EFW_IconFly_f( void )
 	EFW_OrbitCenter( idx, g_vguiN, &ox, &oy );
 	spr = g_vgui[idx].icon ? g_vgui[idx].icon : g_hBubble;
 	EFW_StartIconFly( ox, oy, spr );
-	gEngfuncs.Con_Printf( ">>> FUN_100464c0 i=%d x=%.1f y=%.1f spr=%d\n",
-		idx, ox, oy, spr != 0 );
+	gEngfuncs.Con_Printf( ">>> FUN_100464c0 i=%d x=%.1f y=%.1f spr=%d give=%d pliers=%d\n",
+		idx, ox, oy, (int)spr, (int)g_hGive, (int)g_hPliers );
 }
 
 /* FUN_10045ff0's hover flag. The page owns the cursor while the HTML
@@ -2093,7 +2094,9 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), who );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
-			EFW_VguiAdd( x, y, label, cmd, g_hGive );
+			/* The button stores weapon+0xbc. That handle is the orbit quad
+			   and the fly (FUN_100464c0). */
+			EFW_VguiAdd( x, y, label, cmd, EFW_ItemIcon( id ), "wep" );
 		}
 		return;
 	}
@@ -2107,7 +2110,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 			{
 				snprintf( label, sizeof( label ), "Place %s on fence", EFW_WepLabel( 20 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
-				EFW_VguiAdd( x, y, label, cmd, 0 );
+				EFW_VguiAdd( x, y, label, cmd, EFW_ItemIcon( 20 ), "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
@@ -2116,7 +2119,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 			{
 				snprintf( label, sizeof( label ), "Hide %s in bin", EFW_WepLabel( 16 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
-				EFW_VguiAdd( x, y, label, cmd, 0 );
+				EFW_VguiAdd( x, y, label, cmd, EFW_ItemIcon( 16 ), "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_hiding_place" ) )
@@ -2133,7 +2136,7 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 			{
 				snprintf( label, sizeof( label ), "Force open cage door with %s", EFW_WepLabel( 17 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
-				EFW_VguiAdd( x, y, label, cmd, 0 );
+				EFW_VguiAdd( x, y, label, cmd, EFW_ItemIcon( 17 ), "wep" );
 			}
 		}
 		else
@@ -2148,9 +2151,11 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		int id = s->type - 100;
 		snprintf( label, sizeof( label ), "Pick up %s", EFW_WepLabel( id ) );
 		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
-		/* HasWep returns the weapon info. A null loads efw_give_icon.spr.
-		   A hit uses the sprite at weapon+0xbc. */
-		EFW_VguiAdd( x, y, label, cmd, g_hPliers, EFW_HasWep( id ) ? "wep" : "give" );
+		/* HasWep null loads efw_give_icon.spr. A hit uses weapon+0xbc.
+		   The same handle is what FUN_100464c0 flies to the corner. */
+		EFW_VguiAdd( x, y, label, cmd,
+			EFW_HasWep( id ) ? EFW_ItemIcon( id ) : g_hGive,
+			EFW_HasWep( id ) ? "wep" : "give" );
 	}
 }
 

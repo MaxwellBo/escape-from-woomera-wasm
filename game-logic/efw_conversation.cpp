@@ -971,7 +971,8 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), who );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
-			EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+			/* weapon+0xbc is the item sprite, the same handle the fly uses. */
+			EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 		}
 		return;
 	}
@@ -985,7 +986,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 			{
 				snprintf( label, sizeof( label ), "Place %s on fence", EFW_HtmlWepLabel( 20 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
@@ -994,7 +995,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 			{
 				snprintf( label, sizeof( label ), "Hide %s in bin", EFW_HtmlWepLabel( 16 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_hiding_place" ) )
@@ -1007,7 +1008,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 			{
 				snprintf( label, sizeof( label ), "Force open cage door with %s", EFW_HtmlWepLabel( 17 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else
