@@ -30,26 +30,6 @@ static const char *kConversationFiles[] = {
 };
 
 static void EFW_RegisterDefaults( void );
-static void EFW_SeedScriptTopics( const EfwScript *script );
-
-static void EFW_SeedScriptTopics( const EfwScript *script )
-{
-	int qi;
-	if( !script )
-		return;
-	for( qi = 0; qi < script->questionCount; qi++ )
-	{
-		const char *topic = script->questions[qi].topic;
-		int locked;
-		if( !topic[0] || !strcmp( topic, "UNWANTED_ITEM" ) )
-			continue;
-		/* FUN_100b9990: world-knowledge Qs start unlocked. SUBSEQUENT
-		   greetings and PLIERS_GOT_PLIERS wait for AddTopic. */
-		locked = strstr( topic, "SUBSEQUENT" ) != NULL
-			|| !strcmp( topic, "PLIERS_GOT_PLIERS" );
-		EFW_AddKeyword( topic, locked ? 0 : 1 );
-	}
-}
 
 static EfwScriptCache *EFW_ScriptSlots( void )
 {
@@ -77,7 +57,6 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 	{
 		if( slots[i].loaded && !strcmp( slots[i].name, scriptName ) )
 		{
-			EFW_SeedScriptTopics( &slots[i].script );
 			return &slots[i].script;
 		}
 		if( !slots[i].loaded && !slot )
@@ -115,7 +94,6 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		else
 			EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
 	}
-	EFW_SeedScriptTopics( &slot->script );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
@@ -202,6 +180,8 @@ void EFW_LoadAllConversations( void )
 		}
 	}
 	EFW_DebugPrint( "efwConversation::LoadAll %d files", n );
+	/* FUN_100b9391: the only keywords set at load. FUN_100bfea0 hides
+	   any other topic until AddTopic. DeleteTopic stores flag 0. */
 	EFW_AddKeyword( "ESCAPE", 1 );
 	EFW_AddKeyword( "GREET", 1 );
 	EFW_AddKeyword( "GOODBYE", 1 );
