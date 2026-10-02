@@ -800,8 +800,7 @@ static float EFW_ContextPulse( void )
 		if( bucket >= s_logged )
 		{
 			s_logged = bucket + 1;
-			gEngfuncs.Con_Printf( ">>> FUN_10046550 v=%.3f a=%d\n",
-				v, (int)( v * 255.0f ) );
+			gEngfuncs.Con_Printf( ">>> FUN_10046550 v=%.3f\n", v );
 		}
 	}
 	return v;
@@ -869,8 +868,17 @@ static void EFW_HudColor( float param )
 			gEngfuncs.Con_Printf( ">>> FUN_1001e790 rgb=%d,%d,%d\n", r, g, b );
 		}
 	}
+	/* FUN_1001e4c0 after the pops: if DAT_100bc338, lerp each ftol byte
+	   toward 20, 30, 80, 160 (0x1005acac, 0x1005c370, 0x1005f80c,
+	   0x10060138) by FUN_10046550. The pulse is the blend, not the alpha. */
 	if( EFW_ContextOn() )
-		a = EFW_ClampByte( EFW_ContextPulse() * 255.0f );
+	{
+		float pulse = EFW_ContextPulse();
+		r = EFW_ClampByte( ( 20.0f - (float)r ) * pulse + (float)r );
+		g = EFW_ClampByte( ( 30.0f - (float)g ) * pulse + (float)g );
+		b = EFW_ClampByte( ( 80.0f - (float)b ) * pulse + (float)b );
+		a = EFW_ClampByte( ( 160.0f - (float)a ) * pulse + (float)a );
+	}
 	memset( &sf, 0, sizeof( sf ) );
 	if( gEngfuncs.pfnGetScreenFade )
 		gEngfuncs.pfnGetScreenFade( &sf );
