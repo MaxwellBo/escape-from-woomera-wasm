@@ -2083,16 +2083,13 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 	{
 		if( !strcmp( s->name, "efw_IDTag_Position" ) )
 		{
+			/* FUN_10044f30(0x14). A miss jumps to the end of FUN_10044f70,
+			   so the fence has no button until the ID tag is held. */
 			if( EFW_HasWep( 20 ) )
 			{
 				snprintf( label, sizeof( label ), "Place %s on fence", EFW_WepLabel( 20 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
 				EFW_VguiAdd( x, y, label, cmd, 0 );
-			}
-			else
-			{
-				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
-				EFW_VguiAdd( x, y, "Take ID from fence", cmd, 0 );
 			}
 		}
 		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
