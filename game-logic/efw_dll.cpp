@@ -2245,6 +2245,23 @@ void EFW_LatchTurn( float yawDelta, float pitchDelta )
 
 void EFW_LatchMenuKey( int slot )
 {
+	/* FUN_100c6a50 is GetAsyncKeyState, and FUN_100c6a60 only calls it
+	   while FUN_100c7450 says the menu is up. A menuselect that arrived
+	   earlier is not still down, so it must not arm the next menu. */
+	if( !g_efw.talkActive )
+	{
+		if( slot >= 1 && slot <= 9 )
+		{
+			static int s_ign;
+			if( !s_ign )
+			{
+				s_ign = 1;
+				EFW_DebugPrint( ">>> FUN_100c6a50 ignore vk=%d talk=0", slot );
+			}
+		}
+		s_menuKeyLatch = 0;
+		return;
+	}
 	if( slot >= 1 && slot <= 9 )
 	{
 		{
@@ -2279,7 +2296,15 @@ void EFW_PollMenuKeys( void )
 		}
 	}
 	if( !g_efw.talkActive )
+	{
+		/* The poll does not run while the menu is down, so neither a
+		   HostFwd latch nor a sticky 1..9 impulse can select later. */
+		s_menuKeyLatch = 0;
+		pPlayer = EFW_Player();
+		if( pPlayer && pPlayer->pev->impulse >= 1 && pPlayer->pev->impulse <= 9 )
+			pPlayer->pev->impulse = 0;
 		return;
+	}
 	pPlayer = EFW_Player();
 	if( !pPlayer )
 		return;
