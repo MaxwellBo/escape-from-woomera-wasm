@@ -1432,7 +1432,10 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 	else if( !strcmp( name, "DeleteTopic" ) )
 		EFW_AddKeyword( arg, 0 ); /* FUN_100c3500 flag 0 keeps the node so FUN_100b9990 hides it */
 	else if( !strcmp( name, "AddDiary" ) )
-		EFW_AddDiary( atoi( arg ), 2 );
+		/* FUN_100bf9c0: the bracket action stores the page and calls
+		   FUN_100c6890(page, 1). Mode 1 stashes the cursor while the
+		   menu is up; FUN_100c6c10 opens that page after 0x3c idle ticks. */
+		EFW_AddDiary( atoi( arg ), 1 );
 	else if( !strcmp( name, "ServerCommand" ) )
 		EFW_ServerCommand( pPlayer, arg );
 }
