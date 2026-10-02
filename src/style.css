@@ -332,8 +332,12 @@ canvas#canvas {
   display: none;
 }
 
-.canvas-wrap:has(#efw-story.efw-story-spr:not([hidden])) #efw-vgui {
-  visibility: hidden;
+/* layoutPromptColumn sets visibility:visible on each orbit button.
+   That wins over a hidden parent, so the speech bubble and the give
+   icons painted on top of FUN_10043750. The story Panel covers them. */
+.canvas-wrap:has(#efw-story.efw-story-spr:not([hidden])) #efw-vgui,
+.canvas-wrap:has(#efw-story.efw-story-spr:not([hidden])) #efw-vgui button {
+  visibility: hidden !important;
 }
 
 .efw-story-card {
