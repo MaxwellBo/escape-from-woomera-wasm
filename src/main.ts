@@ -610,11 +610,10 @@ function showLetterbox(code: number, caption?: string) {
   layer.hidden = false;
   if (story) story.hidden = true;
   if (interact) interact.hidden = true;
-  if (storyboardPauses(code) && !storyPaused) {
+  /* FUN_10048790 stores the caption, then the Panel sends efw_pause 1.
+     A page pause before that length is set is the context-open edge. */
+  if (storyboardPauses(code))
     storyPaused = true;
-    runEngineCmd('pausable 0');
-    runGameCmd('efw_pause 1');
-  }
   if (document.pointerLockElement)
     document.exitPointerLock();
   log(`efw: letterbox 0x${code.toString(16)}`);
