@@ -2832,6 +2832,7 @@ static void EFW_DrawLetterbox( float flTime )
 	float half;
 	int y0;
 	int y1;
+	int yText;
 	int h;
 	int w;
 	static int s_logged;
@@ -2872,7 +2873,11 @@ static void EFW_DrawLetterbox( float flTime )
 		0.0f, 0.0f, 0.2f, 1.0f, 0 );
 	EFW_DrawTriQuad( 0.0f, (float)y1, (float)w, (float)y1 + 1.0f,
 		0.0f, 0.0f, 0.6f, 1.0f, 0 );
-	EFW_DrawWrapped( 0x4b, y0, w - 0x4b, g_caption, 255, 255, 255 );
+	/* FUN_10043bb0: pen is h/2 - half + 40, then FUN_1001e7d0 at x=0x4b. */
+	yText = (int)( (float)h * 0.5f - half + 40.0f );
+	if( yText < 0 )
+		yText = 0;
+	EFW_DrawWrapped( 0x4b, yText, w - 0x4b, g_caption, 255, 255, 255 );
 	if( fade >= 1.0f )
 	{
 		EFW_DrawWrapped( w - 300, h - 0x73, w,
@@ -2880,7 +2885,7 @@ static void EFW_DrawLetterbox( float flTime )
 		if( !s_logged )
 		{
 			s_logged = 1;
-			gEngfuncs.Con_Printf( ">>> FUN_10043bb0 fade=1.00\n" );
+			gEngfuncs.Con_Printf( ">>> FUN_10043bb0 fade=1.00 y=%d\n", yText );
 		}
 	}
 }
