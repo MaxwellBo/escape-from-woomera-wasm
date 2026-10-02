@@ -846,11 +846,22 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 			lineLen--;
 		line[lineLen] = '\0';
 
+		/* FUN_100c2640 yylex skips leading space before Q/A, and '#' through
+		   end of line. An indented " A:" is another answer on the current
+		   question (Elika/Amir GREET). */
+		{
+			int lead = 0;
+			while( line[lead] == ' ' || line[lead] == '\t' )
+				lead++;
+			if( lead )
+			{
+				memmove( line, line + lead, (size_t)( lineLen - lead + 1 ) );
+				lineLen -= lead;
+			}
+		}
 		if( line[0] == '\0' )
 			continue;
 		if( line[0] == '#' )
-			continue;
-		if( line[0] == ' ' || line[0] == '\t' )
 			continue;
 
 		if( !strcmp( line, "UNWANTED_ITEM" ) )

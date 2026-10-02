@@ -459,30 +459,30 @@ static int EFW_QuestionVisible( const char *npc, const EfwQuestion *q )
 	return 1;
 }
 
+/* FUN_100b9cd0: every reply whose flags all pass is pushed, then
+   rand() (0x100c84e4) % count indexes that vector. FirstTime fails
+   once the topic is seen; !FirstTime fails before that. No flags pass. */
 static const EfwReply *EFW_PickReply( const char *npc, const EfwQuestion *q )
 {
+	const EfwReply *hits[EFW_MAX_REPLIES];
+	int n = 0;
 	int i;
 	int seen = EFW_HasSeen( npc, q->topic );
-	const EfwReply *fallback = NULL;
-	for( i = 0; i < q->replyCount; i++ )
+	for( i = 0; i < q->replyCount && n < EFW_MAX_REPLIES; i++ )
 	{
 		const EfwReply *r = &q->replies[i];
-		if( EfwFlags_Has( r->flags, "FirstTime" ) )
-		{
-			if( !seen )
-				return r;
+		if( EfwFlags_Has( r->flags, "FirstTime" ) && seen )
 			continue;
-		}
-		if( EfwFlags_Has( r->flags, "!FirstTime" ) )
-		{
-			if( seen )
-				return r;
+		if( EfwFlags_Has( r->flags, "!FirstTime" ) && !seen )
 			continue;
-		}
-		if( !fallback )
-			fallback = r;
+		hits[n++] = r;
 	}
-	return fallback;
+	if( !n )
+		return NULL;
+	i = RANDOM_LONG( 0, n - 1 );
+	if( n > 1 )
+		EFW_DebugPrint( ">>> FUN_100b9cd0 n=%d i=%d", n, i );
+	return hits[i];
 }
 
 void EFW_CloseTalk( void )
@@ -663,11 +663,15 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	int i;
 
 	static float lastPick;
+	float now;
 	if( !pPlayer || slot < 1 || slot > st->menuCount )
 		return;
-	if( gpGlobals->time < lastPick + 0.3f )
+	/* sv.time stays at the listen-server pause, so a gpGlobals->time
+	   gate accepts one menuselect and then drops the rest. */
+	now = EFW_HostClock();
+	if( now < lastPick + 0.3f )
 		return;
-	lastPick = gpGlobals->time;
+	lastPick = now;
 	pNpc = st->talkNpc;
 	if( !pNpc )
 		return;
