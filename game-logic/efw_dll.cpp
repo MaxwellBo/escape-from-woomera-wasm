@@ -4701,6 +4701,7 @@ void EFW_OnServerActivate( void )
 	s_moveSide = 0;
 	s_speedKey = 0;
 	s_useHeld = 0;
+	EFW_ApplyWorldSky();
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,

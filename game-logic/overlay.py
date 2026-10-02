@@ -395,6 +395,21 @@ def main() -> None:
         f"	EFW_EndWorldPrecache(); {MARKER}\n"
         "}\n",
     )
+    once(
+        world_cpp,
+        "	if( FStrEq( pkvd->szKeyName, \"skyname\" ) )\n"
+        "	{\n"
+        "		// Sent over net now.\n"
+        "		CVAR_SET_STRING( \"sv_skyname\", pkvd->szValue );\n"
+        "		pkvd->fHandled = TRUE;\n"
+        "	}\n",
+        "	if( FStrEq( pkvd->szKeyName, \"skyname\" ) )\n"
+        "	{\n"
+        "		// Sent over net now.\n"
+        f"		EFW_ApplyWorldSky(); {MARKER}\n"
+        "		pkvd->fHandled = TRUE;\n"
+        "	}\n",
+    )
 
     weapons_cpp = dlls / "weapons.cpp"
     once(

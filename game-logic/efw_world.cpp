@@ -13,6 +13,27 @@
 #include <stdio.h>
 #include <math.h>
 
+void EFW_ApplyWorldSky( void )
+{
+	const char *sky;
+	int level;
+
+	/* FUN_100b6140 consumes worldspawn skyname. The map string
+	   (dashdesert256) is not installed. Level 2 is evening256; every
+	   other map, including level 1, is day256. */
+	level = EFW_MapLevel();
+	sky = ( level == 1 ) ? "evening256" : "day256";
+	CVAR_SET_STRING( "sv_skyname", sky );
+	{
+		static int s_sky;
+		if( s_sky < 3 )
+		{
+			s_sky++;
+			EFW_DebugPrint( ">>> FUN_100b6140 %s", sky );
+		}
+	}
+}
+
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value )
 {
 	CBaseEntity *pEnt;
