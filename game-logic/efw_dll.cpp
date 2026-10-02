@@ -390,12 +390,10 @@ void EFW_ThinkHope( void )
 		}
 	}
 
-	if( EFW_GetHudInt( 6 ) )
-		return;
-	/* The DLL drains hope from gpGlobals->time, which was one host second
-	   per real second. This listen server bursts StartFrame, so that clock
-	   is not the original one. The pump hands in wall-clock seconds and
-	   ThinkHope spends that budget once. */
+	/* FUN_100c6ad0 does not read the storyboard pause. gpGlobals->time
+	   still advances while hud int 6 is set, so hope drains under the
+	   comic and 0x4d replaces it. This listen server bursts StartFrame,
+	   so the pump's wall clock is that time. ThinkHope spends it once. */
 	if( s_hopeWall > 0.0f )
 	{
 		elapsed = s_hopeWall;
