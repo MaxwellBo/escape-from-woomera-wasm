@@ -39,7 +39,8 @@ static float g_hudDrawTime; /* DAT_100a95ac; FUN_1001db00 flTime */
 static float g_contextOpenedAt; /* DAT_100bc354; FUN_10046370 */
 static int g_hudMsgCount; /* DAT_100baed8; FUN_10041a20 */
 static int g_hudMsgBase; /* DAT_100baedc; FUN_10041a30 */
-static char g_showMenuSlot[7][24]; /* DAT_100bc884; FUN_10047720 efw_ShowMenu %i */
+/* DAT_100bc884 stride 0x10, codes 0x3c..0x52. FUN_10047720 sprintf. */
+static char g_showMenuSlot[23][24];
 static unsigned char g_panel48[0xd4]; /* FUN_10048650 operator_new(0xd4) Panel */
 static int g_panel48On;
 static int g_diaryPage;
@@ -723,15 +724,27 @@ void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active )
 			cmd->viewangles[1], cmd->viewangles[0] );
 }
 
-/* FUN_10047720: HOOK_MESSAGE(EFW_Menu) then sprintf 7× "efw_ShowMenu %i". */
+/* FUN_10047720: HOOK_MESSAGE(EFW_Menu) then sprintf "efw_ShowMenu %i"
+   from code 0x3c until the slot pointer reaches DAT_100bc9f4 (23 slots). */
 static void EFW_HookMenuSlots( void )
 {
-	int i;
+	int code;
 
-	for( i = 0; i < 7; i++ )
-		snprintf( g_showMenuSlot[i], sizeof( g_showMenuSlot[i] ), "efw_ShowMenu %i", i );
+	for( code = 0x3c; code <= 0x52; code++ )
+		snprintf( g_showMenuSlot[code - 0x3c], sizeof( g_showMenuSlot[0] ), "efw_ShowMenu %i", code );
 	gEngfuncs.Con_Printf(
-		">>> FUN_10047720 n=7 %s %s\n", g_showMenuSlot[0], g_showMenuSlot[6] );
+		">>> FUN_10047720 n=23 %s %s\n", g_showMenuSlot[0], g_showMenuSlot[22] );
+}
+
+/* Story panels copy one of those slots (object start = pointer - 4). */
+static void EFW_StoryShowMenu( int code )
+{
+	int i = code - 0x3c;
+
+	if( i < 0 || i >= 23 )
+		return;
+	strncpy( g_storyChange, g_showMenuSlot[i], sizeof( g_storyChange ) - 1 );
+	g_storyChange[sizeof( g_storyChange ) - 1] = '\0';
 }
 
 /* FUN_100419e0: HOOK_MESSAGE(EFWShow/EFWData), zero DAT_100baed8/edc, FUN_10042140. */
@@ -1156,17 +1169,16 @@ static void EFW_OpenStoryboard( int code )
 	switch( code )
 	{
 	case 0x3f:
-		/* FUN_10047830: Hiding_Day Panel copies DAT_100bc9b0, then
-		   ClientCmd stored next to the sprite: changelevel level2. */
+		/* FUN_10047830 copies DAT_100bc9b0. FUN_10047720 filled that
+		   slot with "efw_ShowMenu 79" (0x4f). Decoy_Remove owns the
+		   changelevel, not this panel. */
 		spr = "Storyboard/EFW_Storyboards_Hiding_Day.spr";
-		strncpy( g_storyChange, "efw_changelevel efw_prototype_level2", sizeof( g_storyChange ) - 1 );
-		g_storyChange[sizeof( g_storyChange ) - 1] = '\0';
+		EFW_StoryShowMenu( 0x4f );
 		break;
 	case 0x43:
-		/* FUN_10047830: Hiding_Night Panel copies DAT_100bc9c0 -> level3. */
+		/* DAT_100bc9c0 is "efw_ShowMenu 80" (0x50 Dec_Replace). */
 		spr = "Storyboard/EFW_Storyboards_Hiding_Night.spr";
-		strncpy( g_storyChange, "efw_changelevel efw_prototype_level3", sizeof( g_storyChange ) - 1 );
-		g_storyChange[sizeof( g_storyChange ) - 1] = '\0';
+		EFW_StoryShowMenu( 0x50 );
 		break;
 	case 0x52:
 		spr = "Storyboard/EFW_Storyboards_Help_Screen.spr";
@@ -1178,12 +1190,17 @@ static void EFW_OpenStoryboard( int code )
 			strncpy( g_storyChange, "efw_changelevel efw_prototype_level2", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x49:
+		/* DAT_100bc960 is "efw_ShowMenu 74" (intro 2). */
 		spr = "Storyboard/EFW_Storyboards_Introduction_1.spr";
+		EFW_StoryShowMenu( 0x4a );
 		break;
 	case 0x4a:
+		/* DAT_100bc970 is "efw_ShowMenu 75" (intro 3). */
 		spr = "Storyboard/EFW_Storyboards_Introduction_2.spr";
+		EFW_StoryShowMenu( 0x4b );
 		break;
 	case 0x4b:
+		/* DAT_1007ee20 is an empty command. Dismiss only unpauses. */
 		spr = "Storyboard/EFW_Storyboards_Introduction_3.spr";
 		break;
 	case 0x4c:
@@ -1191,7 +1208,9 @@ static void EFW_OpenStoryboard( int code )
 		strncpy( g_storyChange, "efw_changelevel efw_prototype_level1", sizeof( g_storyChange ) - 1 );
 		break;
 	case 0x4d:
+		/* FUN_100484b0 copies DAT_100bc9a0: "efw_ShowMenu 78" (0x4e). */
 		spr = "Storyboard/EFW_SB_Ending_Iso.spr";
+		EFW_StoryShowMenu( 0x4e );
 		break;
 	case 0x4e:
 		spr = "Storyboard/EFW_SB_Ending_Dep.spr";
@@ -1485,6 +1504,7 @@ static void EFW_DismissStoryboard( void )
 	if( g_storyChange[0] )
 	{
 		char buf[80];
+		gEngfuncs.Con_Printf( ">>> FUN_100485d0 %s\n", g_storyChange );
 		snprintf( buf, sizeof( buf ), "%s\n", g_storyChange );
 		gEngfuncs.pfnServerCmd( buf );
 	}
