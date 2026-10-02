@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll317`;
+    return `${url}?v=efw-dll318`;
   return url;
 }
 
@@ -682,7 +682,22 @@ function dismissEfwStory() {
   }
 }
 
+function isNarrationMenu(code: number): boolean {
+  /* FUN_100c81d0 calls FUN_100c6e60 for these codes. 0x3f and 0x43
+     add hope and send EFW_Menu. The blue panel is the caption. */
+  return code === 0x3c || code === 0x3d || code === 0x3e
+    || code === 0x40 || code === 0x41 || code === 0x42
+    || code === 0x44 || code === 0x45;
+}
+
 function showEfwStory(code: number, fallback?: string) {
+  if (isNarrationMenu(code)) {
+    const layer = document.getElementById('efw-story');
+    if (layer && !layer.classList.contains('efw-story-spr'))
+      layer.hidden = true;
+    log(`efw: FUN_100c81d0 menu 0x${code.toString(16)}`);
+    return;
+  }
   if (code === 0x48) {
     /* FUN_10048650: 0xd4 Panel, no storyboard SPR. FUN_10048710 pauses. */
     if (!storyPaused) {
