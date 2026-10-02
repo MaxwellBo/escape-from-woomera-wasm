@@ -104,6 +104,7 @@ static HSPRITE EFW_ItemIcon( int id ); /* weapon+0xbc, the "weapon" line */
 static int EFW_DrawWrapped( int x, int y, int xmax, const char *text, int r, int g, int b );
 static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 	float r, float g, float b, float v, HSPRITE spr );
+static int EFW_AscaleAlpha( float v );
 
 #define EFW_VGUI_MAX 6 /* FUN_100c6d70 DAT_10134894..a8 — six CommandButton slots */
 struct EfwVguiBtn
@@ -2304,8 +2305,8 @@ static void EFW_DrawInventoryStrip( float fade )
 		return;
 	x0 = (int)( (float)ScreenWidth * ( 1.0f - fade ) );
 	/* FUN_10043dd0: FUN_1001d750 from x=width*(1-fade) to width, y=height-190
-	   to height, RGB 0.2,0.2,0.2, UV v=0.8, spr=0. That ascale row is alpha
-	   204, so the strip is translucent grey. pfnFillRGBA would add the grey. */
+	   to height, RGB 0.2,0.2,0.2, UV v=0.8, spr=0. Row 204 of ascale.spr
+	   stores 216, so the strip is that grey. pfnFillRGBA would add it. */
 	EFW_DrawTriQuad( (float)x0, (float)( ScreenHeight - 190 ),
 		(float)ScreenWidth, (float)ScreenHeight,
 		0.2f, 0.2f, 0.2f, 0.8f, 0 );
@@ -2314,8 +2315,8 @@ static void EFW_DrawInventoryStrip( float fade )
 		if( !s_quad && fade > 0.5f )
 		{
 			s_quad = 1;
-			gEngfuncs.Con_Printf( ">>> FUN_10043dd0 quad %d %d %d 190 rgb=51,51,51 a=204\n",
-				x0, ScreenHeight - 190, ScreenWidth - x0 );
+			gEngfuncs.Con_Printf( ">>> FUN_10043dd0 quad %d %d %d 190 rgb=51,51,51 a=%d\n",
+				x0, ScreenHeight - 190, ScreenWidth - x0, EFW_AscaleAlpha( 0.8f ) );
 		}
 	}
 	if( fade < 1.0f )
@@ -2720,6 +2721,42 @@ static void EFW_DrawStoryboardTiles( HSPRITE spr )
 	}
 }
 
+/* sprites/ascale.spr, one index per row. FUN_1001d750 samples that
+   row for every vertex. v*255 is the row, not the stored index. */
+static int EFW_AscaleAlpha( float v )
+{
+	static const unsigned char kRow[256] = {
+		0,0,0,1,1,2,2,4,4,4,5,5,6,7,8,8,
+		9,9,10,11,11,12,13,13,14,15,16,17,18,18,19,20,
+		20,22,22,24,24,25,26,27,28,28,29,31,31,33,33,34,
+		35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,
+		51,52,53,55,55,57,58,59,60,61,62,64,64,66,67,68,
+		69,70,71,72,74,75,76,77,78,80,81,82,83,84,86,87,
+		88,89,90,91,93,94,95,96,98,99,100,101,103,104,105,106,
+		108,109,110,111,112,114,115,117,117,119,120,121,122,124,125,126,
+		128,128,130,131,132,134,135,136,138,139,140,142,142,144,145,146,
+		147,149,150,151,153,153,155,156,157,159,159,161,162,164,165,166,
+		167,168,169,171,172,173,175,175,177,178,179,180,181,183,184,185,
+		186,187,188,190,191,192,193,194,195,196,197,199,199,201,201,203,
+		204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,
+		220,221,222,223,223,225,226,226,227,228,229,230,231,231,233,233,
+		234,235,236,237,237,238,239,240,240,241,242,243,243,244,245,246,
+		246,247,248,248,249,249,250,251,251,252,252,253,254,254,254,255
+	};
+	int row;
+
+	if( v < 0.0f )
+		v = 0.0f;
+	if( v > 1.0f )
+		v = 1.0f;
+	row = (int)( v * 255.0f + 0.5f );
+	if( row < 0 )
+		row = 0;
+	if( row > 255 )
+		row = 255;
+	return kRow[row];
+}
+
 /* FUN_1001d750: TRIAPI textured quad. param_9!=0 uses SpriteTexture of that
    SPR (RenderMode normal, UV 0..1). param_9==0 loads sprites/ascale.spr,
    RenderMode kRenderTransAlpha, CullFace TRI_NONE, Color4f alpha 1, and
@@ -2774,14 +2811,12 @@ static void EFW_DrawTriQuad( float x1, float y1, float x2, float y2,
 		return;
 	}
 
-	/* v selects the ascale row. v=1 is index 255. pfnFillRGBA adds the
-	   color, so a (0, 0, 0.2) panel only tints the floor. The tri call
-	   sticks on this renderer. pfnFillRGBABlend is that opaque row. */
-	ia = (int)( v * 255.0f + 0.5f );
-	if( ia < 0 )
-		ia = 0;
-	if( ia > 255 )
-		ia = 255;
+	/* FUN_1001d750 pins every vertex to this v, so the quad is one row of
+	   sprites/ascale.spr. That file is not v*255: row 204 (v=0.8) stores
+	   216, and row 255 stores 255. pfnFillRGBA would add the color, so a
+	   (0, 0, 0.2) panel only tints the floor. The tri call sticks on this
+	   renderer. pfnFillRGBABlend is that row. */
+	ia = EFW_AscaleAlpha( v );
 	if( ia < 1 )
 		return;
 	{
