@@ -1347,10 +1347,10 @@ static int EFW_CmdIs( const char *cmd, const char *want )
 	return cmd[n] == '\0' || cmd[n] == ' ' || cmd[n] == '\t';
 }
 
-/* FUN_100bfbf0: conversation ServerCommand(efw_GetPackage / efw_EndMailPickupMessage).
-   efw_TriggerMailPickupMessage is in Conversations txt files but not in the DLL
-   strings; reconstruct as FUN_100c77c0 + AddKeyword(OFFICE) so Mail_Officer
-   can reach the package topic. */
+/* FUN_100bfbf0: efw_GetPackage, efw_GetPackage), efw_EndMailPickupMessage,
+   and efw_EndMailPickupMessage). Any other string, including
+   efw_TriggerMailPickupMessage, falls through. OFFICE is AddKeyword'd
+   by the kitchen-bin virtual at 0x100c50a1. */
 void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
 {
 	char buf[64];
@@ -1383,12 +1383,6 @@ void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
 	if( EFW_CmdIs( buf, "efw_EndMailPickupMessage" ) )
 	{
 		EFW_PAUnlock();
-		return;
-	}
-	if( EFW_CmdIs( buf, "efw_TriggerMailPickupMessage" ) )
-	{
-		EFW_PALockRAR();
-		EFW_AddKeyword( "OFFICE", 1 );
 		return;
 	}
 }
