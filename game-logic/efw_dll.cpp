@@ -1521,6 +1521,7 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.hopeClock = gpGlobals->time;
 	g_efw.dt = 0.0f;
 	g_efw.hideDist = EFW_HIDE_DIST;
+	g_efw.talkCursor = -1;
 	g_efw.diaryPending = -1;
 	g_efw.mapLevel = level;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */

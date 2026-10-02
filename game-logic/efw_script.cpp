@@ -846,9 +846,10 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 			lineLen--;
 		line[lineLen] = '\0';
 
-		/* FUN_100c2640 yylex skips leading space before Q/A, and '#' through
-		   end of line. An indented " A:" is another answer on the current
-		   question (Elika/Amir GREET). */
+		/* FUN_100c2640 yylex skips leading space before Q/A. Rule 14
+		   (0x100c1cec) returns token 0x10c whose value is the run of '#'.
+		   #Q is a follow-up at depth 1; ##Q is depth 2. An indented
+		   " A:" is another answer on the question just opened. */
 		{
 			int lead = 0;
 			while( line[lead] == ' ' || line[lead] == '\t' )
@@ -861,8 +862,39 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 		}
 		if( line[0] == '\0' )
 			continue;
-		if( line[0] == '#' )
-			continue;
+		{
+			int hash = 0;
+			while( line[0] == '#' )
+			{
+				hash++;
+				memmove( line, line + 1, (size_t)lineLen );
+				lineLen--;
+			}
+			if( hash && line[0] != 'Q' )
+			{
+				if( line[0] )
+					EfwYyError( "parse error", lineNo );
+				continue;
+			}
+			if( line[0] == 'Q' )
+			{
+				const char *s = line + 1;
+				if( script->questionCount >= EFW_MAX_QUESTIONS )
+					break;
+				q = &script->questions[script->questionCount++];
+				memset( q, 0, sizeof( *q ) );
+				q->depth = hash;
+				inUnwanted = 0;
+				if( *s == '<' )
+					EfwParseTag( &s, q->topic, EFW_TOPIC_LEN, q->flags, EFW_FLAG_LEN );
+				s = EfwSkipWs( s );
+				if( *s == ':' )
+					s++;
+				s = EfwSkipWs( s );
+				EfwCopy( q->text, EFW_TEXT_LEN, s, -1 );
+				continue;
+			}
+		}
 
 		if( !strcmp( line, "UNWANTED_ITEM" ) )
 		{
@@ -872,24 +904,6 @@ int EfwScript_Parse( EfwScript *script, const char *name, const char *src, int l
 			memset( q, 0, sizeof( *q ) );
 			strcpy( q->topic, "UNWANTED_ITEM" );
 			inUnwanted = 1;
-			continue;
-		}
-
-		if( line[0] == 'Q' )
-		{
-			const char *s = line + 1;
-			if( script->questionCount >= EFW_MAX_QUESTIONS )
-				break;
-			q = &script->questions[script->questionCount++];
-			memset( q, 0, sizeof( *q ) );
-			inUnwanted = 0;
-			if( *s == '<' )
-				EfwParseTag( &s, q->topic, EFW_TOPIC_LEN, q->flags, EFW_FLAG_LEN );
-			s = EfwSkipWs( s );
-			if( *s == ':' )
-				s++;
-			s = EfwSkipWs( s );
-			EfwCopy( q->text, EFW_TEXT_LEN, s, -1 );
 			continue;
 		}
 

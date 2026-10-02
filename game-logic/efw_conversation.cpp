@@ -427,9 +427,16 @@ static int EFW_QuestionVisible( const char *npc, const EfwQuestion *q )
 			EFW_DebugPrint( ">>> FUN_100bdc40 %s %s", npc ? npc : "-", q->topic );
 		}
 	}
-	if( !q->topic[0] || !strcmp( q->topic, "UNWANTED_ITEM" ) )
+	/* A #Q prompt has no topic. FUN_100bdc40 passes an empty flag
+	   range. UNWANTED_ITEM stays off the menu. */
+	if( !strcmp( q->topic, "UNWANTED_ITEM" ) )
 		return 0;
-	if( !EFW_HasKeyword( q->topic ) )
+	if( q->topic[0] )
+	{
+		if( !EFW_HasKeyword( q->topic ) )
+			return 0;
+	}
+	else if( q->depth <= 0 )
 		return 0;
 	seen = EFW_HasSeen( npc, q->topic );
 	if( EfwFlags_Has( q->flags, "FirstTime" ) && seen )
@@ -481,6 +488,7 @@ void EFW_CloseTalk( void )
 	st->talkNpc = NULL;
 	st->menuCount = 0;
 	st->menuMode = 0;
+	st->talkCursor = -1;
 	st->talkStart = 0;
 	st->prevQuestion[0] = '\0';
 	st->speech[0] = '\0';
@@ -536,16 +544,37 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 			}
 		}
 	}
-	slot = 0;
-	for( i = 0; i < script->questionCount && slot < 6; i++ )
+	/* FUN_100b9990: no current question shows depth 0 and skips
+	   deeper lines. After an answer the target is that question's
+	   depth plus one, the walk starts on the next line, a shallower
+	   line ends the walk, and a deeper line is skipped. */
 	{
-		const EfwQuestion *q = &script->questions[i];
-		if( !EFW_QuestionVisible( npc, q ) )
-			continue;
-		st->menuChoices[slot] = i;
-		lines[slot] = q->text[0] ? q->text : q->topic;
-		st->menuCount++;
-		slot++;
+		int target = 0;
+		int begin = 0;
+		if( st->talkCursor >= 0 && st->talkCursor < script->questionCount )
+		{
+			target = script->questions[st->talkCursor].depth + 1;
+			begin = st->talkCursor + 1;
+		}
+		slot = 0;
+		for( i = begin; i < script->questionCount && slot < 6; i++ )
+		{
+			const EfwQuestion *q = &script->questions[i];
+			if( q->depth < target )
+				break;
+			if( q->depth != target )
+				continue;
+			if( !EFW_QuestionVisible( npc, q ) )
+				continue;
+			st->menuChoices[slot] = i;
+			lines[slot] = q->text[0] ? q->text : q->topic;
+			st->menuCount++;
+			slot++;
+		}
+		EFW_DebugPrint( ">>> FUN_100b9990 depth=%d n=%d %s | %s",
+			target, slot,
+			slot > 0 ? lines[0] : "",
+			slot > 1 ? lines[1] : "" );
 	}
 	EFW_DebugPrint( "CONVERSATION   (%d messages)", st->menuCount );
 	if( !st->menuCount )
@@ -580,6 +609,7 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
 	st->speech[0] = '\0';
 	st->speechAt = 0;
+	st->talkCursor = -1;
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
 
@@ -670,11 +700,13 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	q = &script->questions[qi];
 	r = EFW_PickReply( npc, q );
 	EFW_MarkSeen( npc, q->topic );
+	/* FUN_100b9a77: the next menu is this question's depth plus one. */
+	st->talkCursor = qi;
 	/* FUN_100c69a0 copies the pressed ShowMenu line into DAT_10134480. */
 	strncpy( st->prevQuestion, q->text[0] ? q->text : q->topic,
 		sizeof( st->prevQuestion ) - 1 );
 	st->prevQuestion[sizeof( st->prevQuestion ) - 1] = '\0';
-	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic );
+	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic[0] ? q->topic : q->text );
 	body[0] = '\0';
 	if( r && r->text[0] )
 	{

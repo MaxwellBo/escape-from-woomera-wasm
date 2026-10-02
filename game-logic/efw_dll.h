@@ -64,6 +64,7 @@ struct EfwDllState
 
 	int menuCount;
 	int menuChoices[EFW_MENU_LINES];
+	int talkCursor; /* FUN_100b9990: -1 is the depth-0 menu; else the question just answered */
 	int menuMode; /* 0 none, 1 topics, 2 reply */
 	char menuTitle[80];
 	char menuText[EFW_MENU_LINES][160];
