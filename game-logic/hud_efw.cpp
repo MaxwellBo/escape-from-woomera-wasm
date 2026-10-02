@@ -3293,7 +3293,6 @@ int CHudEfw::Draw( float flTime )
 	EFW_DrawArtsClock( g_hudDrawTime );
 
 	EFW_DrawScanPrompts( r, g, b );
-	EFW_DrawInteractPrompt();
 	EFW_DrawLetterbox( flTime );
 
 	if( g_storyCode && g_hStory )
@@ -3418,6 +3417,10 @@ int CHudEfw::Draw( float flTime )
 
 	EFW_DrawInventoryStrip( g_invFade );
 	EFW_DrawDiaryWipe();
+	/* FUN_10046590 runs after the diary wipe. The name plate and the
+	   click bar sit on top of the grey strip. Drawing them earlier left
+	   the 0.8 veil over the glyphs (white text reads back as ~92). */
+	EFW_DrawInteractPrompt();
 	/* FUN_1001db00 calls FUN_10046590 after the menu panel, so the
 	   shrinking quad sits on top of that veil. */
 	EFW_DrawIconFly();
