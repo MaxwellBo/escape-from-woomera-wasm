@@ -782,19 +782,21 @@ void EFW_ThinkConversation( void )
 		{
 			/* FUN_100c6c10: gpGlobals->time >= DAT_1013487c + 20. The
 			   listen server leaves sv.time at 1.00, so both a squark and
-			   a choice menu measure those 20 seconds on the host clock. */
+			   a choice menu measure those 20 seconds on the host clock.
+			   A null partner (narration pushes 0) skips the range test.
+			   It does not close the menu on its own. */
 			float now = EFW_HostClock();
-			if( !pPlayer || !st->talkNpc )
-				EFW_CloseTalk();
-			else if( now >= st->talkStart + EFW_TALK_TIMEOUT )
+			if( now >= st->talkStart + EFW_TALK_TIMEOUT )
 			{
-				if( st->menuMode == 0 )
+				if( !st->talkNpc )
+					EFW_DebugPrint( "efw: caption timeout" );
+				else if( st->menuMode == 0 )
 					EFW_DebugPrint( "efw: squark timeout" );
 				else
 					EFW_DebugPrint( "efw: menu timeout" );
 				EFW_CloseTalk();
 			}
-			else
+			else if( pPlayer && st->talkNpc )
 			{
 				dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
 				if( dist >= st->hideDist )

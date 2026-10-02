@@ -508,7 +508,20 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 	idx = code - 0x3c;
 	if( idx >= 0 && idx < (int)( sizeof( kNarrate ) / sizeof( kNarrate[0] ) ) && kNarrate[idx] )
 	{
+		/* FUN_100c6e60 content path: the title counts, the partner push is
+		   0, and the last argument is 200 (0x43480000) stored at
+		   DAT_1011d130. talkActive becomes 1 and talkNpc is cleared, so
+		   FUN_100c6c10 waits out the 20s clock and skips the range hide. */
+		EfwDllState *st = EFW_Dll();
+		st->talkActive = 1;
+		st->talkNpc = NULL;
+		st->hideDist = EFW_HIDE_DIST;
+		st->menuMode = 0;
 		EFW_ShowDllMenu( pPlayer, kNarrate[idx], NULL, 0 );
+		/* ShowDllMenu stamps gpGlobals->time. sv.time stays paused, so
+		   the 20s compare in FUN_100c6c10 uses the host clock. */
+		st->talkStart = EFW_HostClock();
+		EFW_DebugPrint( "efw: caption arm t=%.2f", st->talkStart );
 		return;
 	}
 	if( code != 0x47 )
