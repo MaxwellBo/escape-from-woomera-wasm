@@ -983,8 +983,12 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 		snprintf( label, sizeof( label ), "Talk to %s", who );
 		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
 		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+		/* FUN_10044f70: columns of 10, stride 11. The red phone card
+		   sits on the skipped index and never becomes a Give button. */
 		for( id = 16; id <= 24; id++ )
 		{
+			if( !EFW_HudWeaponVisited( id ) )
+				continue;
 			if( !EFW_HtmlHasWep( pPlayer, id ) )
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), who );

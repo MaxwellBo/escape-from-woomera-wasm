@@ -8,6 +8,7 @@
 #include "usercmd.h"
 #include "kbutton.h"
 #include "ref_params.h"
+#include "efw.h"
 
 #include <math.h>
 #include <string.h>
@@ -2116,9 +2117,12 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		snprintf( label, sizeof( label ), "Talk to %s", who );
 		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
 		EFW_VguiAdd( x, y, label, cmd, g_hBubble );
-		/* FUN_10044f70 walks DAT_100a37a8 weapon slots 16..24, not just FirstWep. */
+		/* FUN_10044f70 walks DAT_100a37a8 in columns of 10, stride 11.
+		   Index 21, the red phone card, is the column that walk skips. */
 		for( id = 16; id <= 24; id++ )
 		{
+			if( !EFW_HudWeaponVisited( id ) )
+				continue;
 			if( !EFW_HasWep( id ) )
 				continue;
 			snprintf( label, sizeof( label ), "Give %s to %s", EFW_WepLabel( id ), who );
@@ -2339,9 +2343,12 @@ static void EFW_DrawInventoryStrip( float fade )
 	n = 0;
 	names[0] = '\0';
 	namesN = 0;
+	/* Same DAT_100a37a8 walk as the Give buttons: skip id 21. */
 	for( id = 16; id <= 24; id++ )
 	{
 		HSPRITE icon;
+		if( !EFW_HudWeaponVisited( id ) )
+			continue;
 		if( !EFW_HasWep( id ) )
 			continue;
 		icon = EFW_ItemIcon( id );

@@ -63,6 +63,17 @@ void EFW_EnginePrint( const char *line );
 #define WEAPON_EFW_WASHINGPOWDER	24
 #define WEAPON_EFW_PILERS			WEAPON_EFW_PLIERS
 
+/* FUN_10044f70 and FUN_10043dd0 walk DAT_100a37a8 in columns of 10
+   inside a stride of 11, and stop before index 0x37. Ids 10, 21, 32,
+   43, and 54 are never read. 21 is weapon_efw_RedPhoneCard, so the
+   starting phone card is not a Give button and not an inventory icon. */
+static inline int EFW_HudWeaponVisited( int id )
+{
+	if( id < 0 || id >= 0x37 )
+		return 0;
+	return ( id % 11 ) != 10;
+}
+
 #define EFW_ITEM_PLIERS			( 1 << 0 )
 #define EFW_ITEM_PILERS			( 1 << 1 )
 #define EFW_ITEM_LEVER			( 1 << 2 )
