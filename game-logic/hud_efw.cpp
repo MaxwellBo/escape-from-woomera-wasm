@@ -2594,11 +2594,18 @@ static void EFW_DrawInteractPrompt( void )
 	}
 }
 
-/* FUN_100436c0: tile sprites/efw_grey.spr over the framebuffer. */
+/* FUN_100436c0: SPR_Set(0,0,0) then SPR_Draw of sprites/efw_grey.spr,
+   stepped across the framebuffer. The sprite is index-alpha and every
+   texel is index 128, which the gradient palette stores as
+   RGBA(255,255,255,128). pfnSPR_Draw is kRenderTransAlpha (blend off,
+   alpha test greater than 0) modulated by that black color, so each
+   tile replaces the framebuffer with black. A 16px tile is thousands of
+   draws on this present and never returns. The texels are uniform, so
+   one opaque black fill is the same picture. FillRGBA adds light and
+   left the letterbox showing through the comic. */
 static void EFW_DrawGreyVeil( void )
 {
-	int tw, th, x, y, tiles;
-	wrect_t rc;
+	static int s_logged;
 
 	if( !g_hGrey )
 		g_hGrey = EFW_LoadSpr( "sprites/efw_grey.spr" );
@@ -2607,34 +2614,15 @@ static void EFW_DrawGreyVeil( void )
 		g_hAscale = EFW_LoadSpr( "sprites/ascale.spr" ); /* FUN_10044e30 */
 		gEngfuncs.Con_Printf( ">>> FUN_10044e30 ascale=%d grey=%d\n", g_hAscale != 0, g_hGrey != 0 );
 	}
-	if( !g_hGrey )
+	if( !s_logged )
 	{
-		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 220 );
-		return;
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_100436c0 grey=%d rgb=0,0,0\n", g_hGrey != 0 );
 	}
-	tw = SPR_Width( g_hGrey, 0 );
-	th = SPR_Height( g_hGrey, 0 );
-	if( tw < 1 )
-		tw = 16;
-	if( th < 1 )
-		th = 16;
-	tiles = ( ScreenWidth / tw ) * ( ScreenHeight / th );
-	SPR_Set( g_hGrey, 255, 255, 255 );
-	rc.left = 0;
-	rc.top = 0;
-	rc.right = tw;
-	rc.bottom = th;
-	/* 16px grey is ~2500 SPR_DrawHoles on a 917x687 software present and
-	   never returns. Keep the PE loop when the tile is large enough. */
-	if( tiles > 80 )
-	{
-		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 12, 12, 12, 220 );
-		SPR_DrawHoles( 0, 0, 0, &rc );
-		return;
-	}
-	for( y = 0; y < ScreenHeight; y += th )
-		for( x = 0; x < ScreenWidth; x += tw )
-			SPR_DrawHoles( 0, x, y, &rc );
+	if( gEngfuncs.pfnFillRGBABlend )
+		gEngfuncs.pfnFillRGBABlend( 0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 255 );
+	else
+		FillRGBA( 0, 0, ScreenWidth, ScreenHeight, 0, 0, 0, 255 );
 }
 
 /* FUN_10043750: up to 12 frames of a 256px storyboard SPR in a 4x3 grid
