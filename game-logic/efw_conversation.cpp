@@ -1271,7 +1271,11 @@ void EFW_TalkScan( void )
 		if( dist >= EFW_TALK_SCAN && !EFW_FStrEq( cn, "efw_Marker" ) )
 			continue;
 
-		if( EFW_IsTalkNpc( pScan ) || !strcmp( cn, "monster_barney" ) )
+		/* FUN_100c7830: type 0 only for monster_refugee or monster_barney.
+		   monster_patrol_guard is not in that test, so a level-2 guard
+		   does not grow a speech bubble. Use/Give still go through
+		   EFW_IsTalkNpc. */
+		if( !strcmp( cn, "monster_refugee" ) || !strcmp( cn, "monster_barney" ) )
 		{
 			pos = pScan->pev->origin;
 			pos.z += 64.0f;
