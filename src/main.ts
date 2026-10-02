@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll299`;
+    return `${url}?v=efw-dll300`;
   return url;
 }
 
@@ -917,9 +917,7 @@ function applyLetterHud(text: string): boolean {
     return false;
   }
   if (text.includes('>>> FUN_10043bb0') || text.includes('>>> FUN_1001d750')) {
-    const cont = document.getElementById('efw-letter-cont');
-    if (cont && text.includes('>>> FUN_10043bb0'))
-      cont.hidden = false;
+    /* FUN_10043bb0 draws "Press left mouse button to continue". */
     return false;
   }
   return false;
@@ -2234,6 +2232,8 @@ document.getElementById('efw-letter')?.addEventListener('click', (ev) => {
   ev.preventDefault();
   ev.stopPropagation();
   dismissLetterbox();
+  /* Caption InputSignal: EFW_DismissCaption on mouse1. */
+  runGameCmd('efw_story_key');
 });
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (efw_Talk Amir)');

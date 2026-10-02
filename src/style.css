@@ -280,19 +280,20 @@ canvas#canvas {
   background: #000;
 }
 
+/* FUN_10043bb0 draws the growing center veil and the caption with
+   pfnDrawCharacter. This layer is the Panel click (FUN_10048790). */
 .efw-letter {
   position: absolute;
   inset: 0;
   z-index: 7;
-  background: rgb(0, 0, 51);
-  padding: 50px 75px 120px;
+  background: transparent;
+  cursor: pointer;
 }
 
+#efw-letter-text,
 .efw-letter-cont,
 #efw-letter-cont {
-  position: absolute;
-  right: 12px;
-  bottom: 115px;
+  display: none;
 }
 
 .efw-story {
