@@ -3269,6 +3269,8 @@ int CHudEfw::Draw( float flTime )
 	{
 		EFW_DrawIconFly();
 		EFW_DrawLetterbox( flTime );
+		/* FUN_1001db00 draws the arts logo after FUN_10043bb0. */
+		EFW_DrawArtsClock( g_hudDrawTime );
 		return 1;
 	}
 
@@ -3287,11 +3289,6 @@ int CHudEfw::Draw( float flTime )
 		EFW_DrawHopeTicks( ticks );
 	}
 
-	/* cl.time stays near 1, so the 5s logo fade never leaves full
-	   brightness. The dawn palette already spends wall time in
-	   g_hudDrawTime; the logo uses that same clock. */
-	EFW_DrawArtsClock( g_hudDrawTime );
-
 	EFW_DrawScanPrompts( r, g, b );
 
 	if( g_storyCode && g_hStory )
@@ -3299,6 +3296,9 @@ int CHudEfw::Draw( float flTime )
 		/* HUD_Redraw calls FUN_10043a10 after FUN_1001db00, so the
 		   letterbox is already up and the tiles cover it. */
 		EFW_DrawLetterbox( flTime );
+		/* FUN_1001db00 draws the arts logo after the letterbox and
+		   before HUD_Redraw calls FUN_10043a10. The tiles cover it. */
+		EFW_DrawArtsClock( g_hudDrawTime );
 		/* FUN_10043a10: grey veil, fade DAT_100baf10 += 0.1, then FUN_10043750. */
 		g_storyFade += 0.1f;
 		if( g_storyFade > 1.0f )
@@ -3431,5 +3431,9 @@ int CHudEfw::Draw( float flTime )
 	   click bar, stays in view. Drawing the veil earlier left the
 	   notebook and the grey strip on top of the caption. */
 	EFW_DrawLetterbox( flTime );
+	/* FUN_1001db00 draws sprites/efw_artslogo.spr after FUN_10043bb0.
+	   The sprite is 128px at y=5, so the lower rows sit on the veil.
+	   Drawing it earlier left that half under the blue. */
+	EFW_DrawArtsClock( g_hudDrawTime );
 	return 1;
 }
