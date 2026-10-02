@@ -2771,13 +2771,12 @@ static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, flo
 
 /* PM_WalkMove / PM_AirMove wish. cl_forwardspeed and cl_sidespeed are 400.
    +speed multiplies by cl_movespeedkey (0.3) before the clamp, so one axis
-   is 120. PM_CheckParameters then clamps the cmd to sv_maxspeed 320.
-   PM_Duck multiplies that clamped cmd by 0.333, so a crouch wishes 107,
-   not 400*0.333. Holding use on the ground cuts the cap to 320/3 before
-   that clamp, so a walk while using also wishes 107. A full axis without
-   either key stays 320. Looking up zeroes
-   the vertical part of the basis and renormalizes, so the planar wish
-   keeps the cmd speed. */
+   is 120. PM_CheckParameters then takes min(clientmaxspeed, sv_maxspeed).
+   FUN_1007ed20 sets clientmaxspeed to 180 except on map level 1, where
+   the engine cap (320) remains. PM_Duck multiplies that clamped cmd by
+   0.333. Holding use on the ground cuts the cap to a third before that
+   clamp. Looking up zeroes the vertical part of the basis and
+   renormalizes, so the planar wish keeps the cmd speed. */
 static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
 {
 	Vector fwdDir;
@@ -2830,8 +2829,12 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 	maxspd = CVAR_GET_FLOAT( "sv_maxspeed" );
 	if( maxspd < 1.0f )
 		maxspd = 320.0f;
-	/* PM_CheckParameters: holding use on the ground cuts maxspeed to a third
-	   before the cmd is clamped. PM_Duck still multiplies after that. */
+	/* PM_CheckParameters: a non-zero client maxspeed replaces the cap
+	   when it is lower. FUN_1007ed20 writes 180 on this map. */
+	if( pPlayer->pev->maxspeed > 1.0f && pPlayer->pev->maxspeed < maxspd )
+		maxspd = pPlayer->pev->maxspeed;
+	/* Holding use on the ground cuts maxspeed to a third before the cmd
+	   is clamped. PM_Duck still multiplies after that. */
 	if( ( pPlayer->pev->flags & FL_ONGROUND )
 		&& ( s_useHeld || ( pPlayer->pev->button & IN_USE ) ) )
 		maxspd *= ( 1.0f / 3.0f );
@@ -2840,7 +2843,7 @@ static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, 
 		wish = wish * ( maxspd / len );
 		len = maxspd;
 	}
-	/* PM_Duck runs after the maxspeed clamp. 320 * 0.333 = 107. */
+	/* PM_Duck runs after the maxspeed clamp. 180 * 0.333 = 60 on this map. */
 	if( pPlayer->pev->flags & FL_DUCKING )
 	{
 		wish = wish * 0.333f;
@@ -4833,6 +4836,14 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_LinkUserMessages();
 	EFW_Precache();
 	EFW_InitFromSpawn( pPlayer );
+	/* FUN_1007ed20: MapLevel()==1 skips this. Every other map calls
+	   SetClientMaxspeed(edict, 180). Level 2 keeps the engine cap. */
+	if( pPlayer && EFW_MapLevel() != 1 )
+	{
+		pPlayer->pev->maxspeed = 180.0f;
+		g_engfuncs.pfnSetClientMaxspeed( pPlayer->edict(), 180.0f );
+		EFW_DebugPrint( ">>> FUN_1007ed20 maxspeed 180 level=%d", EFW_MapLevel() );
+	}
 	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "bind [ efw_diary_prev\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "bind ] efw_diary_next\n" );
