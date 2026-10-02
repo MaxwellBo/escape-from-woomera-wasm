@@ -3293,10 +3293,12 @@ int CHudEfw::Draw( float flTime )
 	EFW_DrawArtsClock( g_hudDrawTime );
 
 	EFW_DrawScanPrompts( r, g, b );
-	EFW_DrawLetterbox( flTime );
 
 	if( g_storyCode && g_hStory )
 	{
+		/* HUD_Redraw calls FUN_10043a10 after FUN_1001db00, so the
+		   letterbox is already up and the tiles cover it. */
+		EFW_DrawLetterbox( flTime );
 		/* FUN_10043a10: grey veil, fade DAT_100baf10 += 0.1, then FUN_10043750. */
 		g_storyFade += 0.1f;
 		if( g_storyFade > 1.0f )
@@ -3424,5 +3426,10 @@ int CHudEfw::Draw( float flTime )
 	/* FUN_1001db00 calls FUN_10046590 after the menu panel, so the
 	   shrinking quad sits on top of that veil. */
 	EFW_DrawIconFly();
+	/* FUN_10043bb0 runs after the diary sprite and the interact bar.
+	   The center veil covers the page. The bottom 50px, including the
+	   click bar, stays in view. Drawing the veil earlier left the
+	   notebook and the grey strip on top of the caption. */
+	EFW_DrawLetterbox( flTime );
 	return 1;
 }
