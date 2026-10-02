@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll306`;
+    return `${url}?v=efw-dll307`;
   return url;
 }
 
@@ -155,10 +155,18 @@ function itemPromptSprite(id: number): string | undefined {
 }
 
 /* FUN_10044f70: talk uses the speech bubble; give/use uses that weapon's
-   item sprite (weapon info +0xbc); hide and pickup use their own icons. */
-function promptSpriteFor(cmd: string): string | undefined {
+   item sprite (weapon info +0xbc). Pickup loads efw_give_icon.spr when
+   HasWep misses, and the weapon sprite when that item is already held. */
+function promptSpriteFor(cmd: string, hint?: string): string | undefined {
   ensurePromptSprites();
+  if (hint === 'give')
+    return promptSpriteUrl.give;
   const c = cmd.trim();
+  if (hint === 'wep') {
+    const numbered = c.match(/^efw_(?:Give|UseWithMarker|Pickup)\s+(\d+)/);
+    if (numbered)
+      return itemPromptSprite(Number(numbered[1]));
+  }
   if (c.startsWith('efw_Talk'))
     return promptSpriteUrl.speech;
   if (c.startsWith('efw_HideUnderBuilding'))
@@ -174,7 +182,7 @@ function promptSpriteFor(cmd: string): string | undefined {
   return undefined;
 }
 
-function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: string, nw: string, nh: string) {
+function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: string, nw: string, nh: string, hint?: string) {
   const menu = cmd.trim().match(/^menuselect\s+(\d+)/);
   if (menu) {
     /* FUN_100c6e60 draws the topic list in the HUD. The HTML control is only
@@ -199,7 +207,7 @@ function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: 
     return;
   }
   btn.classList.remove('efw-menu');
-  const url = promptSpriteFor(cmd);
+  const url = promptSpriteFor(cmd, hint);
   if (!url) {
     btn.classList.remove('efw-prompt');
     btn.querySelector(':scope > .efw-prompt-label')?.remove();
@@ -476,9 +484,10 @@ function applyEfwVgui(text: string): boolean {
   if (!msg.startsWith('EFWVGUI ADD ')) return true;
   promptPosePendingClear = false;
   const rest = msg.slice('EFWVGUI ADD '.length);
-  const tab = rest.indexOf('\t');
-  const head = tab >= 0 ? rest.slice(0, tab) : rest;
-  const label = tab >= 0 ? rest.slice(tab + 1) : head;
+  const fields = rest.split('\t');
+  const head = fields[0] || '';
+  const label = fields.length > 1 ? fields[1] : head;
+  const hint = (fields[2] || '').trim();
   const parts = head.split(' ');
   if (parts.length < 5) return true;
   const [nx, ny, nw, nh, ...cmdParts] = parts;
@@ -489,7 +498,7 @@ function applyEfwVgui(text: string): boolean {
   const existing = buttons.find((b) => b.dataset.cmd === cmd);
   if (existing) {
     existing.textContent = label || cmd;
-    stylePromptButton(existing, cmd, nx, ny, nw, nh);
+    stylePromptButton(existing, cmd, nx, ny, nw, nh, hint);
     layoutPromptColumn(layer);
     return true;
   }
@@ -499,7 +508,7 @@ function applyEfwVgui(text: string): boolean {
   btn.type = 'button';
   btn.dataset.cmd = cmd;
   btn.textContent = label || cmd;
-  stylePromptButton(btn, cmd, nx, ny, nw, nh);
+  stylePromptButton(btn, cmd, nx, ny, nw, nh, hint);
   if (layer.dataset.font) {
     btn.style.fontFamily = layer.style.fontFamily;
     btn.style.fontSize = layer.style.fontSize;

@@ -863,9 +863,10 @@ struct EfwHtmlVguiBtn
 	int x, y, w, h;
 	char cmd[96];
 	char label[64];
+	char spr[8];
 };
 
-static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const char *label, const char *cmd )
+static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const char *label, const char *cmd, const char *spr = NULL )
 {
 	EfwHtmlVguiBtn *b;
 	int w = 168;
@@ -888,6 +889,12 @@ static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const ch
 	b->h = h;
 	b->x = x - w / 2;
 	b->y = y - h;
+	b->spr[0] = '\0';
+	if( spr && spr[0] )
+	{
+		strncpy( b->spr, spr, sizeof( b->spr ) - 1 );
+		b->spr[sizeof( b->spr ) - 1] = '\0';
+	}
 	strncpy( b->label, label ? label : "", sizeof( b->label ) - 1 );
 	b->label[sizeof( b->label ) - 1] = '\0';
 	strncpy( b->cmd, cmd ? cmd : "", sizeof( b->cmd ) - 1 );
@@ -1015,7 +1022,8 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 		int id = s->type - 100;
 		snprintf( label, sizeof( label ), "Pick up %s", EFW_HtmlWepLabel( id ) );
 		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
-		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+		/* HasWep null loads efw_give_icon.spr. A hit uses weapon+0xbc. */
+		EFW_HtmlVguiAdd( out, n, x, y, label, cmd, EFW_HtmlHasWep( pPlayer, id ) ? "wep" : "give" );
 	}
 }
 
@@ -1102,7 +1110,7 @@ void EFW_HtmlVguiSync( void )
 	used = 0;
 	for( i = 0; i < n; i++ )
 	{
-		used += snprintf( sig + used, sizeof( sig ) - used, "%s@%d,%d|", btns[i].cmd, btns[i].x, btns[i].y );
+		used += snprintf( sig + used, sizeof( sig ) - used, "%s#%s@%d,%d|", btns[i].cmd, btns[i].spr, btns[i].x, btns[i].y );
 		if( used >= (int)sizeof( sig ) - 1 )
 			break;
 	}
@@ -1116,12 +1124,20 @@ void EFW_HtmlVguiSync( void )
 		fprintf( fp, "EFWVGUI CLR\n" );
 	for( i = 0; i < n; i++ )
 	{
-		snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
-			(float)btns[i].x / (float)EFW_HTML_SW,
-			(float)btns[i].y / (float)EFW_HTML_SH,
-			(float)btns[i].w / (float)EFW_HTML_SW,
-			(float)btns[i].h / (float)EFW_HTML_SH,
-			btns[i].cmd, btns[i].label );
+		if( btns[i].spr[0] )
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\t%s\n",
+				(float)btns[i].x / (float)EFW_HTML_SW,
+				(float)btns[i].y / (float)EFW_HTML_SH,
+				(float)btns[i].w / (float)EFW_HTML_SW,
+				(float)btns[i].h / (float)EFW_HTML_SH,
+				btns[i].cmd, btns[i].label, btns[i].spr );
+		else
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
+				(float)btns[i].x / (float)EFW_HTML_SW,
+				(float)btns[i].y / (float)EFW_HTML_SH,
+				(float)btns[i].w / (float)EFW_HTML_SW,
+				(float)btns[i].h / (float)EFW_HTML_SH,
+				btns[i].cmd, btns[i].label );
 		EFW_EnginePrint( line );
 		if( fp )
 			fputs( line, fp );

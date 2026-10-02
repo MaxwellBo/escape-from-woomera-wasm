@@ -109,6 +109,7 @@ struct EfwVguiBtn
 	int x, y, w, h;
 	char cmd[96];
 	char label[64];
+	char spr[8];
 	HSPRITE icon;
 };
 static EfwVguiBtn g_vgui[EFW_VGUI_MAX];
@@ -1845,7 +1846,7 @@ static const char *EFW_WepLabel( int id )
 	return kNames[id - 16];
 }
 
-static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRITE icon )
+static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRITE icon, const char *spr = NULL )
 {
 	EfwVguiBtn *b;
 	int w = 168;
@@ -1868,6 +1869,12 @@ static void EFW_VguiAdd( int x, int y, const char *label, const char *cmd, HSPRI
 	b->x = x - w / 2;
 	b->y = y - h;
 	b->icon = icon;
+	b->spr[0] = '\0';
+	if( spr && spr[0] )
+	{
+		strncpy( b->spr, spr, sizeof( b->spr ) - 1 );
+		b->spr[sizeof( b->spr ) - 1] = '\0';
+	}
 	strncpy( b->label, label ? label : "", sizeof( b->label ) - 1 );
 	b->label[sizeof( b->label ) - 1] = '\0';
 	strncpy( b->cmd, cmd ? cmd : "", sizeof( b->cmd ) - 1 );
@@ -1894,7 +1901,7 @@ static void EFW_VguiSync( void )
 	n = 0;
 	for( i = 0; i < g_vguiN; i++ )
 	{
-		n += snprintf( sig + n, sizeof( sig ) - n, "%s|", g_vgui[i].cmd );
+		n += snprintf( sig + n, sizeof( sig ) - n, "%s#%s|", g_vgui[i].cmd, g_vgui[i].spr );
 		if( n >= (int)sizeof( sig ) - 1 )
 			break;
 	}
@@ -1908,12 +1915,23 @@ static void EFW_VguiSync( void )
 	for( i = 0; i < g_vguiN; i++ )
 	{
 		EfwVguiBtn *b = &g_vgui[i];
-		snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s",
-			(float)b->x / (float)ScreenWidth,
-			(float)b->y / (float)ScreenHeight,
-			(float)b->w / (float)ScreenWidth,
-			(float)b->h / (float)ScreenHeight,
-			b->cmd, b->label );
+		/* Third field is the FUN_10044f70 sprite choice. Pickup uses the
+		   give icon when HasWep misses, and the weapon sprite at +0xbc
+		   when that item is already held. */
+		if( b->spr[0] )
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\t%s",
+				(float)b->x / (float)ScreenWidth,
+				(float)b->y / (float)ScreenHeight,
+				(float)b->w / (float)ScreenWidth,
+				(float)b->h / (float)ScreenHeight,
+				b->cmd, b->label, b->spr );
+		else
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s",
+				(float)b->x / (float)ScreenWidth,
+				(float)b->y / (float)ScreenHeight,
+				(float)b->w / (float)ScreenWidth,
+				(float)b->h / (float)ScreenHeight,
+				b->cmd, b->label );
 		EFW_VguiEmit( fp, line );
 	}
 	if( fp )
@@ -2130,7 +2148,9 @@ static void EFW_BuildVgui( const EfwScanSlot *s, int x, int y )
 		int id = s->type - 100;
 		snprintf( label, sizeof( label ), "Pick up %s", EFW_WepLabel( id ) );
 		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
-		EFW_VguiAdd( x, y, label, cmd, g_hPliers );
+		/* HasWep returns the weapon info. A null loads efw_give_icon.spr.
+		   A hit uses the sprite at weapon+0xbc. */
+		EFW_VguiAdd( x, y, label, cmd, g_hPliers, EFW_HasWep( id ) ? "wep" : "give" );
 	}
 }
 
