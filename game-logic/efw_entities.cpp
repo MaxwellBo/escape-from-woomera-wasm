@@ -2217,27 +2217,47 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		return;
 	}
 	pev->framerate = 1.0f;
-	/* The roster office hull is startsolid from the map origin up through
-	   the room, so MOVETYPE_STEP pushes him back under the floor and the
-	   mesh never reaches the desk. Hold him on the floor the player
-	   stands on in that room and skip the step push. */
+	/* Map origin 166 -962 0 is inside the roster desk. The feet hull is
+	   startsolid there, MOVETYPE_STEP shoves him back into the gap under
+	   the floor, and the mesh is buried in the wood. The open side of
+	   that desk is +X, on the floor the pawn stands on (z=44 at 276 -962).
+	   Park him on the first +X spot where the hull fits, and skip the step
+	   push so the engine cannot put him back in the gap. */
 	if( tn && !strcmp( tn, "Roster_Officer" ) )
 	{
-		if( pev->origin.z < 24.0f )
+		static Vector s_home;
+		static int s_haveHome;
+		static int s_stood;
+
+		if( !s_haveHome )
 		{
-			Vector stood;
-			float wasZ;
-			wasZ = pev->origin.z;
-			stood = pev->origin;
-			stood.z = 44.0f;
-			EFW_QueueOrigin( pev, stood );
+			s_home = pev->origin;
+			s_home.z = 0.0f;
+			s_haveHome = 1;
+		}
+		if( !s_stood )
+		{
+			int ring;
+
+			for( ring = 0; ring <= 80; ring += 4 )
 			{
-				static int s_hold;
-				if( s_hold < 3 )
-				{
-					s_hold++;
-					EFW_DebugPrint( "npc roster hold z=%.0f -> 44", wasZ );
-				}
+				TraceResult tr;
+				Vector stood;
+				Vector end;
+
+				stood.x = s_home.x + (float)ring;
+				stood.y = s_home.y;
+				stood.z = 44.0f;
+				end = stood;
+				end.z += 1.0f;
+				EFW_TraceFeetHull( pev, stood, end, &tr );
+				if( tr.fStartSolid || tr.fAllSolid )
+					continue;
+				EFW_QueueOrigin( pev, stood );
+				EFW_DebugPrint( "npc roster stand x=%.0f y=%.0f z=44 ring=%d",
+					stood.x, stood.y, ring );
+				s_stood = 1;
+				break;
 			}
 		}
 		pev->movetype = MOVETYPE_NONE;
