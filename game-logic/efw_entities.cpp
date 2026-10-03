@@ -2217,12 +2217,13 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		return;
 	}
 	pev->framerate = 1.0f;
-	/* Map origin 166 -962 0 is inside the roster desk. The feet hull is
-	   startsolid there, MOVETYPE_STEP shoves him back into the gap under
-	   the floor, and the mesh is buried in the wood. The open side of
-	   that desk is +X, on the floor the pawn stands on (z=44 at 276 -962).
-	   Park him on the first +X spot where the hull fits, and skip the step
-	   push so the engine cannot put him back in the gap. */
+	/* Map origin 166 -962 0 sits in the roster desk. The feet hull still
+	   fits in that pocket, so a startsolid test leaves him there and the
+	   desk wood covers the mesh. MOVETYPE_STEP then shoves a raised hull
+	   back into the gap under the floor. Step +X, the open side of the
+	   desk, until a chest-height ray from 64 units that way is clear, on
+	   the floor the pawn stands on (z=44 at 276 -962). Skip the step push
+	   so the engine cannot put him back in the gap. */
 	if( tn && !strcmp( tn, "Roster_Officer" ) )
 	{
 		static Vector s_home;
@@ -2245,6 +2246,10 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 				Vector stood;
 				Vector end;
 
+				Vector from;
+				Vector chest;
+				TraceResult los;
+
 				stood.x = s_home.x + (float)ring;
 				stood.y = s_home.y;
 				stood.z = 44.0f;
@@ -2252,6 +2257,14 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 				end.z += 1.0f;
 				EFW_TraceFeetHull( pev, stood, end, &tr );
 				if( tr.fStartSolid || tr.fAllSolid )
+					continue;
+				from = stood;
+				from.x += 64.0f;
+				from.z += 48.0f;
+				chest = stood;
+				chest.z += 48.0f;
+				UTIL_TraceLine( from, chest, ignore_monsters, ENT( pev ), &los );
+				if( los.fStartSolid || los.fAllSolid || los.flFraction < 0.99f )
 					continue;
 				EFW_QueueOrigin( pev, stood );
 				EFW_DebugPrint( "npc roster stand x=%.0f y=%.0f z=44 ring=%d",
