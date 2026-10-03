@@ -420,6 +420,60 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support == 1 )
 	{
+		int seenSlab = 0;
+		int dz;
+
+		/* Feet are on a lower hull-1 floor. The office floor the player
+		   stands on is a slab above the chest, so a point at +40 is air
+		   and the mesh stays under that slab. Step up through the slab
+		   and stand on the first surface that comes out the top. */
+		for( dz = 4; dz <= 160; dz += 2 )
+		{
+			Vector test;
+			Vector tip;
+			TraceResult up;
+
+			test = pev->origin;
+			test.z += (float)dz;
+			tip = test;
+			tip.z += 0.1f;
+			UTIL_TraceHull( test, tip, ignore_monsters, point_hull, ENT( pev ), &up );
+			if( up.fStartSolid || up.fAllSolid )
+			{
+				seenSlab = 1;
+				continue;
+			}
+			if( !seenSlab )
+				continue;
+			{
+				Vector drop;
+				TraceResult skin;
+
+				drop = test;
+				drop.z -= 12.0f;
+				UTIL_TraceHull( test, drop, ignore_monsters, point_hull, ENT( pev ), &skin );
+				if( !skin.fStartSolid && !skin.fAllSolid && skin.flFraction < 1.0f
+					&& ( test.z - skin.vecEndPos.z ) <= 12.0f )
+					test.z = skin.vecEndPos.z;
+			}
+			{
+				static int s_slab;
+				const char *tn = STRING( pev->targetname );
+
+				if( s_slab < 6 )
+				{
+					s_slab++;
+					EFW_DebugPrint( "npc slab %s z=%.0f -> %.0f",
+						( tn && tn[0] ) ? tn : "?",
+						pev->origin.z, test.z );
+				}
+			}
+			s_npcStep = 0;
+			pev->flags |= FL_ONGROUND;
+			pev->velocity.z = 0.0f;
+			EFW_QueueOrigin( pev, test );
+			return;
+		}
 		s_npcStep = 0;
 		pev->flags |= FL_ONGROUND;
 		pev->velocity.z = 0.0f;
