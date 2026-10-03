@@ -188,10 +188,12 @@ static float EFW_GetClientHudFloat( int idx )
 
 static int EFW_GetClientHudInt( int idx );
 
-/* DAT_100a95ac is the flTime HUD_Redraw stores. The wasm host leaves that
-   value at 1, inside the dawn window (time < 4 paints 0,0,0,255). The
-   original cl.time leaves that window a few seconds after play starts.
-   While hudInt[6] is clear, spend wall time so FUN_1001e4c0 can lift. */
+/* DAT_100a95ac is the flTime HUD_Redraw stores. GoldSrc cl.time stops
+   while the game is paused. This host's flTime keeps climbing under the
+   intro, and snapping to it finished the dawn (time < 4, black 255)
+   before the comic was dismissed. While hudInt[6] is set, hold the
+   clock. While it is clear, follow a single frame of flTime, or wall
+   time when that clock is stuck near 1. */
 static double EFW_WallSeconds( void )
 {
 	struct timespec ts;
@@ -205,7 +207,9 @@ static float EFW_HudPlayTime( float flTime )
 {
 	static double s_wall;
 	static float s_play = -1.0f;
+	static float s_engine = -1.0f;
 	static int s_dawnDone;
+	static int s_held;
 	double now;
 	double dt;
 	int paused;
@@ -215,11 +219,33 @@ static float EFW_HudPlayTime( float flTime )
 	if( s_play < 0.0f )
 	{
 		s_play = flTime;
+		if( s_play < 0.0f )
+			s_play = 0.0f;
+		s_engine = flTime;
 		s_wall = now;
 	}
-	if( flTime > s_play + 0.001f )
-		s_play = flTime;
-	else if( !paused && s_wall > 0.0 )
+	if( paused )
+	{
+		if( !s_held )
+		{
+			s_held = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_1001e4c0 hold t=%.2f engine=%.2f\n",
+				s_play, flTime );
+		}
+		s_engine = flTime;
+		s_wall = now;
+		return s_play;
+	}
+	if( flTime > s_engine + 0.001f )
+	{
+		dt = (double)( flTime - s_engine );
+		if( dt < 0.0 )
+			dt = 0.0;
+		if( dt > 0.25 )
+			dt = 0.25;
+		s_play += (float)dt;
+	}
+	else if( s_wall > 0.0 )
 	{
 		dt = now - s_wall;
 		if( dt < 0.0 )
@@ -228,6 +254,7 @@ static float EFW_HudPlayTime( float flTime )
 			dt = 0.25;
 		s_play += (float)dt;
 	}
+	s_engine = flTime;
 	s_wall = now;
 	if( !s_dawnDone && s_play >= 4.0f )
 	{
