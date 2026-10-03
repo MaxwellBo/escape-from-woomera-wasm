@@ -392,6 +392,16 @@ static void EFW_NpcFall( entvars_t *pev )
 		return;
 	s_npcStep = 1;
 	support = EFW_ProbeSupport( pev );
+	{
+		const char *tn = STRING( pev->targetname );
+		static int s_roster;
+
+		if( s_roster < 3 && tn && !strcmp( tn, "Roster_Officer" ) )
+		{
+			s_roster++;
+			EFW_DebugPrint( "npc roster support=%d z=%.0f", support, pev->origin.z );
+		}
+	}
 	if( support == 1 )
 	{
 		s_npcStep = 0;
@@ -421,6 +431,23 @@ static void EFW_NpcFall( entvars_t *pev )
 		feet.z += 8.0f;
 		head.z += 8.1f;
 		UTIL_TraceHull( feet, head, ignore_monsters, point_hull, ENT( pev ), &buried );
+		{
+			Vector chest;
+			TraceResult mid;
+
+			/* The hat is the only part that clears a floor slab. A point
+			   at the chest is inside that slab, and it is still in the
+			   air under a bunk. */
+			chest = pev->origin;
+			chest.z += 40.0f;
+			head = chest;
+			head.z += 0.1f;
+			UTIL_TraceHull( chest, head, ignore_monsters, point_hull, ENT( pev ), &mid );
+			if( mid.fStartSolid || mid.fAllSolid )
+				buried.fStartSolid = 1;
+		}
+		head = feet;
+		head.z += 0.1f;
 		if( !buried.fStartSolid && !buried.fAllSolid )
 		{
 			Vector drop;
