@@ -3583,9 +3583,13 @@ static void EFW_BlitFlare( int x, int y, int size, int amt )
 	}
 }
 
-/* Point hull. ignore_pe is the local player so the eye is not startsolid.
-   Pull the end 48 units toward the camera so the lamp brush around the
-   sprite origin is not the hit. A wall on that segment hides the lamp. */
+/* ignore_pe is a physent slot, not the edict index. The eye sits inside
+   the player box, and that slot was coming back as a fraction-0 hit. */
+extern "C" int PM_GetPhysEntInfo( int ent );
+
+/* Point hull. Pull the end 48 units toward the camera so the lamp brush
+   around the sprite origin is not the hit. A wall on that segment hides
+   the lamp. The player box does not. */
 static int EFW_FlareBlocked( float wx, float wy, float wz, float *outFrac )
 {
 	cl_entity_t *lp;
@@ -3605,7 +3609,6 @@ static int EFW_FlareBlocked( float wx, float wy, float wz, float *outFrac )
 	lp = gEngfuncs.GetLocalPlayer();
 	if( !lp )
 		return 0;
-	ignore = lp->index > 0 ? lp->index : -1;
 	eye[0] = lp->origin[0];
 	eye[1] = lp->origin[1];
 	eye[2] = lp->origin[2] + 28.0f;
@@ -3624,15 +3627,21 @@ static int EFW_FlareBlocked( float wx, float wy, float wz, float *outFrac )
 	start[0] = eye[0];
 	start[1] = eye[1];
 	start[2] = eye[2];
+	ignore = -1;
 	tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
-	if( tr && tr->startsolid )
+	if( tr && tr->ent > 0 && PM_GetPhysEntInfo( tr->ent ) == lp->index )
+	{
+		ignore = tr->ent;
+		tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
+	}
+	if( tr && ( tr->startsolid || tr->fraction <= 0.001f ) )
 	{
 		start[0] = eye[0] + dir[0] * ( 32.0f / len );
 		start[1] = eye[1] + dir[1] * ( 32.0f / len );
 		start[2] = eye[2] + dir[2] * ( 32.0f / len );
 		tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
 	}
-	if( !tr || tr->startsolid )
+	if( !tr || tr->startsolid || tr->fraction <= 0.001f )
 		return 0;
 	if( outFrac )
 		*outFrac = tr->fraction;
