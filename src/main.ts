@@ -1574,6 +1574,78 @@ function unzipZipOnMain(buf: Uint8Array): Record<string, Uint8Array> {
   return unzipSync(buf);
 }
 
+/* Retail halflife.wad is not in the Uplink set. These names are on
+   drawn faces (texinfo flags 0). Xash paints the missing-texture
+   checker there: the yard lamp heads are metal_bord06 plus
+   skkylightdim, and the kitchen shelf is generic007. Each stand-in
+   is already in woomera.wad. clip, origin, and aaatrigger stay,
+   because their texinfo flag is TEX_SPECIAL. */
+const WAD_STANDIN: Record<string, string> = {
+  metal_bord01: 'metal_edge',
+  metal_bord06: 'metal_edge',
+  skkylightdim: 'fluro',
+  skkylite: 'fluro',
+  generic007: 'electric',
+  freezer_bx2: 'fridge_door',
+  freezer_bx3: 'fridge_door',
+  freezer_bx5: 'fridge_door',
+  freezer_bx6: 'fridge_door',
+  freezer_bx8: 'fridge_door',
+  xcrate9a: 'cardboard',
+  xcrate9b: 'cardboard',
+  xcrate9c: 'cardboard',
+  paper4: '{paper',
+  paper6: '{paper',
+  fiftsfile1: 'file',
+  fiftsfile2b: 'file',
+  out_roof1: 'roof',
+  subway_seat: 'benchtop',
+  rope: 'pipe',
+  '{blue': 'folder_blue',
+  '{grass2': '{dmcgrassb',
+  '8ball1': 'greywall_plain',
+  '-0out_cuby': 'sky',
+  '-1out_cuby': 'sky',
+  '-2out_cuby': 'sky',
+  '-3out_cuby': 'sky',
+  '-4out_cuby': 'sky',
+  '-5out_cuby': 'sky',
+};
+
+function retargetMissingWadTextures(bsp: Uint8Array): { bsp: Uint8Array; replaced: number } {
+  if (bsp.length < 124) return { bsp, replaced: 0 };
+  const view = new DataView(bsp.buffer, bsp.byteOffset, bsp.byteLength);
+  if (view.getInt32(0, true) !== 30) return { bsp, replaced: 0 };
+  const lumpOff = view.getInt32(4 + 2 * 8, true);
+  const lumpLen = view.getInt32(4 + 2 * 8 + 4, true);
+  if (lumpOff < 0 || lumpLen < 4 || lumpOff + lumpLen > bsp.length)
+    return { bsp, replaced: 0 };
+  const count = view.getInt32(lumpOff, true);
+  if (count < 1 || count > 512 || lumpOff + 4 + count * 4 > bsp.length)
+    return { bsp, replaced: 0 };
+  const out = bsp.slice();
+  const outView = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  let replaced = 0;
+  for (let i = 0; i < count; i++) {
+    const rel = outView.getInt32(lumpOff + 4 + i * 4, true);
+    if (rel < 0) continue;
+    const at = lumpOff + rel;
+    if (at < 0 || at + 16 > out.length) continue;
+    let name = '';
+    for (let c = 0; c < 16; c++) {
+      const ch = out[at + c];
+      if (ch === 0) break;
+      name += String.fromCharCode(ch);
+    }
+    const next = WAD_STANDIN[name];
+    if (!next || next.length > 15) continue;
+    for (let c = 0; c < 16; c++) out[at + c] = 0;
+    for (let c = 0; c < next.length; c++) out[at + c] = next.charCodeAt(c);
+    replaced++;
+  }
+  return replaced ? { bsp: out, replaced } : { bsp, replaced: 0 };
+}
+
 function unzipZipInWorker(buf: Uint8Array): Promise<Record<string, Uint8Array>> {
   return new Promise((resolve, reject) => {
     let worker: Worker;
@@ -1643,6 +1715,13 @@ async function stageModZip() {
     let payload = data as Uint8Array;
     if (rel.toLowerCase() === 'liblist.gam') {
       payload = new TextEncoder().encode(patchLibList(new TextDecoder().decode(data)));
+    }
+    if (rel.toLowerCase().endsWith('.bsp')) {
+      const patched = retargetMissingWadTextures(payload);
+      if (patched.replaced) {
+        payload = patched.bsp;
+        log(`wad stand-in ${rel} ${patched.replaced}`);
+      }
     }
     staged.woomera.set(`${GAME_DIR}/${out}`, payload);
     bytes += (data as Uint8Array).length;
