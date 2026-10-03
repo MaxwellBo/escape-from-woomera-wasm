@@ -55,6 +55,16 @@ static int EFW_NameIs( const char *tn, const char *a )
 	return !stricmp( tn, a );
 }
 
+/* FUN_1000d1d0 is monster_barney slot 10. efw_electrician is
+   models/tradesman.mdl. Kitchen_Guard, the officers, and the unmatched
+   default are models/security.mdl. */
+const char *EFW_BarneyStudio( const char *targetname )
+{
+	if( targetname && targetname[0] && !stricmp( targetname, "efw_electrician" ) )
+		return "models/tradesman.mdl";
+	return "models/Security.mdl";
+}
+
 void EFW_OverrideNpcModel( CBaseEntity *pEntity )
 {
 	const char *tn;

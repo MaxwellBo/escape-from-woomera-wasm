@@ -18,6 +18,7 @@ struct usercmd_s;
 void EFW_NoteUsercmd( const struct usercmd_s *cmd );
 void EFW_LinkUserMessages( void );
 void EFW_OverrideNpcModel( CBaseEntity *pEntity );
+const char *EFW_BarneyStudio( const char *targetname ); /* FUN_1000d1d0 */
 int EFW_RefugeeCount( void );
 void EFW_Precache( void );
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );

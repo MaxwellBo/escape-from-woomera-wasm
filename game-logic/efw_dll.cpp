@@ -2477,6 +2477,32 @@ static int EFW_BindOneDetainee( void )
 			continue;
 		if( pent->v.flags & FL_CLIENT )
 			continue;
+		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+		/* Stock Spawn left models/barney.mdl. FUN_1000d1d0 replaces that
+		   before the studio is shown. Zero the index so the bind below
+		   loads the mod mesh one entity per frame. */
+		if( cn[0] && !strcmp( cn, "monster_barney" ) )
+		{
+			const char *tn = pent->v.targetname ? STRING( pent->v.targetname ) : "";
+			const char *want = EFW_BarneyStudio( tn );
+			const char *cur = pent->v.model ? STRING( pent->v.model ) : "";
+
+			if( want && strcmp( cur, want ) )
+			{
+				static int s_bar;
+				char line[160];
+
+				pent->v.model = MAKE_STRING( want );
+				pent->v.modelindex = 0;
+				if( s_bar < 6 )
+				{
+					s_bar++;
+					snprintf( line, sizeof( line ), "efw: FUN_1000d1d0 %s %s\n",
+						tn[0] ? tn : "?", want );
+					EFW_LogLine( line );
+				}
+			}
+		}
 		if( pent->v.modelindex > 0 )
 			continue;
 		if( !pent->v.model )
