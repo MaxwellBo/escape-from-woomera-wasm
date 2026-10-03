@@ -393,14 +393,30 @@ static void EFW_NpcFall( entvars_t *pev )
 	s_npcStep = 1;
 	support = EFW_ProbeSupport( pev );
 	{
+		Vector chest;
+		Vector tip;
+		TraceResult mid;
 		const char *tn = STRING( pev->targetname );
 		static int s_roster;
+		int chestSolid;
 
+		/* Hull 1 can stand on a floor the point hull never sees, with the
+		   torso still inside the office slab. The hat is the only part
+		   that clears that slab. A point at the chest is inside it. */
+		chest = pev->origin;
+		chest.z += 40.0f;
+		tip = chest;
+		tip.z += 0.1f;
+		UTIL_TraceHull( chest, tip, ignore_monsters, point_hull, ENT( pev ), &mid );
+		chestSolid = ( mid.fStartSolid || mid.fAllSolid ) ? 1 : 0;
 		if( s_roster < 3 && tn && !strcmp( tn, "Roster_Officer" ) )
 		{
 			s_roster++;
-			EFW_DebugPrint( "npc roster support=%d z=%.0f", support, pev->origin.z );
+			EFW_DebugPrint( "npc roster support=%d chest=%d z=%.0f",
+				support, chestSolid, pev->origin.z );
 		}
+		if( chestSolid && support >= 0 )
+			support = -1;
 	}
 	if( support == 1 )
 	{
@@ -496,8 +512,24 @@ static void EFW_NpcFall( entvars_t *pev )
 				if( !seenSolid )
 					continue;
 				test.z -= 8.0f;
-				if( EFW_LandMonster( pev, test, &stood ) )
+				/* LandMonster uses hull 1. That hull falls through the
+				   office slab onto the floor under it. A drop of more
+				   than one step means the surface the point just left
+				   is the one to stand on. */
+				if( EFW_LandMonster( pev, test, &stood ) && ( test.z - stood.z ) <= 18.0f )
 					test = stood;
+				else
+				{
+					Vector drop;
+					TraceResult skin;
+
+					drop = test;
+					drop.z -= 24.0f;
+					UTIL_TraceHull( test, drop, ignore_monsters, point_hull, ENT( pev ), &skin );
+					if( !skin.fStartSolid && !skin.fAllSolid && skin.flFraction < 1.0f
+						&& ( test.z - skin.vecEndPos.z ) <= 18.0f )
+						test.z = skin.vecEndPos.z;
+				}
 				{
 					static int s_unbury;
 					const char *tn = STRING( pev->targetname );
