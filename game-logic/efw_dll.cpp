@@ -4705,6 +4705,38 @@ void EFW_OnServerActivate( void )
 	s_speedKey = 0;
 	s_useHeld = 0;
 	EFW_ApplyWorldSky();
+	{
+		int si, sn, smi0, ssc0, sshown;
+		sn = smi0 = ssc0 = sshown = 0;
+		for( si = 1; si < EFW_MaxEnts(); si++ )
+		{
+			edict_t *sp = INDEXENT( si );
+			const char *scn;
+			const char *smodel;
+			if( !sp || sp->free )
+				continue;
+			scn = sp->v.classname ? STRING( sp->v.classname ) : "";
+			if( strcmp( scn, "env_sprite" ) )
+				continue;
+			sn++;
+			if( sp->v.modelindex <= 0 )
+				smi0++;
+			if( sp->v.scale <= 0.01f )
+				ssc0++;
+			if( sshown >= 3 )
+				continue;
+			sshown++;
+			smodel = sp->v.model ? STRING( sp->v.model ) : "";
+			snprintf( line, sizeof( line ),
+				"efw: env_sprite i=%d mi=%d mode=%d amt=%.0f scale=%.2f org=%.0f %.0f %.0f %s\n",
+				si, sp->v.modelindex, sp->v.rendermode, sp->v.renderamt, sp->v.scale,
+				sp->v.origin[0], sp->v.origin[1], sp->v.origin[2],
+				smodel ? smodel : "" );
+			EFW_LogLine( line );
+		}
+		snprintf( line, sizeof( line ), "efw: env_sprite n=%d mi0=%d scale0=%d\n", sn, smi0, ssc0 );
+		EFW_LogLine( line );
+	}
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,

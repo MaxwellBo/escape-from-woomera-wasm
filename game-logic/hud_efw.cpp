@@ -3331,36 +3331,54 @@ static void EFW_LogPoseClock( float flTime )
 }
 
 /* Level 2 env_sprite lamps: rendermode 5, renderamt 150, scale 0.5,
-   sprites/yellow_flare.spr. Stock CSprite::Spawn leaves those keys. */
+   sprites/yellow_flare.spr. Stock CSprite::Spawn leaves those keys.
+   Called every frame; prints once per map, including modelindex 0. */
 static void EFW_LogWorldSprites( void )
 {
 	int i;
-	int n;
-	static int s_done;
+	int n5;
+	int nz;
+	int shown;
+	const char *map;
+	static char s_map[64];
 
-	if( s_done )
+	map = gEngfuncs.pfnGetLevelName ? gEngfuncs.pfnGetLevelName() : "";
+	if( !map || !map[0] )
 		return;
-	s_done = 1;
-	n = 0;
-	for( i = 1; i <= 512; i++ )
+	if( !strcmp( s_map, map ) )
+		return;
+	strncpy( s_map, map, sizeof( s_map ) - 1 );
+	s_map[sizeof( s_map ) - 1] = '\0';
+	n5 = 0;
+	nz = 0;
+	shown = 0;
+	for( i = 1; i <= 1024; i++ )
 	{
 		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
+		int mode5;
+		int nearz;
 
-		if( !ent || ent->curstate.modelindex <= 0 )
+		if( !ent || ent->player )
 			continue;
-		if( ent->curstate.rendermode == 0 && ent->curstate.scale == 0.0f )
+		mode5 = ent->curstate.rendermode == 5;
+		nearz = ent->origin[2] > 200.0f && ent->origin[2] < 280.0f;
+		if( mode5 )
+			n5++;
+		if( nearz && ent->curstate.modelindex > 0 )
+			nz++;
+		if( !mode5 && ent->curstate.scale <= 0.01f && !nearz )
 			continue;
-		if( ent->player )
+		if( shown >= 8 )
 			continue;
-		n++;
-		if( n <= 6 )
-			gEngfuncs.Con_Printf(
-				">>> sprite i=%d mi=%d mode=%d amt=%d scale=%.2f fx=%d org=%.0f %.0f %.0f\n",
-				i, ent->curstate.modelindex, ent->curstate.rendermode,
-				ent->curstate.renderamt, ent->curstate.scale, ent->curstate.effects,
-				ent->origin[0], ent->origin[1], ent->origin[2] );
+		shown++;
+		gEngfuncs.Con_Printf(
+			">>> sprite i=%d mi=%d mode=%d amt=%d scale=%.2f fx=%d mdl=%d org=%.0f %.0f %.0f\n",
+			i, ent->curstate.modelindex, ent->curstate.rendermode,
+			ent->curstate.renderamt, ent->curstate.scale, ent->curstate.effects,
+			ent->model ? 1 : 0,
+			ent->origin[0], ent->origin[1], ent->origin[2] );
 	}
-	gEngfuncs.Con_Printf( ">>> sprite n=%d\n", n );
+	gEngfuncs.Con_Printf( ">>> sprite map=%s mode5=%d nearz=%d\n", map, n5, nz );
 }
 
 int CHudEfw::Draw( float flTime )
@@ -3370,7 +3388,7 @@ int CHudEfw::Draw( float flTime )
 
 	s_drawN++;
 	EFW_SilenceNotify();
-	if( s_drawN == 30 )
+	if( ( s_drawN % 30 ) == 0 )
 		EFW_LogWorldSprites();
 	if( s_drawN == 40 || s_drawN == 100 || s_drawN == 180 || s_drawN == 260 )
 		EFW_LogPoseClock( flTime );
