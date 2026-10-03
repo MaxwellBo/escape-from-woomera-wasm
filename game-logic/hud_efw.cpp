@@ -3188,33 +3188,21 @@ static void EFW_DrawHopeTicks( int ticks )
 	int y;
 	static int s_logged = -1;
 
-	/* FUN_1001daa0 calls pfnFillRGBA (engine index 11). GoldSrc blends
-	   that call, so alpha 255 is solid 200,0,0 and alpha 10 is a faint
-	   grey. This engine's FillRGBA adds, and the sky showed through
-	   (a 200 red bar sampled as 228,47,89). pfnFillRGBABlend is the
-	   opaque path already used for the ascale panel. */
+	/* FUN_1001daa0 calls pfnFillRGBA (engine index 11) for every tick.
+	   Filled bars are 200,0,0,255. Empty bars are 200,200,200,10.
+	   This host's FillRGBA adds, so a solid red bar sampled as
+	   228,47,89. Those stay on pfnFillRGBABlend. Blend of alpha 10
+	   left the sky above the stack unchanged, so the empty bars go
+	   back through FillRGBA and deposit the faint grey. */
 	y = 0x78 - 6;
 	for( i = 0; i < 10; i++ )
 	{
-		int r, g, b, a;
 		if( ticks < i )
-		{
-			r = 200;
-			g = 200;
-			b = 200;
-			a = 10;
-		}
+			FillRGBA( 0x14, y, 0x1c, 6, 200, 200, 200, 10 );
+		else if( gEngfuncs.pfnFillRGBABlend )
+			gEngfuncs.pfnFillRGBABlend( 0x14, y, 0x1c, 6, 200, 0, 0, 255 );
 		else
-		{
-			r = 200;
-			g = 0;
-			b = 0;
-			a = 255;
-		}
-		if( gEngfuncs.pfnFillRGBABlend )
-			gEngfuncs.pfnFillRGBABlend( 0x14, y, 0x1c, 6, r, g, b, a );
-		else
-			FillRGBA( 0x14, y, 0x1c, 6, r, g, b, a );
+			FillRGBA( 0x14, y, 0x1c, 6, 200, 0, 0, 255 );
 		y -= 0xc;
 	}
 	if( s_logged != ticks )
