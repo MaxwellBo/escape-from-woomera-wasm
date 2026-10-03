@@ -3627,25 +3627,53 @@ static int EFW_FlareBlocked( float wx, float wy, float wz, float *outFrac )
 	start[0] = eye[0];
 	start[1] = eye[1];
 	start[2] = eye[2];
+	/* Only a world hit hides the lamp. The player box and an alpha fence
+	   are physents the trace stops on first; skip those and continue.
+	   A fraction of 0 is the eye inside that box, which is not a wall. */
 	ignore = -1;
-	tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
-	if( tr && tr->ent > 0 && PM_GetPhysEntInfo( tr->ent ) == lp->index )
 	{
-		ignore = tr->ent;
-		tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
+		int guard;
+		int stepped;
+
+		stepped = 0;
+		for( guard = 0; guard < 6; guard++ )
+		{
+			tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
+			if( tr && lp->origin[0] > 40.0f && lp->origin[0] < 180.0f && lp->origin[1] < -400.0f )
+			{
+				static int s_trLog;
+				if( s_trLog < 4 )
+				{
+					s_trLog++;
+					gEngfuncs.Con_Printf( ">>> flare tr to %.0f %.0f %.0f frac=%.3f ent=%d info=%d solid=%d\n",
+						wx, wy, wz, (double)tr->fraction, tr->ent,
+						PM_GetPhysEntInfo( tr->ent ), tr->startsolid ? 1 : 0 );
+				}
+			}
+			if( !tr || tr->startsolid || tr->fraction <= 0.001f )
+			{
+				if( !stepped )
+				{
+					stepped = 1;
+					start[0] = eye[0] + dir[0] * ( 32.0f / len );
+					start[1] = eye[1] + dir[1] * ( 32.0f / len );
+					start[2] = eye[2] + dir[2] * ( 32.0f / len );
+					continue;
+				}
+				return 0;
+			}
+			if( tr->fraction >= 0.95f )
+				return 0;
+			if( tr->ent <= 0 )
+			{
+				if( outFrac )
+					*outFrac = tr->fraction;
+				return 1;
+			}
+			ignore = tr->ent;
+		}
 	}
-	if( tr && ( tr->startsolid || tr->fraction <= 0.001f ) )
-	{
-		start[0] = eye[0] + dir[0] * ( 32.0f / len );
-		start[1] = eye[1] + dir[1] * ( 32.0f / len );
-		start[2] = eye[2] + dir[2] * ( 32.0f / len );
-		tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
-	}
-	if( !tr || tr->startsolid || tr->fraction <= 0.001f )
-		return 0;
-	if( outFrac )
-		*outFrac = tr->fraction;
-	return tr->fraction < 0.95f;
+	return 0;
 }
 
 static void EFW_DrawWorldFlares( void )
