@@ -3425,13 +3425,12 @@ static void EFW_DrawWorldFlares( void )
 
 	if( !s_flare )
 		s_flare = SPR_Load( "sprites/yellow_flare.spr" );
-	if( !s_flare || !gEngfuncs.pfnSPR_DrawGeneric )
+	if( !s_flare )
 	{
 		if( !s_logged )
 		{
 			s_logged = 1;
-			gEngfuncs.Con_Printf( ">>> flare spr=%d generic=%d\n",
-				s_flare != 0, gEngfuncs.pfnSPR_DrawGeneric != 0 );
+			gEngfuncs.Con_Printf( ">>> flare spr=0\n" );
 		}
 		return;
 	}
@@ -3466,10 +3465,11 @@ static void EFW_DrawWorldFlares( void )
 			g = 255;
 			b = 255;
 		}
-		dx = (int)( sx - w * 0.5f );
-		dy = (int)( sy - w * 0.5f );
+		dx = (int)( sx - 128 );
+		dy = (int)( sy - 128 );
 		SPR_Set( s_flare, r, g, b );
-		gEngfuncs.pfnSPR_DrawGeneric( 0, dx, dy, NULL, 0x0302, 1, w, w );
+		SPR_DrawAdditive( 0, dx, dy, NULL );
+		(void)w;
 		if( n == 0 && s_xy < 2 )
 		{
 			s_xy++;
