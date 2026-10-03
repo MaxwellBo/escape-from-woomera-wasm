@@ -20,7 +20,8 @@ void EFW_ApplyWorldSky( void )
 
 	/* FUN_100b6140 consumes worldspawn skyname. The map string
 	   (dashdesert256) is not installed. Level 2 is evening256; every
-	   other map, including level 1, is day256. */
+	   other map, including level 1, is day256. The dusk set has no
+	   down face; staging copies the up face so the skybox loads. */
 	level = EFW_MapLevel();
 	sky = ( level == 1 ) ? "evening256" : "day256";
 	CVAR_SET_STRING( "sv_skyname", sky );

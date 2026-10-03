@@ -1219,6 +1219,14 @@ function dismissMenuAfterHud() {
   }, 250);
 }
 
+function applyMapSky() {
+  /* sv_skyname alone does not rebuild the skybox. skyname does.
+     Level 2 is the dusk set; the other maps are day256. */
+  if (!startedMap) return;
+  const sky = startedMap.indexOf('level2') >= 0 ? 'evening256' : 'day256';
+  runEngineCmd(`skyname ${sky}`);
+}
+
 function forceWorldPresent() {
   runEngineCmd('r_norefresh 0');
   runEngineCmd('r_drawworld 1');
@@ -1227,6 +1235,7 @@ function forceWorldPresent() {
   runEngineCmd('r_novis 1');
   runEngineCmd('gl_clear 1');
   runEngineCmd('ui_renderworld 1');
+  applyMapSky();
 }
 
 function resumeAfterFirstClientFrame() {
@@ -1437,6 +1446,7 @@ function onServerActivateSeen() {
   setTimeout(() => {
     runEngineCmd('developer 0');
     runEngineCmd('con_notifytime -1');
+    applyMapSky();
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
     runEngineCmd('ui_renderworld 1');
@@ -1636,6 +1646,18 @@ async function stageModZip() {
     }
     staged.woomera.set(`${GAME_DIR}/${out}`, payload);
     bytes += (data as Uint8Array).length;
+  }
+  /* evening256 shipped five faces. Xash drops the whole skybox when one
+     face is missing and draws the Quake cloud sphere instead, so level 2
+     never showed the dusk set. The down face is the up face: the ground
+     covers it. */
+  {
+    const up = staged.woomera.get(`${GAME_DIR}/gfx/env/evening256up.tga`);
+    const dn = `${GAME_DIR}/gfx/env/evening256dn.tga`;
+    if (up && !staged.woomera.has(dn)) {
+      staged.woomera.set(dn, up);
+      log('sky: evening256dn copied from evening256up');
+    }
   }
   assetsStatus.textContent = `${staged.woomera.size} files (${fmtMB(bytes)}), skipped ${skipped} Win32/unused`;
   markDone('step-assets');
