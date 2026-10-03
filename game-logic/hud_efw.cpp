@@ -2225,19 +2225,31 @@ static void EFW_DrawScanPrompts( int r, int g, int b )
 	EFW_VguiSync();
 }
 
+/* FUN_10043a70 / FUN_10043af0 call pfnFillRGBA (0x100a501c). GoldSrc
+   blends that, so the 64 tile is opaque 20,20,20 and the 3px frame is
+   opaque 50,50,50. This engine's FillRGBA adds: the frame read back
+   117,112,107 on the diary strip. */
+static void EFW_FillBlend( int x, int y, int w, int h, int r, int g, int b, int a )
+{
+	if( gEngfuncs.pfnFillRGBABlend )
+		gEngfuncs.pfnFillRGBABlend( x, y, w, h, r, g, b, a );
+	else
+		FillRGBA( x, y, w, h, r, g, b, a );
+}
+
 /* FUN_10043af0: 4-edge FillRGBA border of thickness param_9. */
 static void EFW_DrawBoxBorder( int x, int y, int w, int h, int r, int g, int b, int a, int t )
 {
 	int inner;
 	if( t < 1 )
 		t = 1;
-	FillRGBA( x, y, w, t, r, g, b, a );
-	FillRGBA( x, y + h - t, w, t, r, g, b, a );
+	EFW_FillBlend( x, y, w, t, r, g, b, a );
+	EFW_FillBlend( x, y + h - t, w, t, r, g, b, a );
 	inner = h - t * 2;
 	if( inner < 1 )
 		inner = 1;
-	FillRGBA( x, y + t, t, inner, r, g, b, a );
-	FillRGBA( x + w - t, y + t, t, inner, r, g, b, a );
+	EFW_FillBlend( x, y + t, t, inner, r, g, b, a );
+	EFW_FillBlend( x + w - t, y + t, t, inner, r, g, b, a );
 }
 
 /* weapon_s sprite named by sprites/weapon_efw_*.txt. Slots 21..23 share
@@ -2272,8 +2284,16 @@ static void EFW_DrawInvIcon( int x, int y, HSPRITE icon )
 {
 	wrect_t rc;
 	int dw, dh;
-	FillRGBA( x, y, 64, 64, 20, 20, 20, 255 );
+	EFW_FillBlend( x, y, 64, 64, 20, 20, 20, 255 );
 	EFW_DrawBoxBorder( x, y, 64, 64, 50, 50, 50, 255, 3 );
+	{
+		static int s_tile;
+		if( !s_tile )
+		{
+			s_tile = 1;
+			gEngfuncs.Con_Printf( ">>> FUN_10043a70 blend tile 20 frame 50\n" );
+		}
+	}
 	if( !icon )
 		return;
 	dw = SPR_Width( icon, 0 );
