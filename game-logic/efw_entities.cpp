@@ -2217,66 +2217,95 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		return;
 	}
 	pev->framerate = 1.0f;
-	/* Map origin 166 -962 0 sits in the roster desk. The feet hull still
-	   fits in that pocket, so a startsolid test leaves him there and the
-	   desk wood covers the mesh. MOVETYPE_STEP then shoves a raised hull
-	   back into the gap under the floor. Step +X, the open side of the
-	   desk, until a chest-height ray from 64 units that way is clear, on
-	   the floor the pawn stands on (z=44 at 276 -962). Skip the step push
-	   so the engine cannot put him back in the gap. */
-	if( tn && !strcmp( tn, "Roster_Officer" ) )
+	/* Roster_Officer (166 -962 0) stands inside the roster desk. Mail_Officer
+	   (326 -899 10) and efw_compound_gate_guard (310 -435 0) stand inside the
+	   yard tarp. A feet hull still fits in those pockets, so a startsolid
+	   test leaves the mesh under the cover. MOVETYPE_STEP then shoves a
+	   raised hull back under the floor. Step +X, the open side, drop the
+	   feet hull onto the floor there, and keep the spot only when a
+	   chest-height ray from 64 units that way is clear. Skip the step push
+	   so the engine cannot put them back under the cover. */
 	{
-		static Vector s_home;
-		static int s_haveHome;
-		static int s_stood;
+		int slot;
 
-		if( !s_haveHome )
+		slot = -1;
+		if( tn && !strcmp( tn, "Roster_Officer" ) )
+			slot = 0;
+		else if( tn && !strcmp( tn, "Mail_Officer" ) )
+			slot = 1;
+		else if( tn && !strcmp( tn, "efw_compound_gate_guard" ) )
+			slot = 2;
+		if( slot >= 0 )
 		{
-			s_home = pev->origin;
-			s_home.z = 0.0f;
-			s_haveHome = 1;
-		}
-		if( !s_stood )
-		{
-			int ring;
+			static Vector s_home[3];
+			static int s_haveHome[3];
+			static int s_stood[3];
 
-			for( ring = 0; ring <= 80; ring += 4 )
+			if( !s_haveHome[slot] )
 			{
-				TraceResult tr;
-				Vector stood;
-				Vector end;
-
-				Vector from;
-				Vector chest;
-				TraceResult los;
-
-				stood.x = s_home.x + (float)ring;
-				stood.y = s_home.y;
-				stood.z = 44.0f;
-				end = stood;
-				end.z += 1.0f;
-				EFW_TraceFeetHull( pev, stood, end, &tr );
-				if( tr.fStartSolid || tr.fAllSolid )
-					continue;
-				from = stood;
-				from.x += 64.0f;
-				from.z += 48.0f;
-				chest = stood;
-				chest.z += 48.0f;
-				UTIL_TraceLine( from, chest, ignore_monsters, ENT( pev ), &los );
-				if( los.fStartSolid || los.fAllSolid || los.flFraction < 0.99f )
-					continue;
-				EFW_QueueOrigin( pev, stood );
-				EFW_DebugPrint( "npc roster stand x=%.0f y=%.0f z=44 ring=%d",
-					stood.x, stood.y, ring );
-				s_stood = 1;
-				break;
+				s_home[slot] = pev->origin;
+				s_home[slot].z = 0.0f;
+				s_haveHome[slot] = 1;
 			}
+			if( !s_stood[slot] )
+			{
+				int ring;
+				static const float kDrop[3] = { 80.0f, 64.0f, 48.0f };
+
+				for( ring = 0; ring <= 120; ring += 4 )
+				{
+					int hi;
+					int landed;
+					Vector stood;
+					Vector from;
+					Vector chest;
+					TraceResult los;
+
+					landed = 0;
+					stood = Vector( 0, 0, 0 );
+					for( hi = 0; hi < 3 && !landed; hi++ )
+					{
+						TraceResult tr;
+						Vector top;
+						Vector bot;
+
+						top.x = s_home[slot].x + (float)ring;
+						top.y = s_home[slot].y;
+						top.z = kDrop[hi];
+						bot = top;
+						bot.z = -16.0f;
+						EFW_TraceFeetHull( pev, top, bot, &tr );
+						if( tr.fStartSolid || tr.fAllSolid )
+							continue;
+						if( tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
+							continue;
+						stood = tr.vecEndPos;
+						stood.x = top.x;
+						stood.y = top.y;
+						landed = 1;
+					}
+					if( !landed )
+						continue;
+					from = stood;
+					from.x += 64.0f;
+					from.z += 48.0f;
+					chest = stood;
+					chest.z += 48.0f;
+					UTIL_TraceLine( from, chest, ignore_monsters, ENT( pev ), &los );
+					if( los.fStartSolid || los.fAllSolid || los.flFraction < 0.99f )
+						continue;
+					EFW_QueueOrigin( pev, stood );
+					EFW_DebugPrint( "npc stand %s x=%.0f y=%.0f z=%.0f ring=%d",
+						tn, stood.x, stood.y, stood.z, ring );
+					s_stood[slot] = 1;
+					break;
+				}
+			}
+			pev->movetype = MOVETYPE_NONE;
+			pev->velocity = Vector( 0, 0, 0 );
+			EFW_AdvanceNpcAnim( pMon, tn );
+			return;
 		}
-		pev->movetype = MOVETYPE_NONE;
-		pev->velocity = Vector( 0, 0, 0 );
-		EFW_AdvanceNpcAnim( pMon, tn );
-		return;
 	}
 	pev->movetype = MOVETYPE_STEP;
 	{
