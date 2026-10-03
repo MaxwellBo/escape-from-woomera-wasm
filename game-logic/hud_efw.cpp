@@ -871,6 +871,11 @@ static void EFW_HudColor( float param )
 	else
 		memcpy( stops, kPaletteDay, sizeof( stops ) );
 	t = ( g_hudDrawTime - kPaletteT0 ) / kPaletteTSpan;
+	/* FUN_1001e4c0 stores 2*(time-60)/90, then fadd st,st again
+	   before FUN_1001d9e0. One double left level 3 on the middle
+	   stop (100,20,30,80) while the original was already at the
+	   last stop. Day stops are identical, so level 1 stays clear. */
+	t = t + t;
 	t = t + t;
 	EFW_Palette3( cur, stops, t );
 	EFW_Lerp4( outc, 1.0f - param, cur, kPaletteDest );
@@ -924,8 +929,8 @@ static void EFW_HudColor( float param )
 	{
 		s_pack = pack;
 		gEngfuncs.Con_Printf(
-			">>> FUN_1001e4c0 p=%.2f lvl=%d rgb=%d,%d,%d a=%d\n",
-			param, lvl, r, g, b, a );
+			">>> FUN_1001e4c0 p=%.2f lvl=%d t=%.2f rgb=%d,%d,%d a=%d\n",
+			param, lvl, t, r, g, b, a );
 	}
 }
 
