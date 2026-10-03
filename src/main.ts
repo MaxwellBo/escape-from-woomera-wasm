@@ -1646,6 +1646,60 @@ function retargetMissingWadTextures(bsp: Uint8Array): { bsp: Uint8Array; replace
   return replaced ? { bsp: out, replaced } : { bsp, replaced: 0 };
 }
 
+/* kRenderTransTexture (rendermode 2) is the kitchen window. Xash
+   samples one triangle of that lightmap off the luxel block, so each
+   pane draws a black wedge. A face with lightofs -1 and style 255 is
+   fullbright: the texture stays, the wedge does not. */
+function fullbrightTranslucentBrushes(bsp: Uint8Array): { bsp: Uint8Array; faces: number } {
+  if (bsp.length < 124) return { bsp, faces: 0 };
+  const view = new DataView(bsp.buffer, bsp.byteOffset, bsp.byteLength);
+  if (view.getInt32(0, true) !== 30) return { bsp, faces: 0 };
+  const entOff = view.getInt32(4, true);
+  const entLen = view.getInt32(8, true);
+  const faceOff = view.getInt32(4 + 7 * 8, true);
+  const faceLen = view.getInt32(4 + 7 * 8 + 4, true);
+  const modelOff = view.getInt32(4 + 14 * 8, true);
+  const modelLen = view.getInt32(4 + 14 * 8 + 4, true);
+  if (entOff < 0 || entLen < 2 || entOff + entLen > bsp.length) return { bsp, faces: 0 };
+  if (faceOff < 0 || faceLen < 20 || faceOff + faceLen > bsp.length) return { bsp, faces: 0 };
+  if (modelOff < 0 || modelLen < 64 || modelOff + modelLen > bsp.length) return { bsp, faces: 0 };
+  const faceCount = Math.floor(faceLen / 20);
+  const modelCount = Math.floor(modelLen / 64);
+  let end = entOff;
+  const limit = entOff + entLen;
+  while (end < limit && bsp[end] !== 0) end++;
+  const text = new TextDecoder('latin1').decode(bsp.subarray(entOff, end));
+  const models = new Set<number>();
+  for (const block of text.split('}')) {
+    if (!/"rendermode"\s+"2"/.test(block)) continue;
+    const model = /"model"\s+"\*(\d+)"/.exec(block);
+    if (!model) continue;
+    const idx = Number(model[1]);
+    if (idx > 0 && idx < modelCount) models.add(idx);
+  }
+  if (models.size === 0) return { bsp, faces: 0 };
+  const out = bsp.slice();
+  const outView = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  let faces = 0;
+  for (const idx of models) {
+    const base = modelOff + idx * 64;
+    const first = outView.getInt32(base + 56, true);
+    const num = outView.getInt32(base + 60, true);
+    if (first < 0 || num < 1 || first + num > faceCount) continue;
+    for (let f = 0; f < num; f++) {
+      const at = faceOff + (first + f) * 20;
+      if (outView.getInt32(at + 16, true) === -1) continue;
+      out[at + 12] = 255;
+      out[at + 13] = 255;
+      out[at + 14] = 255;
+      out[at + 15] = 255;
+      outView.setInt32(at + 16, -1, true);
+      faces++;
+    }
+  }
+  return faces ? { bsp: out, faces } : { bsp, faces: 0 };
+}
+
 function unzipZipInWorker(buf: Uint8Array): Promise<Record<string, Uint8Array>> {
   return new Promise((resolve, reject) => {
     let worker: Worker;
@@ -1721,6 +1775,11 @@ async function stageModZip() {
       if (patched.replaced) {
         payload = patched.bsp;
         log(`wad stand-in ${rel} ${patched.replaced}`);
+      }
+      const glass = fullbrightTranslucentBrushes(payload);
+      if (glass.faces) {
+        payload = glass.bsp;
+        log(`glass fullbright ${rel} ${glass.faces}`);
       }
     }
     staged.woomera.set(`${GAME_DIR}/${out}`, payload);
