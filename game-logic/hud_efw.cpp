@@ -3617,8 +3617,10 @@ static void EFW_BlitFlare( int x, int y, int size, int r, int g, int b, int amt 
 	int cell;
 	int i, j;
 
-	if( size < 32 )
-		size = 32;
+	/* The 32-cell fallback needed a 32px floor. The textured quad keeps the
+	   projected size, so a lamp 20px on screen stays 20px. */
+	if( size < 1 )
+		size = 1;
 	if( size > 512 )
 		size = 512;
 	if( amt < 1 )
