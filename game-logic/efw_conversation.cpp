@@ -579,6 +579,19 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	EFW_DebugPrint( "CONVERSATION   (%d messages)", st->menuCount );
 	if( !st->menuCount )
 	{
+		/* FUN_100b9cd0 stores the reply, then FUN_100b9990 walks the next
+		   depth. GREET has no child topics, so that walk is empty. Closing
+		   here dropped the reply: EFW_Print had already sent it to the
+		   console and the HUD never got a title-only menu. A squark with
+		   no choices is that line (menuMode 0, same as FUN_100ba040). */
+		if( title[0] )
+		{
+			EFW_DebugPrint( ">>> FUN_100b9cd0 reply" );
+			EFW_ShowDllMenu( pPlayer, title, NULL, 0 );
+			st->menuMode = 0;
+			st->talkStart = EFW_HostClock();
+			return;
+		}
 		EFW_DebugPrint( "<conversation inactive>" );
 		EFW_CloseTalk();
 		return;
