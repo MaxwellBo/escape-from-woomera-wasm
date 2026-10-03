@@ -9,6 +9,7 @@
 #include "kbutton.h"
 #include "ref_params.h"
 #include "efw.h"
+#include "pm_defs.h"
 
 #include <math.h>
 #include <string.h>
@@ -3516,8 +3517,11 @@ static const unsigned char kFlare32[32 * 32 * 3] = {
 	22,5,5,20,4,4,19,4,4,18,3,3,14,2,2,8,1,1,5,0,0,2,0,0,
 };
 
-/* 90-degree projection. Rejects sprites behind the eye. No player-hull
-   trace: PM_TraceLine from the eye is startsolid and hid every lamp. */
+/* 90-degree projection. Rejects sprites behind the eye. */
+/* kRenderTransAdd depth-tests. A point trace (hull 2) ignores the player,
+   steps out of the eye if that start is solid, and stops 48 units short
+   of the sprite so the lamp housing is not the occluder. A human-hull
+   trace from the eye is startsolid and is not used. */
 static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy, float *dist )
 {
 	cl_entity_t *lp;
@@ -3579,18 +3583,80 @@ static void EFW_BlitFlare( int x, int y, int size, int amt )
 	}
 }
 
+/* Point hull. ignore_pe is the local player so the eye is not startsolid.
+   Pull the end 48 units toward the camera so the lamp brush around the
+   sprite origin is not the hit. A wall on that segment hides the lamp. */
+static int EFW_FlareBlocked( float wx, float wy, float wz, float *outFrac )
+{
+	cl_entity_t *lp;
+	pmtrace_t *tr;
+	float eye[3];
+	float target[3];
+	float start[3];
+	float dir[3];
+	float len;
+	float pull;
+	int ignore;
+
+	if( outFrac )
+		*outFrac = 1.0f;
+	if( !gEngfuncs.PM_TraceLine )
+		return 0;
+	lp = gEngfuncs.GetLocalPlayer();
+	if( !lp )
+		return 0;
+	ignore = lp->index > 0 ? lp->index : -1;
+	eye[0] = lp->origin[0];
+	eye[1] = lp->origin[1];
+	eye[2] = lp->origin[2] + 28.0f;
+	dir[0] = wx - eye[0];
+	dir[1] = wy - eye[1];
+	dir[2] = wz - eye[2];
+	len = sqrtf( dir[0] * dir[0] + dir[1] * dir[1] + dir[2] * dir[2] );
+	if( len < 8.0f )
+		return 0;
+	pull = 48.0f;
+	if( pull > len * 0.5f )
+		pull = 0.0f;
+	target[0] = eye[0] + dir[0] * ( ( len - pull ) / len );
+	target[1] = eye[1] + dir[1] * ( ( len - pull ) / len );
+	target[2] = eye[2] + dir[2] * ( ( len - pull ) / len );
+	start[0] = eye[0];
+	start[1] = eye[1];
+	start[2] = eye[2];
+	tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
+	if( tr && tr->startsolid )
+	{
+		start[0] = eye[0] + dir[0] * ( 32.0f / len );
+		start[1] = eye[1] + dir[1] * ( 32.0f / len );
+		start[2] = eye[2] + dir[2] * ( 32.0f / len );
+		tr = gEngfuncs.PM_TraceLine( start, target, PM_TRACELINE_PHYSENTSONLY, 2, ignore );
+	}
+	if( !tr || tr->startsolid )
+		return 0;
+	if( outFrac )
+		*outFrac = tr->fraction;
+	return tr->fraction < 0.95f;
+}
+
 static void EFW_DrawWorldFlares( void )
 {
 	static int s_logged;
+	static int s_prevN = -1;
+	static int s_prevHide = -1;
 	static int s_sx, s_sy, s_w;
 	int i;
 	int n;
+	int hide;
+	float hideFrac;
 
 	n = 0;
+	hide = 0;
+	hideFrac = 1.0f;
 	for( i = 1; i <= 1024; i++ )
 	{
 		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
-		float sx, sy, dist, pix;
+		float sx, sy, dist, pix, frac;
 		int w, amt;
 
 		if( !ent || ent->player )
@@ -3601,6 +3667,13 @@ static void EFW_DrawWorldFlares( void )
 			continue;
 		if( !EFW_FlareOnScreen( ent->origin[0], ent->origin[1], ent->origin[2], &sx, &sy, &dist ) )
 			continue;
+		if( EFW_FlareBlocked( ent->origin[0], ent->origin[1], ent->origin[2], &frac ) )
+		{
+			hide++;
+			if( frac < hideFrac )
+				hideFrac = frac;
+			continue;
+		}
 		pix = ( 256.0f * ent->curstate.scale ) * (float)ScreenWidth / ( 2.0f * dist );
 		w = (int)pix;
 		if( w < 8 )
@@ -3609,18 +3682,20 @@ static void EFW_DrawWorldFlares( void )
 		if( amt <= 0 )
 			amt = 150;
 		EFW_BlitFlare( (int)( sx - w * 0.5f ), (int)( sy - w * 0.5f ), w, amt );
-		if( !s_logged )
-		{
-			s_sx = (int)sx;
-			s_sy = (int)sy;
-			s_w = w;
-		}
+		s_sx = (int)sx;
+		s_sy = (int)sy;
+		s_w = w;
 		n++;
 	}
-	if( !s_logged && n > 0 )
+	/* First on-screen set, then again when a wall changes the hide
+	   count. Stop after a handful so the console does not scroll. */
+	if( s_logged < 4 && ( n > 0 || hide > 0 ) && ( n != s_prevN || hide != s_prevHide ) )
 	{
-		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> flare blit n=%d xy=%d %d w=%d\n", n, s_sx, s_sy, s_w );
+		s_prevN = n;
+		s_prevHide = hide;
+		s_logged++;
+		gEngfuncs.Con_Printf( ">>> flare blit n=%d hide=%d frac=%.2f xy=%d %d w=%d\n",
+			n, hide, (double)hideFrac, s_sx, s_sy, s_w );
 	}
 }
 
