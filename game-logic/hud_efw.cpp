@@ -3383,9 +3383,11 @@ static void EFW_LogWorldSprites( void )
 }
 
 /* Level-2 lamps are env_sprite yellow_flare, rendermode 5, scale 0.5.
-   The client has the model, but this WebGL ref draws those sprites with
-   no coverage. kFlare32 is sprites/yellow_flare.spr averaged to 8x8 blocks.
-   FillRGBA on this host is additive, same as kRenderTransAdd. */
+   The client has the model, but this WebGL ref draws those world sprites
+   with no coverage. The HUD draws the same sprite as one additive quad
+   (kRenderTransAdd, renderamt on the alpha). kFlare32 is the 8x8-block
+   fallback when that texture is not ready. FillRGBA on this host is
+   additive, same as kRenderTransAdd. */
 static const unsigned char kFlare32[32 * 32 * 3] = {
 	0,0,0,0,0,0,0,0,0,0,0,0,2,0,0,6,0,0,11,1,1,11,1,1,
 	10,1,1,11,1,2,13,2,2,14,2,3,14,3,3,15,3,3,16,3,3,17,4,4,
@@ -3552,7 +3554,65 @@ static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy
 	return 1;
 }
 
-static void EFW_BlitFlare( int x, int y, int size, int amt )
+static HSPRITE g_hFlareSpr;
+
+/* One textured quad. rendercolor is the vertex RGB and renderamt is the
+   vertex alpha, the same pair kRenderTransAdd multiplies into the sprite. */
+static int EFW_BlitFlareTex( int x, int y, int size, int r, int g, int b, int amt )
+{
+	struct model_s *model;
+	float cr, cg, cb, ca;
+	float x0, y0, x1, y1;
+	static int s_logged;
+
+	if( !g_hFlareSpr )
+		g_hFlareSpr = EFW_LoadSpr( "sprites/yellow_flare.spr" );
+	if( !g_hFlareSpr || !gEngfuncs.pTriAPI || !gEngfuncs.GetSpritePointer )
+		return 0;
+	model = (struct model_s *)gEngfuncs.GetSpritePointer( g_hFlareSpr );
+	if( !model || !gEngfuncs.pTriAPI->SpriteTexture( model, 0 ) )
+		return 0;
+	if( r <= 0 && g <= 0 && b <= 0 )
+	{
+		r = 255;
+		g = 255;
+		b = 255;
+	}
+	if( amt < 1 )
+		amt = 1;
+	if( amt > 255 )
+		amt = 255;
+	cr = (float)r / 255.0f;
+	cg = (float)g / 255.0f;
+	cb = (float)b / 255.0f;
+	ca = (float)amt / 255.0f;
+	x0 = (float)x;
+	y0 = (float)y;
+	x1 = (float)( x + size );
+	y1 = (float)( y + size );
+	gEngfuncs.pTriAPI->RenderMode( kRenderTransAdd );
+	gEngfuncs.pTriAPI->CullFace( TRI_NONE );
+	gEngfuncs.pTriAPI->Color4f( cr, cg, cb, ca );
+	gEngfuncs.pTriAPI->Begin( TRI_QUADS );
+	gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 0.0f );
+	gEngfuncs.pTriAPI->Vertex3f( x0, y0, 0.5f );
+	gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 0.0f );
+	gEngfuncs.pTriAPI->Vertex3f( x1, y0, 0.5f );
+	gEngfuncs.pTriAPI->TexCoord2f( 1.0f, 1.0f );
+	gEngfuncs.pTriAPI->Vertex3f( x1, y1, 0.5f );
+	gEngfuncs.pTriAPI->TexCoord2f( 0.0f, 1.0f );
+	gEngfuncs.pTriAPI->Vertex3f( x0, y1, 0.5f );
+	gEngfuncs.pTriAPI->End();
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> flare tex w=%d amt=%d rgb=%d,%d,%d\n",
+			size, amt, r, g, b );
+	}
+	return 1;
+}
+
+static void EFW_BlitFlare( int x, int y, int size, int r, int g, int b, int amt )
 {
 	int cell;
 	int i, j;
@@ -3561,13 +3621,15 @@ static void EFW_BlitFlare( int x, int y, int size, int amt )
 		size = 32;
 	if( size > 512 )
 		size = 512;
-	cell = size / 32;
-	if( cell < 1 )
-		cell = 1;
 	if( amt < 1 )
 		amt = 1;
 	if( amt > 255 )
 		amt = 255;
+	if( EFW_BlitFlareTex( x, y, size, r, g, b, amt ) )
+		return;
+	cell = size / 32;
+	if( cell < 1 )
+		cell = 1;
 	for( j = 0; j < 32; j++ )
 	{
 		for( i = 0; i < 32; i++ )
@@ -3718,7 +3780,9 @@ static void EFW_DrawWorldFlares( void )
 		amt = ent->curstate.renderamt;
 		if( amt <= 0 )
 			amt = 150;
-		EFW_BlitFlare( (int)( sx - w * 0.5f ), (int)( sy - w * 0.5f ), w, amt );
+		EFW_BlitFlare( (int)( sx - w * 0.5f ), (int)( sy - w * 0.5f ), w,
+			ent->curstate.rendercolor.r, ent->curstate.rendercolor.g,
+			ent->curstate.rendercolor.b, amt );
 		s_sx = (int)sx;
 		s_sy = (int)sy;
 		s_w = w;
