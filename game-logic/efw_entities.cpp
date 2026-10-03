@@ -401,9 +401,63 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support < 0 )
 	{
+		Vector feet;
+		Vector head;
+		TraceResult buried;
+		int dz;
+
 		/* A low ceiling makes the tall hull startsolid while the feet are
 		   already on the floor. Climbing out of that lands on the bunk.
-		   Leave the origin; the step still runs. */
+		   A point 8 units up is still in the air there, so the origin stays.
+		   StartMonster's DROP_TO_FLOOR never runs: that call stalls the
+		   studio bind. The roster office floor is above the map origin, and
+		   the same startsolid leaves the body under the floor. A point at
+		   the feet is inside the world. Step up until it is clear, then
+		   stand the tall hull on that surface. */
+		feet = pev->origin;
+		head = pev->origin;
+		feet.z += 8.0f;
+		head.z += 8.1f;
+		UTIL_TraceHull( feet, head, ignore_monsters, point_hull, ENT( pev ), &buried );
+		if( !buried.fStartSolid && !buried.fAllSolid )
+		{
+			s_npcStep = 0;
+			pev->flags &= ~FL_ONGROUND;
+			return;
+		}
+		for( dz = 4; dz <= 128; dz += 4 )
+		{
+			Vector test;
+			Vector stood;
+			TraceResult up;
+
+			test = pev->origin;
+			test.z += (float)dz + 8.0f;
+			head = test;
+			head.z += 0.1f;
+			UTIL_TraceHull( test, head, ignore_monsters, point_hull, ENT( pev ), &up );
+			if( up.fStartSolid || up.fAllSolid )
+				continue;
+			test.z -= 8.0f;
+			if( EFW_LandMonster( pev, test, &stood ) )
+				test = stood;
+			{
+				static int s_unbury;
+				const char *tn = STRING( pev->targetname );
+				if( s_unbury < 8 )
+				{
+					s_unbury++;
+					EFW_DebugPrint( "npc unbury %s z=%.0f -> %.0f at %.0f %.0f",
+						( tn && tn[0] ) ? tn : "?",
+						pev->origin.z, test.z, test.x, test.y );
+				}
+			}
+			s_npcStep = 0;
+			pev->flags |= FL_ONGROUND;
+			pev->velocity.z = 0.0f;
+			EFW_QueueOrigin( pev, test );
+			return;
+		}
 		s_npcStep = 0;
 		pev->flags &= ~FL_ONGROUND;
 		return;
