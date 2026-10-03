@@ -9,7 +9,6 @@
 #include "kbutton.h"
 #include "ref_params.h"
 #include "efw.h"
-#include "pm_defs.h"
 
 #include <math.h>
 #include <string.h>
@@ -3392,8 +3391,7 @@ static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy
 	float angles[3];
 	float fwd[3], right[3], up[3], delta[3];
 	float z, px, py;
-	float eye[3], end[3];
-	pmtrace_t *tr;
+	float eye[3];
 
 	lp = gEngfuncs.GetLocalPlayer();
 	if( !lp )
@@ -3409,17 +3407,6 @@ static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy
 	z = delta[0] * fwd[0] + delta[1] * fwd[1] + delta[2] * fwd[2];
 	if( z < 16.0f )
 		return 0;
-	end[0] = wx;
-	end[1] = wy;
-	end[2] = wz;
-	if( gEngfuncs.PM_TraceLine )
-	{
-		tr = gEngfuncs.PM_TraceLine( eye, end, PM_GLASS_IGNORE, 2, -1 );
-		/* The eye sits in the player hull, so a point trace is startsolid
-		   and fraction stays 0. Only a free trace that stops short is a wall. */
-		if( tr && !tr->allsolid && !tr->startsolid && tr->fraction < 0.92f )
-			return 0;
-	}
 	px = ( delta[0] * right[0] + delta[1] * right[1] + delta[2] * right[2] ) / z;
 	py = ( delta[0] * up[0] + delta[1] * up[1] + delta[2] * up[2] ) / z;
 	*sx = ScreenWidth * 0.5f + px * (float)ScreenWidth * 0.5f;
@@ -3436,8 +3423,6 @@ static void EFW_DrawWorldFlares( void )
 	int i;
 	int n;
 
-	if( g_storyCode )
-		return;
 	if( !s_flare )
 		s_flare = SPR_Load( "sprites/yellow_flare.spr" );
 	if( !s_flare || !gEngfuncs.pfnSPR_DrawGeneric )
