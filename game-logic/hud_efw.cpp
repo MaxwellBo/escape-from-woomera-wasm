@@ -3330,6 +3330,39 @@ static void EFW_LogPoseClock( float flTime )
 		best->curstate.movetype, best->origin[0], best->origin[1] );
 }
 
+/* Level 2 env_sprite lamps: rendermode 5, renderamt 150, scale 0.5,
+   sprites/yellow_flare.spr. Stock CSprite::Spawn leaves those keys. */
+static void EFW_LogWorldSprites( void )
+{
+	int i;
+	int n;
+	static int s_done;
+
+	if( s_done )
+		return;
+	s_done = 1;
+	n = 0;
+	for( i = 1; i <= 512; i++ )
+	{
+		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
+
+		if( !ent || ent->curstate.modelindex <= 0 )
+			continue;
+		if( ent->curstate.rendermode == 0 && ent->curstate.scale == 0.0f )
+			continue;
+		if( ent->player )
+			continue;
+		n++;
+		if( n <= 6 )
+			gEngfuncs.Con_Printf(
+				">>> sprite i=%d mi=%d mode=%d amt=%d scale=%.2f fx=%d org=%.0f %.0f %.0f\n",
+				i, ent->curstate.modelindex, ent->curstate.rendermode,
+				ent->curstate.renderamt, ent->curstate.scale, ent->curstate.effects,
+				ent->origin[0], ent->origin[1], ent->origin[2] );
+	}
+	gEngfuncs.Con_Printf( ">>> sprite n=%d\n", n );
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -3337,6 +3370,8 @@ int CHudEfw::Draw( float flTime )
 
 	s_drawN++;
 	EFW_SilenceNotify();
+	if( s_drawN == 30 )
+		EFW_LogWorldSprites();
 	if( s_drawN == 40 || s_drawN == 100 || s_drawN == 180 || s_drawN == 260 )
 		EFW_LogPoseClock( flTime );
 	if( s_drawN <= 8 || ( s_drawN % 120 ) == 1 )
