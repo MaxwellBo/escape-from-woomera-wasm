@@ -420,59 +420,51 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	if( support == 1 )
 	{
-		int seenSlab = 0;
-		int dz;
+		const char *tn = STRING( pev->targetname );
 
-		/* Feet are on a lower hull-1 floor. The office floor the player
-		   stands on is a slab above the chest, so a point at +40 is air
-		   and the mesh stays under that slab. Step up through the slab
-		   and stand on the first surface that comes out the top. */
-		for( dz = 4; dz <= 160; dz += 2 )
+		/* Point samples above the roster officer are air, and hull 1
+		   reports a floor at the map origin. The player stands on the
+		   office floor in that same room. A feet-hull drop from above
+		   his chest is that floor. Other monsters stay on the floor
+		   the probe already found. */
+		if( tn && !strcmp( tn, "Roster_Officer" ) )
 		{
-			Vector test;
-			Vector tip;
-			TraceResult up;
+			Vector top;
+			Vector bot;
+			TraceResult tr;
+			float raise;
 
-			test = pev->origin;
-			test.z += (float)dz;
-			tip = test;
-			tip.z += 0.1f;
-			UTIL_TraceHull( test, tip, ignore_monsters, point_hull, ENT( pev ), &up );
-			if( up.fStartSolid || up.fAllSolid )
+			for( raise = 48.0f; raise <= 96.0f; raise += 16.0f )
 			{
-				seenSlab = 1;
-				continue;
-			}
-			if( !seenSlab )
-				continue;
-			{
-				Vector drop;
-				TraceResult skin;
-
-				drop = test;
-				drop.z -= 12.0f;
-				UTIL_TraceHull( test, drop, ignore_monsters, point_hull, ENT( pev ), &skin );
-				if( !skin.fStartSolid && !skin.fAllSolid && skin.flFraction < 1.0f
-					&& ( test.z - skin.vecEndPos.z ) <= 12.0f )
-					test.z = skin.vecEndPos.z;
-			}
-			{
-				static int s_slab;
-				const char *tn = STRING( pev->targetname );
-
-				if( s_slab < 6 )
+				top = pev->origin;
+				bot = pev->origin;
+				top.z += raise;
+				EFW_TraceFeetHull( pev, top, bot, &tr );
 				{
-					s_slab++;
-					EFW_DebugPrint( "npc slab %s z=%.0f -> %.0f",
-						( tn && tn[0] ) ? tn : "?",
-						pev->origin.z, test.z );
+					static int s_drop;
+					if( s_drop < 6 )
+					{
+						s_drop++;
+						EFW_DebugPrint( "npc roster drop raise=%.0f solid=%d frac=%.2f z=%.0f",
+							raise,
+							( tr.fStartSolid || tr.fAllSolid ) ? 1 : 0,
+							tr.flFraction, tr.vecEndPos.z );
+					}
+				}
+				if( tr.fStartSolid || tr.fAllSolid )
+					continue;
+				if( tr.flFraction < 1.0f && tr.vecEndPos.z > pev->origin.z + 8.0f )
+				{
+					Vector stood;
+					stood = pev->origin;
+					stood.z = tr.vecEndPos.z;
+					s_npcStep = 0;
+					pev->flags |= FL_ONGROUND;
+					pev->velocity.z = 0.0f;
+					EFW_QueueOrigin( pev, stood );
+					return;
 				}
 			}
-			s_npcStep = 0;
-			pev->flags |= FL_ONGROUND;
-			pev->velocity.z = 0.0f;
-			EFW_QueueOrigin( pev, test );
-			return;
 		}
 		s_npcStep = 0;
 		pev->flags |= FL_ONGROUND;
