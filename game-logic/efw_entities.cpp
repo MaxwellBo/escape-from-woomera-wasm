@@ -2217,6 +2217,34 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		return;
 	}
 	pev->framerate = 1.0f;
+	/* The roster office hull is startsolid from the map origin up through
+	   the room, so MOVETYPE_STEP pushes him back under the floor and the
+	   mesh never reaches the desk. Hold him on the floor the player
+	   stands on in that room and skip the step push. */
+	if( tn && !strcmp( tn, "Roster_Officer" ) )
+	{
+		if( pev->origin.z < 24.0f )
+		{
+			Vector stood;
+			float wasZ;
+			wasZ = pev->origin.z;
+			stood = pev->origin;
+			stood.z = 44.0f;
+			EFW_QueueOrigin( pev, stood );
+			{
+				static int s_hold;
+				if( s_hold < 3 )
+				{
+					s_hold++;
+					EFW_DebugPrint( "npc roster hold z=%.0f -> 44", wasZ );
+				}
+			}
+		}
+		pev->movetype = MOVETYPE_NONE;
+		pev->velocity = Vector( 0, 0, 0 );
+		EFW_AdvanceNpcAnim( pMon, tn );
+		return;
+	}
 	pev->movetype = MOVETYPE_STEP;
 	{
 		static int s_mv;
