@@ -9,6 +9,7 @@
 #include "kbutton.h"
 #include "ref_params.h"
 #include "efw.h"
+#include "pm_defs.h"
 
 #include <math.h>
 #include <string.h>
@@ -3381,6 +3382,113 @@ static void EFW_LogWorldSprites( void )
 	gEngfuncs.Con_Printf( ">>> sprite map=%s mode5=%d nearz=%d\n", map, n5, nz );
 }
 
+/* World kRenderTransAdd sprites reach the client (modelindex, scale 0.5,
+   renderamt 150) but this WebGL ref draws them with zero coverage.
+   SPR_DrawGeneric is the HUD path that does show sprites/yellow_flare.spr.
+   Half-extent is 128 texels times the networked scale, at a 90-degree view. */
+static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy, float *dist )
+{
+	cl_entity_t *lp;
+	float angles[3];
+	float fwd[3], right[3], up[3], delta[3];
+	float z, px, py;
+	float eye[3], end[3];
+	pmtrace_t *tr;
+
+	lp = gEngfuncs.GetLocalPlayer();
+	if( !lp )
+		return 0;
+	gEngfuncs.GetViewAngles( angles );
+	AngleVectors( angles, fwd, right, up );
+	eye[0] = lp->origin[0];
+	eye[1] = lp->origin[1];
+	eye[2] = lp->origin[2] + 28.0f;
+	delta[0] = wx - eye[0];
+	delta[1] = wy - eye[1];
+	delta[2] = wz - eye[2];
+	z = delta[0] * fwd[0] + delta[1] * fwd[1] + delta[2] * fwd[2];
+	if( z < 16.0f )
+		return 0;
+	end[0] = wx;
+	end[1] = wy;
+	end[2] = wz;
+	if( gEngfuncs.PM_TraceLine )
+	{
+		tr = gEngfuncs.PM_TraceLine( eye, end, PM_GLASS_IGNORE, 2, -1 );
+		if( tr && ( tr->startsolid || tr->fraction < 0.92f ) )
+			return 0;
+	}
+	px = ( delta[0] * right[0] + delta[1] * right[1] + delta[2] * right[2] ) / z;
+	py = ( delta[0] * up[0] + delta[1] * up[1] + delta[2] * up[2] ) / z;
+	*sx = ScreenWidth * 0.5f + px * (float)ScreenWidth * 0.5f;
+	*sy = ScreenHeight * 0.5f - py * (float)ScreenWidth * 0.5f;
+	*dist = z;
+	return 1;
+}
+
+static void EFW_DrawWorldFlares( void )
+{
+	static HSPRITE s_flare;
+	static int s_logged;
+	int i;
+	int n;
+
+	if( g_storyCode )
+		return;
+	if( !s_flare )
+		s_flare = SPR_Load( "sprites/yellow_flare.spr" );
+	if( !s_flare || !gEngfuncs.pfnSPR_DrawGeneric )
+	{
+		if( !s_logged )
+		{
+			s_logged = 1;
+			gEngfuncs.Con_Printf( ">>> flare spr=%d generic=%d\n",
+				s_flare != 0, gEngfuncs.pfnSPR_DrawGeneric != 0 );
+		}
+		return;
+	}
+	n = 0;
+	for( i = 1; i <= 1024; i++ )
+	{
+		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
+		float sx, sy, dist, pix;
+		int w, r, g, b;
+
+		if( !ent || ent->player )
+			continue;
+		if( ent->curstate.rendermode != 5 || ent->curstate.scale <= 0.01f )
+			continue;
+		if( ent->curstate.modelindex <= 0 )
+			continue;
+		if( !EFW_FlareOnScreen( ent->origin[0], ent->origin[1], ent->origin[2], &sx, &sy, &dist ) )
+			continue;
+		pix = ( 256.0f * ent->curstate.scale ) * (float)ScreenWidth / ( 2.0f * dist );
+		w = (int)pix;
+		if( w < 2 )
+			continue;
+		if( w > ScreenWidth )
+			w = ScreenWidth;
+		r = ent->curstate.rendercolor.r;
+		g = ent->curstate.rendercolor.g;
+		b = ent->curstate.rendercolor.b;
+		if( r == 0 && g == 0 && b == 0 )
+		{
+			r = 255;
+			g = 255;
+			b = 255;
+		}
+		SPR_Set( s_flare, r, g, b );
+		gEngfuncs.pfnSPR_DrawGeneric( 0, (int)( sx - w * 0.5f ), (int)( sy - w * 0.5f ),
+			NULL, 0x0302, 1, w, w );
+		n++;
+	}
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> flare draw n=%d spr=%d\n", n, s_flare != 0 );
+	}
+}
+
 int CHudEfw::Draw( float flTime )
 {
 	static int s_drawN;
@@ -3402,6 +3510,7 @@ int CHudEfw::Draw( float flTime )
 		gEngfuncs.Con_Printf( "efw: HUD_Draw skip n=%d\n", s_drawN );
 		return 1;
 	}
+	EFW_DrawWorldFlares();
 	if( s_drawN <= 16 || ( s_drawN % 60 ) == 1 )
 	{
 		cl_entity_t *lp = gEngfuncs.GetLocalPlayer();
