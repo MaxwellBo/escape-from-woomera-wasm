@@ -2250,9 +2250,15 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 			if( !s_stood[slot] )
 			{
 				int ring;
+				int ringMax;
 				static const float kDrop[3] = { 80.0f, 64.0f, 48.0f };
 
-				for( ring = 0; ring <= 120; ring += 4 )
+				/* Roster keeps the office floor at z=44. Mail and the gate
+				   guard keep the yard gravel at z=0. A drop onto the tarp
+				   (mail landed at z=61) still has a clear chest ray above
+				   the cover, so a yard landing above the gravel is dropped. */
+				ringMax = ( slot == 0 ) ? 80 : 160;
+				for( ring = 0; ring <= ringMax; ring += 4 )
 				{
 					int hi;
 					int landed;
@@ -2261,28 +2267,49 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 					Vector chest;
 					TraceResult los;
 
+					stood.x = s_home[slot].x + (float)ring;
+					stood.y = s_home[slot].y;
+					stood.z = 0.0f;
 					landed = 0;
-					stood = Vector( 0, 0, 0 );
-					for( hi = 0; hi < 3 && !landed; hi++ )
+					if( slot == 0 )
 					{
 						TraceResult tr;
-						Vector top;
-						Vector bot;
+						Vector end;
 
-						top.x = s_home[slot].x + (float)ring;
-						top.y = s_home[slot].y;
-						top.z = kDrop[hi];
-						bot = top;
-						bot.z = -16.0f;
-						EFW_TraceFeetHull( pev, top, bot, &tr );
+						stood.z = 44.0f;
+						end = stood;
+						end.z += 1.0f;
+						EFW_TraceFeetHull( pev, stood, end, &tr );
 						if( tr.fStartSolid || tr.fAllSolid )
 							continue;
-						if( tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
-							continue;
-						stood = tr.vecEndPos;
-						stood.x = top.x;
-						stood.y = top.y;
 						landed = 1;
+					}
+					else
+					{
+						for( hi = 0; hi < 3 && !landed; hi++ )
+						{
+							TraceResult tr;
+							Vector top;
+							Vector bot;
+
+							top.x = stood.x;
+							top.y = stood.y;
+							top.z = kDrop[hi];
+							bot = top;
+							bot.z = -16.0f;
+							EFW_TraceFeetHull( pev, top, bot, &tr );
+							if( tr.fStartSolid || tr.fAllSolid )
+								continue;
+							if( tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
+								continue;
+							stood.z = tr.vecEndPos.z;
+							landed = 1;
+						}
+						if( !landed || stood.z > 16.0f )
+						{
+							stood.z = 0.0f;
+							landed = 1;
+						}
 					}
 					if( !landed )
 						continue;
