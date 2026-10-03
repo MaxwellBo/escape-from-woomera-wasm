@@ -3415,7 +3415,9 @@ static int EFW_FlareOnScreen( float wx, float wy, float wz, float *sx, float *sy
 	if( gEngfuncs.PM_TraceLine )
 	{
 		tr = gEngfuncs.PM_TraceLine( eye, end, PM_GLASS_IGNORE, 2, -1 );
-		if( tr && ( tr->startsolid || tr->fraction < 0.92f ) )
+		/* The eye sits in the player hull, so a point trace is startsolid
+		   and fraction stays 0. Only a free trace that stops short is a wall. */
+		if( tr && !tr->allsolid && !tr->startsolid && tr->fraction < 0.92f )
 			return 0;
 	}
 	px = ( delta[0] * right[0] + delta[1] * right[1] + delta[2] * right[2] ) / z;
@@ -3430,6 +3432,7 @@ static void EFW_DrawWorldFlares( void )
 {
 	static HSPRITE s_flare;
 	static int s_logged;
+	static int s_xy;
 	int i;
 	int n;
 
@@ -3453,6 +3456,7 @@ static void EFW_DrawWorldFlares( void )
 		cl_entity_t *ent = gEngfuncs.GetEntityByIndex( i );
 		float sx, sy, dist, pix;
 		int w, r, g, b;
+		int dx, dy;
 
 		if( !ent || ent->player )
 			continue;
@@ -3477,12 +3481,18 @@ static void EFW_DrawWorldFlares( void )
 			g = 255;
 			b = 255;
 		}
+		dx = (int)( sx - w * 0.5f );
+		dy = (int)( sy - w * 0.5f );
 		SPR_Set( s_flare, r, g, b );
-		gEngfuncs.pfnSPR_DrawGeneric( 0, (int)( sx - w * 0.5f ), (int)( sy - w * 0.5f ),
-			NULL, 0x0302, 1, w, w );
+		gEngfuncs.pfnSPR_DrawGeneric( 0, dx, dy, NULL, 0x0302, 1, w, w );
+		if( n == 0 && s_xy < 2 )
+		{
+			s_xy++;
+			gEngfuncs.Con_Printf( ">>> flare xy=%d %d w=%d dist=%.0f\n", dx, dy, w, dist );
+		}
 		n++;
 	}
-	if( !s_logged )
+	if( !s_logged && n > 0 )
 	{
 		s_logged = 1;
 		gEngfuncs.Con_Printf( ">>> flare draw n=%d spr=%d\n", n, s_flare != 0 );
