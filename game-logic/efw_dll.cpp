@@ -4281,43 +4281,34 @@ static void EFW_PrecacheSteps( void )
 		PRECACHE_SOUND( (char *)kWav[i] );
 }
 
-/* PM_UpdateStepSound. The pump is the cmd.msec clock. A timer that
-   reaches 0 this pump still plays, matching ReduceTimers before the
-   step check. */
+/* PM_ReduceTimers then PM_UpdateStepSound, once per GoldSrc command.
+   cmd.msec is about 10. The pump is many of those commands. A timer
+   that reaches 0 on a slice still plays. Spending the whole budget on
+   one subtract left a two-second run with a single footstep. */
 static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 {
-	int msec;
+	float budget;
+	int left;
+	int played;
+	int guard;
 	float speed;
 	float velwalk;
 	float velrun;
 	float flduck;
 	int ducked;
-	int step;
-	float fvol;
-	int irand;
-	const char *sample;
-	const char *texName = NULL;
-	char texType;
-	Vector start;
-	Vector end;
+	int canPlay;
 	static int s_skipWade;
 	static int s_log;
+	static int s_burst;
 
 	if( !pPlayer )
 		return;
-	msec = (int)( EFW_MoveBudget() * 1000.0f );
-	if( msec < 1 )
-		msec = 1;
-	if( pPlayer->m_flTimeStepSound > 0.0f )
-	{
-		pPlayer->m_flTimeStepSound -= (float)msec;
-		if( pPlayer->m_flTimeStepSound < 0.0f )
-			pPlayer->m_flTimeStepSound = 0.0f;
-	}
-	if( pPlayer->m_flTimeStepSound > 0.0f )
-		return;
-	if( pPlayer->pev->flags & FL_FROZEN )
-		return;
+	budget = EFW_MoveBudget();
+	left = (int)( budget * 1000.0f + 0.5f );
+	if( left < 1 )
+		left = 1;
+	if( left > 2000 )
+		left = 2000;
 	speed = pPlayer->pev->velocity.Length();
 	ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
 	if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
@@ -4332,18 +4323,50 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		velrun = 210.0f;
 		flduck = 0.0f;
 	}
+	/* ReduceTimers still runs while frozen, airborne, or standing.
+	   The timer stays at 0, so the next grounded step plays at once. */
+	canPlay = 1;
+	if( pPlayer->pev->flags & FL_FROZEN )
+		canPlay = 0;
 	if( !( pPlayer->pev->flags & FL_ONGROUND ) && pPlayer->pev->movetype != MOVETYPE_FLY )
-		return;
+		canPlay = 0;
 	if( speed <= 0.0f )
-		return;
-	if( speed < velwalk && pPlayer->m_flTimeStepSound != 0.0f )
-		return;
+		canPlay = 0;
+	played = 0;
+	guard = 0;
+	while( left > 0 && guard < 200 )
 	{
-		int walking = speed < velrun;
+		int msec;
+		int step;
+		float fvol;
+		int irand;
+		const char *sample;
+		const char *texName;
+		char texType;
+		int walking;
 		float height;
 		Vector knee;
 		Vector feet;
+		Vector start;
+		Vector end;
 
+		guard++;
+		msec = left > 10 ? 10 : left;
+		left -= msec;
+		if( pPlayer->m_flTimeStepSound > 0.0f )
+		{
+			pPlayer->m_flTimeStepSound -= (float)msec;
+			if( pPlayer->m_flTimeStepSound < 0.0f )
+				pPlayer->m_flTimeStepSound = 0.0f;
+		}
+		if( pPlayer->m_flTimeStepSound > 0.0f )
+			continue;
+		if( !canPlay )
+			continue;
+		if( speed < velwalk && pPlayer->m_flTimeStepSound != 0.0f )
+			continue;
+		walking = speed < velrun;
+		texName = NULL;
 		height = pPlayer->pev->maxs.z - pPlayer->pev->mins.z;
 		knee = pPlayer->pev->origin;
 		feet = pPlayer->pev->origin;
@@ -4369,13 +4392,13 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		}
 		else
 		{
+			edict_t *world;
+
 			start = pPlayer->pev->origin;
 			end = start;
 			end.z -= 64.0f;
-			{
-				edict_t *world = INDEXENT( 0 );
-				texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
-			}
+			world = INDEXENT( 0 );
+			texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
 			texType = EFW_TextureType( texName );
 			switch( texType )
 			{
@@ -4395,33 +4418,55 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 				fvol = walking ? 0.2f : 0.5f;
 			pPlayer->m_flTimeStepSound = walking ? 400.0f : 300.0f;
 		}
-	}
-	pPlayer->m_flTimeStepSound += flduck;
-	if( ducked )
-		fvol *= 0.35f;
-	pPlayer->m_iStepLeft = !pPlayer->m_iStepLeft;
-	irand = RANDOM_LONG( 0, 1 ) + ( pPlayer->m_iStepLeft ? 2 : 0 );
-	if( step == 5 && !RANDOM_LONG( 0, 4 ) )
-		irand = 4;
-	if( step == 7 )
-	{
-		if( s_skipWade == 0 )
+		pPlayer->m_flTimeStepSound += flduck;
+		if( ducked )
+			fvol *= 0.35f;
+		pPlayer->m_iStepLeft = !pPlayer->m_iStepLeft;
+		irand = RANDOM_LONG( 0, 1 ) + ( pPlayer->m_iStepLeft ? 2 : 0 );
+		if( step == 5 && !RANDOM_LONG( 0, 4 ) )
+			irand = 4;
+		if( step == 7 )
 		{
-			s_skipWade++;
-			return;
+			/* Timer is already armed. A return here would skip the
+			   rest of this pump's commands. */
+			if( s_skipWade == 0 )
+			{
+				s_skipWade++;
+				continue;
+			}
+			if( s_skipWade++ == 3 )
+				s_skipWade = 0;
 		}
-		if( s_skipWade++ == 3 )
-			s_skipWade = 0;
+		sample = EFW_StepSample( step, irand );
+		EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
+		played++;
+		if( s_log < 8 )
+		{
+			char line[160];
+			s_log++;
+			snprintf( line, sizeof( line ),
+				"efw: step %s vol=%.2f spd=%.0f tex=%s\n",
+				sample, fvol, speed, texName ? texName : "-" );
+			EFW_LogLine( line );
+		}
+		if( played >= 12 )
+		{
+			if( pPlayer->m_flTimeStepSound > 0.0f )
+			{
+				pPlayer->m_flTimeStepSound -= (float)left;
+				if( pPlayer->m_flTimeStepSound < 0.0f )
+					pPlayer->m_flTimeStepSound = 0.0f;
+			}
+			break;
+		}
 	}
-	sample = EFW_StepSample( step, irand );
-	EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
-	if( s_log < 8 )
+	if( played > 1 && s_burst < 6 )
 	{
-		char line[160];
-		s_log++;
+		char line[96];
+		s_burst++;
 		snprintf( line, sizeof( line ),
-			"efw: step %s vol=%.2f spd=%.0f tex=%s\n",
-			sample, fvol, speed, texName ? texName : "-" );
+			"efw: step burst n=%d iv=%.3f spd=%.0f\n",
+			played, budget, speed );
 		EFW_LogLine( line );
 	}
 }
