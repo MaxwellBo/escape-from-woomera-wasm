@@ -733,20 +733,118 @@ static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
 	start.z = mins.z + step;
 	stop.z = start.z - 2.0f * step;
 	UTIL_TraceHull( start, stop, ignore_monsters, point_hull, ENT( pev ), &tr );
-	if( tr.fStartSolid || tr.fAllSolid || tr.flFraction >= 1.0f )
+	/* A solid start reports the start point. That column is still a floor
+	   when the drop from there stays inside one step. */
+	if( tr.flFraction >= 1.0f )
 		return 0;
-	mid = tr.vecEndPos.z;
+	if( tr.fStartSolid || tr.fAllSolid )
+		mid = start.z;
+	else
+		mid = tr.vecEndPos.z;
 	for( x = 0; x <= 1; x++ )
 	{
 		for( y = 0; y <= 1; y++ )
 		{
+			float ez;
+
 			start.x = stop.x = x ? maxs.x : mins.x;
 			start.y = stop.y = y ? maxs.y : mins.y;
 			UTIL_TraceHull( start, stop, ignore_monsters, point_hull, ENT( pev ), &tr );
-			if( tr.fStartSolid || tr.flFraction >= 1.0f || mid - tr.vecEndPos.z > step )
+			if( tr.flFraction >= 1.0f )
+				return 0;
+			ez = ( tr.fStartSolid || tr.fAllSolid ) ? start.z : tr.vecEndPos.z;
+			if( mid - ez > step )
 				return 0;
 		}
 	}
+	return 1;
+}
+
+/* SV_MoveStep. The hull column at the full wish is the only landing.
+   A wall in that column refuses the step, so the chase can turn along
+   the face. A fraction of the wish is not a move. */
+static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move, Vector *out )
+{
+	Vector top;
+	Vector bot;
+	TraceResult tr;
+	const float step = 18.0f;
+	int partial;
+	const char *tn;
+
+	if( !pev || !out )
+		return 0;
+	partial = ( pev->flags & FL_PARTIALGROUND ) ? 1 : 0;
+	top = start + move;
+	top.z += step;
+	bot = top;
+	bot.z -= step * 2.0f;
+	EFW_TraceFeetHull( pev, top, bot, &tr, dont_ignore_monsters );
+	if( tr.fAllSolid )
+		return 0;
+	if( tr.fStartSolid )
+	{
+		top.z -= step;
+		EFW_TraceFeetHull( pev, top, bot, &tr, dont_ignore_monsters );
+		if( tr.fAllSolid || tr.fStartSolid )
+			return 0;
+	}
+	tn = STRING( pev->targetname );
+	if( tr.flFraction >= 1.0f )
+	{
+		if( !partial )
+		{
+			if( tn && !strcmp( tn, "Elika" ) )
+			{
+				static int s_hold;
+
+				if( s_hold < 6 )
+				{
+					s_hold++;
+					EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
+						( start + move ).x, ( start + move ).y, start.z );
+				}
+			}
+			return -1;
+		}
+		*out = start + move;
+		pev->flags &= ~FL_ONGROUND;
+		if( tn && !strcmp( tn, "Elika" ) )
+		{
+			static int s_air;
+
+			if( s_air < 4 )
+			{
+				s_air++;
+				EFW_DebugPrint( "partial fall Elika at %.0f %.0f z=%.0f",
+					out->x, out->y, out->z );
+			}
+		}
+		return 3;
+	}
+	if( EFW_TraceHitBody( pev, &tr ) )
+		return 0;
+	*out = tr.vecEndPos;
+	if( !EFW_CheckBottom( pev, *out ) )
+	{
+		if( !partial )
+		{
+			if( tn && !strcmp( tn, "Elika" ) )
+			{
+				static int s_hold;
+
+				if( s_hold < 6 )
+				{
+					s_hold++;
+					EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
+						out->x, out->y, out->z );
+				}
+			}
+			return -1;
+		}
+		return 2;
+	}
+	pev->flags &= ~FL_PARTIALGROUND;
 	return 1;
 }
 
@@ -760,131 +858,21 @@ static int EFW_YawHoldsStep( entvars_t *pev );
    chunk of this MoveExecute turns back toward that heading. */
 static int s_chaseRestored;
 
-/* SV_movestep: the down-trace from one step above the wish to one step
-   below it missed. FL_PARTIALGROUND still takes that horizontal move,
-   then clears FL_ONGROUND. MoveExecute's next chunk calls MoveToOrigin,
-   and that call returns before it turns or steps. */
-static void EFW_LeavePartialGround( entvars_t *pev, const Vector &pos )
-{
-	Vector floor;
-	const char *tn;
-
-	if( !pev || !( pev->flags & FL_PARTIALGROUND ) )
-		return;
-	if( EFW_LandMonster( pev, pos, &floor ) )
-		return;
-	pev->flags &= ~FL_ONGROUND;
-	tn = STRING( pev->targetname );
-	if( tn && !strcmp( tn, "Elika" ) )
-	{
-		static int s_air;
-
-		if( s_air < 4 )
-		{
-			s_air++;
-			EFW_DebugPrint( "partial fall Elika at %.0f %.0f z=%.0f",
-				pos.x, pos.y, pos.z );
-		}
-	}
-	else
-	{
-		static int s_air;
-
-		if( s_air < 4 )
-		{
-			s_air++;
-			EFW_DebugPrint( "partial fall at %.0f %.0f z=%.0f",
-				pos.x, pos.y, pos.z );
-		}
-	}
-}
-
 static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
 {
 	Vector wish;
-	Vector end;
-	Vector stepLand;
-	TraceResult tr;
-	float savedMins;
-	float horiz;
+	Vector move;
+	int kind;
 
 	wish = dir;
 	wish.z = 0.0f;
 	if( wish.Length() < 0.001f )
 		return 0;
 	wish = wish.Normalize();
-	end = start + wish * step;
-	savedMins = pev->mins.z;
-	if( savedMins < 1.0f )
-		pev->mins.z = 1.0f;
-	EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
-	if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
-	{
-		int stepUp;
-		float baseZ = start.z;
-
-		for( stepUp = 1; stepUp <= 9; stepUp++ )
-		{
-			Vector raised = start;
-
-			raised.z = baseZ + stepUp * 2.0f;
-			EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
-			if( !tr.fStartSolid && !tr.fAllSolid )
-			{
-				end = raised + wish * step;
-				EFW_TraceFeetHull( pev, raised, end, &tr, dont_ignore_monsters );
-				break;
-			}
-		}
-	}
-	pev->mins.z = savedMins;
-	/* Same acceptance as the direct chunk: a destination with a floor
-	   counts, even when the feet-level trace started in the ground.
-	   A body in the way is not a stair; landing at the far end would
-	   step through that person. */
-	if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
-	{
-		horiz = ( stepLand - start ).Length2D();
-		if( horiz >= 0.5f )
-		{
-			int bottom = EFW_CheckBottom( pev, stepLand );
-
-			/* FL_PARTIALGROUND keeps a step whose corners hang off.
-			   A solid landing clears the flag. */
-			if( bottom || ( pev->flags & FL_PARTIALGROUND ) )
-			{
-				if( bottom )
-					pev->flags &= ~FL_PARTIALGROUND;
-				*out = stepLand;
-				return 1;
-			}
-		}
-	}
-	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+	move = wish * step;
+	kind = EFW_MoveStep( pev, start, move, out );
+	if( kind <= 0 )
 		return 0;
-	stepLand = start + ( end - start ) * tr.flFraction;
-	{
-		Vector grounded;
-
-		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, stepLand, &grounded ) )
-			stepLand = grounded;
-		else
-			stepLand.z = start.z;
-	}
-	horiz = ( stepLand - start ).Length2D();
-	if( horiz < 0.5f )
-		return 0;
-	{
-		int bottom = EFW_CheckBottom( pev, stepLand );
-
-		if( !bottom && !( pev->flags & FL_PARTIALGROUND ) )
-			return 0;
-		if( bottom )
-			pev->flags &= ~FL_PARTIALGROUND;
-		else
-			EFW_LeavePartialGround( pev, stepLand );
-	}
-	*out = stepLand;
 	return 1;
 }
 
@@ -1208,10 +1196,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	while( total > 0.001f && chunks < 48 )
 	{
 		Vector wish;
-		Vector end;
 		Vector stepLand;
-		TraceResult tr;
-		float savedMins;
 		float step;
 		float stepLen;
 		float remain;
@@ -1254,142 +1239,59 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			wish.y = sinf( yawRad ) * step;
 			wish.z = 0.0f;
 		}
-		end = start + wish;
-		savedMins = pev->mins.z;
-		if( savedMins < 1.0f )
-			pev->mins.z = 1.0f;
-		EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
-		/* Feet-origin mins.z == 0 sits in the floor and the trace is
-		   startsolid. StartMonster adds 1 to origin.z; DROP_TO_FLOOR
-		   cannot lift an origin already inside the floor. Another
-		   character is not the floor: climbing off their hull is the
-		   bunk pop. */
-		if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
 		{
-			int stepUp;
-			float baseZ = start.z;
-			/* sv_stepsize is 18. A taller climb is the pop past a ceiling. */
-			for( stepUp = 1; stepUp <= 9; stepUp++ )
-			{
-				Vector raised = start;
-				raised.z = baseZ + stepUp * 2.0f;
-				EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
-				if( !tr.fStartSolid && !tr.fAllSolid )
-				{
-					start = raised;
-					end = start + wish;
-					EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
-					{
-						static int s_lift;
-						if( s_lift < 6 )
-						{
-							s_lift++;
-							EFW_DebugPrint( "floor lift z=%.0f -> %.0f solid=%d frac=%.2f",
-								baseZ, start.z, tr.fStartSolid, tr.flFraction );
-						}
-					}
-					break;
-				}
-			}
-		}
-		pev->mins.z = savedMins;
-		{
-			static int s_hullLog;
-			if( s_hullLog < 6 )
-			{
-				s_hullLog++;
-				EFW_DebugPrint( "hull step frac=%.2f solid=%d all=%d",
-					tr.flFraction, tr.fStartSolid, tr.fAllSolid );
-			}
-		}
-		/* Prefer the step-size landing at the full chunk. A blocked hull
-		   falls back to the partial slide, then lands if a floor is near.
-		   The far landing ignores bodies, so a person in the trace must
-		   keep the contact instead of the floor beyond them. */
-		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
-		{
-			float dz = stepLand.z - start.z;
-			if( dz < 0.0f )
-				dz = -dz;
-			if( dz >= 1.0f )
-			{
-				static int s_ground;
-				if( s_ground < 6 )
-				{
-					s_ground++;
-					EFW_DebugPrint( "step ground z=%.0f -> %.0f at %.0f %.0f",
-						start.z, stepLand.z, stepLand.x, stepLand.y );
-				}
-			}
-		}
-		else if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
-		{
-			/* The hull is flush with a face. A point trace from the chest
-			   misses a thin func_wall and the next origin starts inside
-			   it, so every chase heading is startsolid. Stay on the face
-			   and let the heading search slide along it. */
-			stepLand = start;
-		}
-		else
-		{
-			stepLand = start + ( end - start ) * tr.flFraction;
-			{
-				Vector grounded;
-				if( EFW_TraceHitBody( pev, &tr ) )
-				{
-					static int s_body;
-					stepLand.z = start.z;
-					if( s_body < 6 )
-					{
-						const char *who = STRING( tr.pHit->v.targetname );
-						s_body++;
-						EFW_DebugPrint( "body stop frac=%.2f at %.0f %.0f hit=%s",
-							tr.flFraction, stepLand.x, stepLand.y,
-							( who && who[0] ) ? who : STRING( tr.pHit->v.classname ) );
-					}
-				}
-				else if( EFW_LandMonster( pev, stepLand, &grounded ) )
-					stepLand = grounded;
-				else
-					stepLand.z = start.z;
-			}
-		}
-		stepLen = ( stepLand - start ).Length();
-		/* SV_CheckBottom rejects a chunk whose corners hang off a drop
-		   deeper than the step. The chase then tries a heading that
-		   still has floor. */
-		if( stepLen >= 0.5f && !EFW_CheckBottom( pev, stepLand ) )
-		{
-			if( pev->flags & FL_PARTIALGROUND )
-			{
-				static int s_part;
+			int kind;
 
-				if( s_part < 4 )
-				{
-					s_part++;
-					EFW_DebugPrint( "partial step at %.0f %.0f z=%.0f",
-						stepLand.x, stepLand.y, stepLand.z );
-				}
-			}
-			else
+			/* SV_MoveStep accepts the full column or nothing. A wall
+			   closer than this chunk refuses it, and the chase below
+			   turns along that face instead of sliding into it. */
+			kind = EFW_MoveStep( pev, start, wish, &stepLand );
+			if( kind <= 0 )
 			{
-				static int s_bot;
-
-				if( s_bot < 6 )
+				if( kind == 0 )
 				{
-					s_bot++;
-					EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
-						stepLand.x, stepLand.y, stepLand.z );
+					static int s_refuse;
+					const char *tn = STRING( pev->targetname );
+
+					if( tn && !strcmp( tn, "Elika" ) && s_refuse < 4 )
+					{
+						s_refuse++;
+						EFW_DebugPrint( "step refuse Elika at %.0f %.0f wish=%.0f %.0f",
+							start.x, start.y, wish.x, wish.y );
+					}
 				}
 				stepLen = 0.0f;
 			}
+			else
+			{
+				float dz = stepLand.z - start.z;
+
+				if( dz < 0.0f )
+					dz = -dz;
+				if( dz >= 1.0f )
+				{
+					static int s_ground;
+					if( s_ground < 6 )
+					{
+						s_ground++;
+						EFW_DebugPrint( "step ground z=%.0f -> %.0f at %.0f %.0f",
+							start.z, stepLand.z, stepLand.x, stepLand.y );
+					}
+				}
+				if( kind == 2 )
+				{
+					static int s_part;
+
+					if( s_part < 4 )
+					{
+						s_part++;
+						EFW_DebugPrint( "partial step at %.0f %.0f z=%.0f",
+							stepLand.x, stepLand.y, stepLand.z );
+					}
+				}
+				stepLen = ( stepLand - start ).Length();
+			}
 		}
-		else if( stepLen >= 0.5f )
-			pev->flags &= ~FL_PARTIALGROUND;
-		/* A kept step with no floor in the column is the air step.
-		   FL_ONGROUND clears before the facing test restores an origin. */
-		if( stepLen >= 0.5f )
-			EFW_LeavePartialGround( pev, stepLand );
 		/* SV_StepDirection keeps the origin when the body has not turned
 		   to within that band of ideal_yaw. A blocked step still chases. */
 		if( stepLen >= 0.5f && EFW_YawHoldsStep( pev ) )
