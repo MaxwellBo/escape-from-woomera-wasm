@@ -690,6 +690,64 @@ static void EFW_NpcFall( entvars_t *pev )
    groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
 
+/* SV_CheckBottom. Four corners in the floor means the hull is standing.
+   A corner over a drop deeper than sv_stepsize (18) refuses the step, so
+   the chase tries another heading instead of walking off the ledge.
+   Point traces match SV_PointContents / MOVE_NOMONSTERS. */
+static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
+{
+	Vector mins;
+	Vector maxs;
+	Vector start;
+	Vector stop;
+	TraceResult tr;
+	float mid;
+	int x;
+	int y;
+	int easy;
+	const float step = 18.0f;
+
+	if( !pev )
+		return 0;
+	mins = pos + Vector( -16.0f, -16.0f, 0.0f );
+	maxs = pos + Vector( 16.0f, 16.0f, 72.0f );
+	easy = 1;
+	for( x = 0; x <= 1; x++ )
+	{
+		for( y = 0; y <= 1; y++ )
+		{
+			start.x = x ? maxs.x : mins.x;
+			start.y = y ? maxs.y : mins.y;
+			start.z = mins.z - 1.0f;
+			UTIL_TraceHull( start, start, ignore_monsters, point_hull, ENT( pev ), &tr );
+			if( !tr.fStartSolid && !tr.fAllSolid )
+				easy = 0;
+		}
+	}
+	if( easy )
+		return 1;
+	start.x = stop.x = ( mins.x + maxs.x ) * 0.5f;
+	start.y = stop.y = ( mins.y + maxs.y ) * 0.5f;
+	start.z = mins.z;
+	stop.z = start.z - 2.0f * step;
+	UTIL_TraceHull( start, stop, ignore_monsters, point_hull, ENT( pev ), &tr );
+	if( tr.fStartSolid || tr.fAllSolid || tr.flFraction >= 1.0f )
+		return 0;
+	mid = tr.vecEndPos.z;
+	for( x = 0; x <= 1; x++ )
+	{
+		for( y = 0; y <= 1; y++ )
+		{
+			start.x = stop.x = x ? maxs.x : mins.x;
+			start.y = stop.y = y ? maxs.y : mins.y;
+			UTIL_TraceHull( start, stop, ignore_monsters, point_hull, ENT( pev ), &tr );
+			if( tr.fStartSolid || tr.flFraction >= 1.0f || mid - tr.vecEndPos.z > step )
+				return 0;
+		}
+	}
+	return 1;
+}
+
 /* SV_MoveToOrigin MOVE_NORMAL steps along ideal_yaw. When that step cannot
    be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
    the other 45-degree headings. This is that search with the hull trace,
@@ -740,7 +798,7 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 	if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
 	{
 		horiz = ( stepLand - start ).Length2D();
-		if( horiz >= 0.5f )
+		if( horiz >= 0.5f && EFW_CheckBottom( pev, stepLand ) )
 		{
 			*out = stepLand;
 			return 1;
@@ -758,7 +816,7 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 			stepLand.z = start.z;
 	}
 	horiz = ( stepLand - start ).Length2D();
-	if( horiz < 0.5f )
+	if( horiz < 0.5f || !EFW_CheckBottom( pev, stepLand ) )
 		return 0;
 	*out = stepLand;
 	return 1;
@@ -1081,6 +1139,21 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 		stepLen = ( stepLand - start ).Length();
+		/* SV_CheckBottom rejects a chunk whose corners hang off a drop
+		   deeper than the step. The chase then tries a heading that
+		   still has floor. */
+		if( stepLen >= 0.5f && !EFW_CheckBottom( pev, stepLand ) )
+		{
+			static int s_bot;
+
+			if( s_bot < 6 )
+			{
+				s_bot++;
+				EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
+					stepLand.x, stepLand.y, stepLand.z );
+			}
+			stepLen = 0.0f;
+		}
 		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
 		   instead of stopping on the wall. */
 		if( stepLen < 0.5f )
