@@ -1340,6 +1340,26 @@ void CRefugee::IdleThink( void )
 		}
 		if( peThink )
 		{
+		{
+			static float s_slipAt;
+			/* The roster thinks in one pump, so DAT_10132ca8 strides by
+			   that count. The count shares a factor of 2 with 0x52, and
+			   the other half never lands on the multiple (Nasir stayed
+			   idle in front of the camera while Mouhtaz walked). PE frames
+			   are shorter than the 0.1s think, so membership slips. One
+			   extra count per pump is that slip. */
+			if( s_slipAt != now )
+			{
+				static int s_slipLog;
+				s_slipAt = now;
+				s_walkTick++;
+				if( s_slipLog < 1 )
+				{
+					s_slipLog = 1;
+					EFW_DebugPrint( "walk slip tick=%d", s_walkTick );
+				}
+			}
+		}
 		s_walkTick++;
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
