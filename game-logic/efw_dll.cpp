@@ -3726,6 +3726,8 @@ static int EFW_FlyDisplace( CBasePlayer *pPlayer, const Vector &wish, Vector *ou
 	return 0;
 }
 
+static void EFW_EmitStep( CBasePlayer *pPlayer, const Vector &at, float fvol, const char *tag );
+
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
@@ -3914,6 +3916,10 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				"efw: jump impulse vz=%.0f z=%.1f floor=%.1f hv=%.0f %.0f\n",
 				s_vz, pPlayer->pev->origin.z, s_floorZ, s_hvx, s_hvy );
 			EFW_LogLine( line );
+			/* PM_Jump plays the ground step at volume 1 before the hop.
+			   A frozen pawn returns before that sound. */
+			if( !( pPlayer->pev->flags & FL_FROZEN ) )
+				EFW_EmitStep( pPlayer, pPlayer->pev->origin, 1.0f, "jump" );
 		}
 	}
 
@@ -3992,8 +3998,27 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				if( fall >= 350.0f )
 				{
 					static int s_fallLog;
+					float fvol;
+					Vector wetAt;
 
 					s_punchRoll = fall * 0.013f;
+					/* PM_CheckFalling zeros the step timer, then plays the
+					   texture again at a fall volume. 350..580 is 0.85.
+					   Past 580 is 1 and the pain sample. Water stays 0.5. */
+					pPlayer->m_flTimeStepSound = 0.0f;
+					wetAt = dest;
+					wetAt.z += 8.0f;
+					if( UTIL_PointContents( wetAt ) == CONTENTS_WATER )
+						fvol = 0.5f;
+					else if( fall > 580.0f )
+					{
+						fvol = 1.0f;
+						EMIT_SOUND_DYN( pPlayer->edict(), CHAN_VOICE,
+							"player/pl_fallpain3.wav", 1.0f, ATTN_NORM, 0, PITCH_NORM );
+					}
+					else
+						fvol = 0.85f;
+					EFW_EmitStep( pPlayer, dest, fvol, "land" );
 					if( s_fallLog < 6 )
 					{
 						s_fallLog++;
@@ -4249,6 +4274,55 @@ static char EFW_TextureType( const char *texName )
 	return 'C';
 }
 
+/* PM_PlayStepSound. The walking timer is a different call. A jump uses
+   volume 1. A landing uses the fall volume from PM_CheckFalling. */
+static void EFW_EmitStep( CBasePlayer *pPlayer, const Vector &at, float fvol, const char *tag )
+{
+	const char *texName;
+	const char *sample;
+	char texType;
+	int step;
+	int irand;
+	Vector start;
+	Vector end;
+	edict_t *world;
+	static int s_log;
+
+	if( !pPlayer || fvol <= 0.0f )
+		return;
+	start = at;
+	end = at;
+	end.z -= 64.0f;
+	world = INDEXENT( 0 );
+	texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
+	texType = EFW_TextureType( texName );
+	switch( texType )
+	{
+	case 'M': step = 1; break;
+	case 'D': step = 2; break;
+	case 'V': step = 3; break;
+	case 'G': step = 4; break;
+	case 'T': step = 5; break;
+	case 'S': step = 6; break;
+	default: step = 0; break;
+	}
+	pPlayer->m_iStepLeft = !pPlayer->m_iStepLeft;
+	irand = RANDOM_LONG( 0, 1 ) + ( pPlayer->m_iStepLeft ? 2 : 0 );
+	if( step == 5 && !RANDOM_LONG( 0, 4 ) )
+		irand = 4;
+	sample = EFW_StepSample( step, irand );
+	EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
+	if( s_log < 8 )
+	{
+		char line[192];
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: %s step %s vol=%.2f tex=%s\n",
+			tag ? tag : "play", sample, fvol, texName ? texName : "-" );
+		EFW_LogLine( line );
+	}
+}
+
 static void EFW_PrecacheSteps( void )
 {
 	static const char *kWav[] = {
@@ -4274,7 +4348,8 @@ static void EFW_PrecacheSteps( void )
 		"player/pl_wade1.wav", "player/pl_wade2.wav",
 		"player/pl_wade3.wav", "player/pl_wade4.wav",
 		"player/pl_ladder1.wav", "player/pl_ladder2.wav",
-		"player/pl_ladder3.wav", "player/pl_ladder4.wav"
+		"player/pl_ladder3.wav", "player/pl_ladder4.wav",
+		"player/pl_fallpain3.wav"
 	};
 	unsigned i;
 	for( i = 0; i < sizeof( kWav ) / sizeof( kWav[0] ); i++ )
