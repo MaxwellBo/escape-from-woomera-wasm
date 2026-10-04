@@ -1317,6 +1317,29 @@ void CRefugee::IdleThink( void )
 	}
 	else if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
 	{
+		/* vtable+8(3.0) is FUN_100196f0: nextthink = time + 3. The listen
+		   server clock never reaches that, so the host clock is the 3s.
+		   Queue names skip the call and keep the every-frame pulse. */
+		float now = EFW_HostClock();
+		int slot = ENTINDEX( edict() );
+		static float s_nextPe[512];
+		static int s_peLog;
+		int peThink = 0;
+
+		if( slot > 0 && slot < 512
+			&& ( s_nextPe[slot] <= 0.0f || now >= s_nextPe[slot] ) )
+		{
+			s_nextPe[slot] = now + 3.0f;
+			peThink = 1;
+			if( s_peLog < 4 )
+			{
+				s_peLog++;
+				EFW_DebugPrint( ">>> FUN_100196f0 +3 %s t=%.1f",
+					( tn && tn[0] ) ? tn : "?", now );
+			}
+		}
+		if( peThink )
+		{
 		s_walkTick++;
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
@@ -1353,6 +1376,26 @@ void CRefugee::IdleThink( void )
 			m_hTargetEnt = pPlayer;
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
+			/* FUN_1005d500 sits inside the % 0x52 branch. One hull step is
+			   that Move; later thinks leave the activity set and do not
+			   step again until the counter matches. */
+			{
+				float speed = EFW_NpcGroundSpeed( this );
+				float dt = EFW_HostInterval();
+				int moved;
+				static int s_peMove;
+
+				if( dt < 0.001f )
+					dt = 0.05f;
+				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+				if( s_peMove < 6 )
+				{
+					s_peMove++;
+					EFW_DebugPrint( "pe move %s moved=%d dist=%.0f origin=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", moved, dist,
+						pev->origin.x, pev->origin.y );
+				}
+			}
 		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
@@ -1402,91 +1445,11 @@ void CRefugee::IdleThink( void )
 				EFW_DebugPrint( "IdleThink movetype STEP %s", ( tn && tn[0] ) ? tn : "?" );
 			}
 		}
-	}
-	/* FUN_1005d160 anim half, then the hull step stands in for Move.
-	   The returned interval is 0 on the SetActivity think. */
-	float flInterval = EFW_AdvanceNpcAnim( this, tn );
-	/* this+0x284 is m_movementActivity. Step at the sequence ground speed. */
-	if( pPlayer && !( tn && strstr( tn, "queue" ) )
-		&& m_movementActivity == ACT_WALK && m_Activity == ACT_WALK
-		&& dist > 100.0f
-		&& m_movementGoal == MOVEGOAL_TARGETENT )
-	{
-		float speed;
-		int moved;
-
-		speed = EFW_NpcGroundSpeed( this );
-		{
-			static int s_why;
-			if( s_why < 4 )
-			{
-				s_why++;
-				EFW_DebugPrint( "step why flag=%d dt=%.3f ground=%d mi=%d",
-					s_npcStep, flInterval,
-					( pev->flags & FL_ONGROUND ) ? 1 : 0, pev->modelindex );
-			}
-		}
-		{
-			static int s_gateLog;
-			if( s_gateLog < 8 )
-			{
-				s_gateLog++;
-				EFW_DebugPrint( "IdleThink gate %s user=%d dist=%.0f spd=%.0f",
-					( tn && tn[0] ) ? tn : "?", (int)m_movementActivity, dist, speed );
-			}
-		}
-		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
-		{
-			float left = ( pPlayer->pev->origin - pev->origin ).Length();
-			static int s_approach;
-
-			if( left < 130.0f && s_approach < 3 )
-			{
-				s_approach++;
-				EFW_DebugPrint( "approach %s dist=%.0f origin=%.0f %.0f %.0f",
-					( tn && tn[0] ) ? tn : "?", left,
-					pev->origin.x, pev->origin.y, pev->origin.z );
-			}
-		}
-		if( moved && EFW_FStrEq( tn, "Amir" ) )
-		{
-			static int s_amirStep;
-			if( s_amirStep < 4 )
-			{
-				s_amirStep++;
-				EFW_DebugPrint( "seq step Amir moved=%d origin=%.0f %.0f %.0f frame=%.1f",
-					moved, pev->origin.x, pev->origin.y, pev->origin.z, pev->frame );
-			}
-		}
-		{
-			static int s_stepLog;
-			static int s_stepN;
-			static int s_sink;
-			s_stepN++;
-			if( s_stepLog < 8 )
-			{
-				s_stepLog++;
-				EFW_DebugPrint( "IdleThink step %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
-					( tn && tn[0] ) ? tn : "?", moved,
-					pev->origin.x, pev->origin.y, pev->origin.z,
-					( pPlayer->pev->origin - pev->origin ).Length() );
-			}
-			else if( s_stepN == 40 || s_stepN == 160 )
-			{
-				EFW_DebugPrint( "step late %s moved=%d origin=%.0f %.0f %.0f dist=%.0f",
-					( tn && tn[0] ) ? tn : "?", moved,
-					pev->origin.x, pev->origin.y, pev->origin.z,
-					( pPlayer->pev->origin - pev->origin ).Length() );
-			}
-			if( pev->origin.z < -1.0f && s_sink < 4 )
-			{
-				s_sink++;
-				EFW_DebugPrint( "npc sink %s z=%.0f at %.0f %.0f",
-					( tn && tn[0] ) ? tn : "?",
-					pev->origin.z, pev->origin.x, pev->origin.y );
-			}
 		}
 	}
+	/* FUN_1005d160 still runs on the frames the 3s gate skips, so the
+	   client pose does not stall between server thinks. */
+	EFW_AdvanceNpcAnim( this, tn );
 }
 
 void CRefugee::Precache( void )
