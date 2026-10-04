@@ -413,8 +413,8 @@ void EFW_ThinkHope( void )
 		hope = 100.0f;
 	EFW_SetHudFloat( 1, hope );
 	s_hopeN++;
-	if( s_hopeN == 1 || ( s_hopeN % 40 ) == 0 )
-		EFW_DebugPrint( ">>> hope %.1f time=%.2f", hope, now );
+	if( s_hopeN <= 4 || ( s_hopeN % 4 ) == 0 )
+		EFW_DebugPrint( ">>> hope %.2f elapsed=%.3f", hope, elapsed );
 	/* FUN_100c6ad0 has no latch: hope <= 0 pushes 0x4d, then
 	   FUN_100c81d0, on every think. A one-shot flag let a key clear
 	   the isolation comic and leave the yard in view. */

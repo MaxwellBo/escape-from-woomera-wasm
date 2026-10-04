@@ -1292,8 +1292,8 @@ function startHostPumps() {
       hotCapSent = hotCapLine;
     }
     pumps++;
-    if (pumps === 1 || (pumps % 80) === 0)
-      log(`listen: hostpump n=${pumps}`);
+    if (pumps <= 8 || (pumps % 10) === 0)
+      log(`listen: pumpdt ${dt.toFixed(3)} n=${pumps}`);
   }, 120);
 }
 
