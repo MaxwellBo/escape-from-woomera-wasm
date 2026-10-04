@@ -2561,7 +2561,8 @@ static void EFW_DrawIconFly( void )
    kRenderTransAlpha and UV v=1 (the opaque row) at RGB 0,0,0.
    That tri call sticks on this renderer and the next world frame is black.
    pfnFillRGBA is additive, so a black rect adds nothing. pfnFillRGBABlend
-   is the alpha fill of the same rectangle: opaque black behind the lines. */
+   replaces the framebuffer (hope ticks read back 200,0,0). An exact
+   0,0,0 fill is dropped on this host, so the opaque black row is 1,1,1. */
 static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v )
 {
 	int x, y, w, h;
@@ -2579,12 +2580,35 @@ static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v 
 	if( !s_logged )
 	{
 		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d\n", x, y, w, h );
+		gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d rgb=1,1,1\n", x, y, w, h );
 	}
 	if( gEngfuncs.pfnFillRGBABlend )
-		gEngfuncs.pfnFillRGBABlend( x, y, w, h, 0, 0, 0, 255 );
+		gEngfuncs.pfnFillRGBABlend( x, y, w, h, 1, 1, 1, 255 );
 	else
-		FillRGBA( x, y, w, h, 0, 0, 0, 255 );
+		FillRGBA( x, y, w, h, 1, 1, 1, 255 );
+}
+
+/* FUN_1001e7d0 draws with the console glyph. pfnDrawCharacter has no
+   HUD font in this mod, so the click line and the name go through
+   pfnDrawConsoleString, which is that glyph. */
+static void EFW_DrawPromptLine( int x, int y, const char *text )
+{
+	int end = x;
+	static int s_logged;
+
+	if( !text || !text[0] )
+		return;
+	if( gEngfuncs.pfnDrawSetTextColor )
+		gEngfuncs.pfnDrawSetTextColor( 1.0f, 1.0f, 1.0f );
+	if( gEngfuncs.pfnDrawConsoleString )
+		end = gEngfuncs.pfnDrawConsoleString( x, y, (char *)text );
+	else
+		end = gHUD.DrawHudString( x, y, ScreenWidth, text, 255, 255, 255 );
+	if( !s_logged )
+	{
+		s_logged = 1;
+		gEngfuncs.Con_Printf( ">>> FUN_1001e7d0 x=%d y=%d end=%d %s\n", x, y, end, text );
+	}
 }
 
 static void EFW_DrawInteractPrompt( void )
@@ -2681,8 +2705,8 @@ static void EFW_DrawInteractPrompt( void )
 	/* FUN_10046590: FUN_1001d750 from (width/2-120, height-25) to
 	   (width/2+120, height), then the click line at height-20. */
 	EFW_DrawAscaleQuad( (float)x, (float)y, (float)( x + w ), (float)ScreenHeight, 1.0f );
-	gHUD.DrawHudString( ScreenWidth / 2 - 115, ScreenHeight - 20, ScreenWidth,
-		"Click left mouse button to interact", 255, 255, 255 );
+	EFW_DrawPromptLine( ScreenWidth / 2 - 115, ScreenHeight - 20,
+		"Click left mouse button to interact" );
 	if( name[0] )
 	{
 		nameW = (int)strlen( name ) * 7;
@@ -2694,8 +2718,7 @@ static void EFW_DrawInteractPrompt( void )
 			(float)( ( ScreenWidth + nameW ) / 2 + 5 ),
 			(float)( ScreenHeight - 25 ),
 			1.0f );
-		gHUD.DrawHudString( ( ScreenWidth - nameW ) / 2, ScreenHeight - 40,
-			ScreenWidth, name, 255, 255, 255 );
+		EFW_DrawPromptLine( ( ScreenWidth - nameW ) / 2, ScreenHeight - 40, name );
 	}
 	if( strcmp( s_interact, name ) )
 	{
