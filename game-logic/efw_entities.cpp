@@ -691,8 +691,9 @@ static void EFW_NpcFall( entvars_t *pev )
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
 
 /* SV_CheckBottom. Four corners in the floor means the hull is standing.
-   A corner over a drop deeper than sv_stepsize (18) refuses the step, so
-   the chase tries another heading instead of walking off the ledge.
+   The real drop starts one step above the feet and stops one step below.
+   A floor deeper than sv_stepsize (18) is a miss, so the chase tries
+   another heading instead of walking off that curb.
    Point traces match SV_PointContents / MOVE_NOMONSTERS. */
 static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
 {
@@ -728,7 +729,8 @@ static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
 		return 1;
 	start.x = stop.x = ( mins.x + maxs.x ) * 0.5f;
 	start.y = stop.y = ( mins.y + maxs.y ) * 0.5f;
-	start.z = mins.z;
+	/* GoldSrc starts this column one step up and stops one step down. */
+	start.z = mins.z + step;
 	stop.z = start.z - 2.0f * step;
 	UTIL_TraceHull( start, stop, ignore_monsters, point_hull, ENT( pev ), &tr );
 	if( tr.fStartSolid || tr.fAllSolid || tr.flFraction >= 1.0f )
