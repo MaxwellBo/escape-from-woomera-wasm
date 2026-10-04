@@ -3234,7 +3234,6 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	Vector start;
 	Vector dest;
 	int hull;
-	int stepped;
 	int wallClip;
 	Vector wallN;
 
@@ -3243,7 +3242,6 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	start = pPlayer->pev->origin;
 	dest = start + Vector( s_hvx * slice, s_hvy * slice, 0 );
 	hull = EFW_PlayerHull( pPlayer );
-	stepped = 0;
 	wallClip = 0;
 	wallN = Vector( 0, 0, 0 );
 	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
@@ -3325,72 +3323,103 @@ static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
 	}
 	if( tr.flFraction < 1.0f )
 	{
-		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
-		if( !over.fStartSolid && over.flFraction >= 1.0f )
+		Vector hit;
+		Vector left;
+		Vector slidePos;
+		Vector stepPos;
+		float into;
+		float slideDist;
+		float stepDist;
+		int stepOk;
+		TraceResult drop;
+
+		/* PM_WalkMove tries the ground slide and the step-up, then keeps
+		   whichever went farther. A tall face blocks the raised move, so
+		   the slide wins and the hull stays on that plane. A stair whose
+		   top is open wins the same test and the hull climbs. */
+		hit = tr.vecEndPos;
+		left = dest - hit;
+		into = DotProduct( left, tr.vecPlaneNormal );
+		if( into < 0.0f )
+			left = left - tr.vecPlaneNormal * into;
+		UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( over.fStartSolid )
 		{
-			UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, hull, pPlayer->edict(), &down );
-			if( !down.fStartSolid && down.flFraction > 0.2f )
+			Vector eased = hit + tr.vecPlaneNormal * 0.03125f;
+			UTIL_TraceHull( eased, eased + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		}
+		slidePos = over.fStartSolid ? hit : over.vecEndPos;
+		slideDist = ( slidePos.x - start.x ) * ( slidePos.x - start.x )
+			+ ( slidePos.y - start.y ) * ( slidePos.y - start.y );
+		stepOk = 0;
+		stepPos = slidePos;
+		stepDist = -1.0f;
+		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( !over.fStartSolid && !over.fAllSolid )
+		{
+			Vector raised = over.vecEndPos;
+			Vector fwdEnd( dest.x, dest.y, raised.z );
+
+			UTIL_TraceHull( raised, fwdEnd, dont_ignore_monsters, hull, pPlayer->edict(), &down );
+			if( !down.fStartSolid && down.flFraction > 0.0f )
 			{
-				TraceResult drop;
-				UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
-				if( !drop.fStartSolid )
+				Vector dropEnd = down.vecEndPos;
+				dropEnd.z -= 18.0f;
+				UTIL_TraceHull( down.vecEndPos, dropEnd, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
+				if( !drop.fStartSolid && !drop.fAllSolid
+					&& drop.flFraction < 1.0f
+					&& drop.vecPlaneNormal.z >= 0.7f )
 				{
-					dest = drop.vecEndPos;
-					stepped = 1;
+					stepPos = drop.vecEndPos;
+					stepDist = ( stepPos.x - start.x ) * ( stepPos.x - start.x )
+						+ ( stepPos.y - start.y ) * ( stepPos.y - start.y );
+					stepOk = 1;
 				}
 			}
 		}
-		if( !stepped )
+		/* A tie keeps the step, matching downdist > updist. */
+		if( stepOk && stepDist >= slideDist )
 		{
-			Vector hit = tr.vecEndPos;
-			Vector left = dest - hit;
-			float into = DotProduct( left, tr.vecPlaneNormal );
-			if( into < 0.0f )
-				left = left - tr.vecPlaneNormal * into;
-			left = left + tr.vecPlaneNormal;
-			UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
-			if( over.fStartSolid )
-				return 0;
-			dest = over.vecEndPos;
-			/* PM_ClipVelocity overbounce 1. The 4-unit stand-off keeps a
-			   slide out of the plane. A head-on stop has no speed left
-			   along the wall, and that same nudge was walking the hull
-			   back out so the next slice hit the face again. */
+			dest = stepPos;
+		}
+		else
+		{
+			static int s_farLog;
+			static int s_holdLog;
+			float cx;
+			float cy;
+			float intoV;
+			float slide;
+
+			dest = slidePos;
 			wallClip = 1;
 			wallN = tr.vecPlaneNormal;
+			cx = s_hvx;
+			cy = s_hvy;
+			intoV = cx * wallN.x + cy * wallN.y;
+			if( intoV < 0.0f )
 			{
-				float cx = s_hvx;
-				float cy = s_hvy;
-				float intoV = cx * wallN.x + cy * wallN.y;
-				float slide;
-				if( intoV < 0.0f )
-				{
-					cx -= intoV * wallN.x;
-					cy -= intoV * wallN.y;
-				}
-				slide = sqrtf( cx * cx + cy * cy );
-				if( slide > 1.0f
-					&& wallN.z < 0.5f && wallN.z > -0.5f )
-				{
-					TraceResult gap;
-					Vector back = dest + wallN * 4.0f;
-					UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
-					if( !gap.fStartSolid )
-						dest = gap.vecEndPos;
-				}
-				else if( slide <= 1.0f )
-				{
-					static int s_holdLog;
-					if( s_holdLog < 6 )
-					{
-						char line[128];
-						s_holdLog++;
-						snprintf( line, sizeof( line ),
-							"efw: wall hold at %.0f %.0f z=%.1f\n",
-							dest.x, dest.y, dest.z );
-						EFW_LogLine( line );
-					}
-				}
+				cx -= intoV * wallN.x;
+				cy -= intoV * wallN.y;
+			}
+			slide = sqrtf( cx * cx + cy * cy );
+			if( stepOk && s_farLog < 6 && slide > 1.0f )
+			{
+				char line[160];
+				s_farLog++;
+				snprintf( line, sizeof( line ),
+					"efw: wall farther slide=%.2f step=%.2f at %.0f %.0f\n",
+					sqrtf( slideDist ), sqrtf( stepDist ), dest.x, dest.y );
+				EFW_LogLine( line );
+			}
+			else if( slide <= 1.0f && s_holdLog < 6 )
+			{
+				char line[128];
+				s_holdLog++;
+				snprintf( line, sizeof( line ),
+					"efw: wall hold at %.0f %.0f z=%.1f\n",
+					dest.x, dest.y, dest.z );
+				EFW_LogLine( line );
 			}
 		}
 	}
