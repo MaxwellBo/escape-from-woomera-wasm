@@ -1279,8 +1279,8 @@ void CRefugee::IdleThink( void )
 	   the deadflag==2 path after it zeroes the box. The link virtual is
 	   the base abs box, so this write is the hull the player stops on. */
 	EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
-	   every ServerFrame (same function; denser ticks). */
+	/* FUN_1005d160 ends IdleThink with vtable+8(0.1), overwriting the
+	   earlier +3. Frozen sv.time never reaches it, so the pulse is the think. */
 	pev->nextthink = gpGlobals->time;
 	if( !pev->modelindex )
 		return;
@@ -1317,9 +1317,9 @@ void CRefugee::IdleThink( void )
 	}
 	else if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
 	{
-		/* vtable+8(3.0) is FUN_100196f0: nextthink = time + 3. The listen
-		   server clock never reaches that, so the host clock is the 3s.
-		   Queue names skip the call and keep the every-frame pulse. */
+		/* IdleThink pushes 3.0 through vtable+8, then FUN_1005d160
+		   pushes 0.1 and that write is the one left in nextthink.
+		   Queue names never enter this branch. */
 		float now = EFW_HostClock();
 		int slot = ENTINDEX( edict() );
 		static float s_nextPe[512];
@@ -1329,12 +1329,12 @@ void CRefugee::IdleThink( void )
 		if( slot > 0 && slot < 512
 			&& ( s_nextPe[slot] <= 0.0f || now >= s_nextPe[slot] ) )
 		{
-			s_nextPe[slot] = now + 3.0f;
+			s_nextPe[slot] = now + 0.1f;
 			peThink = 1;
 			if( s_peLog < 4 )
 			{
 				s_peLog++;
-				EFW_DebugPrint( ">>> FUN_100196f0 +3 %s t=%.1f",
+				EFW_DebugPrint( ">>> FUN_1005d160 +0.1 %s t=%.1f",
 					( tn && tn[0] ) ? tn : "?", now );
 			}
 		}
@@ -1376,9 +1376,8 @@ void CRefugee::IdleThink( void )
 			m_hTargetEnt = pPlayer;
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
-			/* FUN_1005d500 sits inside the % 0x52 branch. One hull step is
-			   that Move; later thinks leave the activity set and do not
-			   step again until the counter matches. */
+			/* FUN_1005d500 is this first Move. Later thinks keep stepping
+			   from FUN_1005d160 while the goal stays in the 100..300 band. */
 			{
 				float speed = EFW_NpcGroundSpeed( this );
 				float dt = EFW_HostInterval();
@@ -1435,6 +1434,30 @@ void CRefugee::IdleThink( void )
 				}
 			}
 		}
+		else if( m_movementGoal == MOVEGOAL_TARGETENT
+			&& m_movementActivity == ACT_WALK
+			&& dist > 100.0f && dist < 300.0f )
+		{
+			/* FUN_1005d160 calls vtable+0x154 (0x1005f200) on every think
+			   once the modulo branch has stored the target goal. That is
+			   the rest of the walk. Move() itself stalls, so one hull
+			   step is that call. */
+			float speed = EFW_NpcGroundSpeed( this );
+			float dt = EFW_HostInterval();
+			int moved;
+			static int s_follow;
+
+			if( dt < 0.001f )
+				dt = 0.05f;
+			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+			if( s_follow < 8 )
+			{
+				s_follow++;
+				EFW_DebugPrint( "pe follow %s moved=%d dist=%.0f origin=%.0f %.0f",
+					( tn && tn[0] ) ? tn : "?", moved, dist,
+					pev->origin.x, pev->origin.y );
+			}
+		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
 		pev->movetype = MOVETYPE_STEP;
 		{
@@ -1447,8 +1470,8 @@ void CRefugee::IdleThink( void )
 		}
 		}
 	}
-	/* FUN_1005d160 still runs on the frames the 3s gate skips, so the
-	   client pose does not stall between server thinks. */
+	/* FUN_1005d160 still advances the pose on the pulses the 0.1s
+	   gate skips, so the client frame does not stall. */
 	EFW_AdvanceNpcAnim( this, tn );
 }
 
