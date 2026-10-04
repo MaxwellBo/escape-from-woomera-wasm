@@ -954,7 +954,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	landed = start;
 	moved = 0.0f;
 	chunks = 0;
-	while( total > 0.001f && chunks < 8 )
+	/* MoveExecute spends the wish in 16-unit steps with no chunk cap.
+	   Eight chunks is 128 units: walk speed 64 across the 2s pump clamp.
+	   A run is faster, so the rest of that wish never landed. 40 chunks
+	   is 640 units, which still covers the clamp at a run. */
+	while( total > 0.001f && chunks < 40 )
 	{
 		Vector wish;
 		Vector end;
@@ -1111,6 +1115,16 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		{
 			s_exec++;
 			EFW_DebugPrint( "move execute run iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
+				dt, speed, speed * dt, moved, chunks );
+		}
+	}
+	if( chunks > 8 )
+	{
+		static int s_long;
+		if( s_long < 8 )
+		{
+			s_long++;
+			EFW_DebugPrint( "move execute long iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
 				dt, speed, speed * dt, moved, chunks );
 		}
 	}
