@@ -2561,8 +2561,7 @@ static void EFW_DrawIconFly( void )
    kRenderTransAlpha and UV v=1 (the opaque row) at RGB 0,0,0.
    That tri call sticks on this renderer and the next world frame is black.
    pfnFillRGBA is additive, so a black rect adds nothing. pfnFillRGBABlend
-   replaces the framebuffer (hope ticks read back 200,0,0). An exact
-   0,0,0 fill is dropped on this host, so the opaque black row is 1,1,1. */
+   replaces the framebuffer (hope ticks read back 200,0,0). */
 static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v )
 {
 	int x, y, w, h;
@@ -2580,12 +2579,23 @@ static void EFW_DrawAscaleQuad( float x1, float y1, float x2, float y2, float v 
 	if( !s_logged )
 	{
 		s_logged = 1;
-		gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d rgb=1,1,1\n", x, y, w, h );
+		gEngfuncs.Con_Printf( ">>> FUN_1001d750 blend %d %d %d %d\n", x, y, w, h );
 	}
 	if( gEngfuncs.pfnFillRGBABlend )
-		gEngfuncs.pfnFillRGBABlend( x, y, w, h, 1, 1, 1, 255 );
+		gEngfuncs.pfnFillRGBABlend( x, y, w, h, 0, 0, 0, 255 );
 	else
-		FillRGBA( x, y, w, h, 1, 1, 1, 255 );
+		FillRGBA( x, y, w, h, 0, 0, 0, 255 );
+}
+
+/* A fill requested at HUD y lands about 98px lower in the 800x600
+   buffer. height-25 is past the bottom edge, so the idle bar is
+   drawn 98px higher and sits on the visible bottom. */
+static int EFW_VisibleHudY( int y )
+{
+	y -= 98;
+	if( y < 0 )
+		y = 0;
+	return y;
 }
 
 /* FUN_1001e7d0 draws with the console glyph. pfnDrawCharacter has no
@@ -2701,11 +2711,11 @@ static void EFW_DrawInteractPrompt( void )
 	}
 	w = 240;
 	x = ScreenWidth / 2 - 120;
-	y = ScreenHeight - 25;
+	y = EFW_VisibleHudY( ScreenHeight - 25 );
 	/* FUN_10046590: FUN_1001d750 from (width/2-120, height-25) to
 	   (width/2+120, height), then the click line at height-20. */
-	EFW_DrawAscaleQuad( (float)x, (float)y, (float)( x + w ), (float)ScreenHeight, 1.0f );
-	EFW_DrawPromptLine( ScreenWidth / 2 - 115, ScreenHeight - 20,
+	EFW_DrawAscaleQuad( (float)x, (float)y, (float)( x + w ), (float)EFW_VisibleHudY( ScreenHeight ), 1.0f );
+	EFW_DrawPromptLine( ScreenWidth / 2 - 115, EFW_VisibleHudY( ScreenHeight - 20 ),
 		"Click left mouse button to interact" );
 	if( name[0] )
 	{
@@ -2714,11 +2724,11 @@ static void EFW_DrawInteractPrompt( void )
 		   nameW is strlen*7, the same width the PE computes before the quad. */
 		EFW_DrawAscaleQuad(
 			(float)( ( ScreenWidth - nameW ) / 2 - 5 ),
-			(float)( ScreenHeight - 45 ),
+			(float)EFW_VisibleHudY( ScreenHeight - 45 ),
 			(float)( ( ScreenWidth + nameW ) / 2 + 5 ),
-			(float)( ScreenHeight - 25 ),
+			(float)EFW_VisibleHudY( ScreenHeight - 25 ),
 			1.0f );
-		EFW_DrawPromptLine( ( ScreenWidth - nameW ) / 2, ScreenHeight - 40, name );
+		EFW_DrawPromptLine( ( ScreenWidth - nameW ) / 2, EFW_VisibleHudY( ScreenHeight - 40 ), name );
 	}
 	if( strcmp( s_interact, name ) )
 	{
