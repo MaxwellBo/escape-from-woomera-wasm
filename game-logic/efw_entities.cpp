@@ -2334,6 +2334,29 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 					break;
 				}
 			}
+			/* The +X step leaves the desk and the tarp. Map yaw 180
+			   looks back along -X into that cover, so the open side
+			   meets the back. Face +X. The gate guard's yaw 270 looks
+			   along the gate, not into the tarp, and stays. */
+			if( s_stood[slot] && slot != 2 )
+			{
+				float yaw = pev->angles.y;
+				while( yaw < 0.0f )
+					yaw += 360.0f;
+				while( yaw >= 360.0f )
+					yaw -= 360.0f;
+				if( yaw > 1.0f )
+				{
+					static int s_face;
+					pev->angles.y = 0.0f;
+					pev->ideal_yaw = 0.0f;
+					if( s_face < 2 )
+					{
+						s_face++;
+						EFW_DebugPrint( "officer face %s yaw=0", tn );
+					}
+				}
+			}
 			pev->movetype = MOVETYPE_NONE;
 			pev->velocity = Vector( 0, 0, 0 );
 			/* FUN_1000d1d0 calls vtable+0x134, MonsterInit. StartMonster
