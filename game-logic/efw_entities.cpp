@@ -5,12 +5,15 @@
 #include "cbase.h"
 #include "monsters.h"
 #include "activity.h"
+#include "animation.h"
 #include "player.h"
+#include "game.h"
 #include "efw_dll.h"
 #include "studio.h"
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 static int g_refugeeCount;
 
@@ -50,6 +53,16 @@ static int EFW_NameIs( const char *tn, const char *a )
 	if( !tn || !a )
 		return 0;
 	return !stricmp( tn, a );
+}
+
+/* FUN_1000d1d0 is monster_barney slot 10. efw_electrician is
+   models/tradesman.mdl. Kitchen_Guard, the officers, and the unmatched
+   default are models/security.mdl. */
+const char *EFW_BarneyStudio( const char *targetname )
+{
+	if( targetname && targetname[0] && !stricmp( targetname, "efw_electrician" ) )
+		return "models/tradesman.mdl";
+	return "models/Security.mdl";
 }
 
 void EFW_OverrideNpcModel( CBaseEntity *pEntity )
@@ -92,12 +105,11 @@ public:
 	void Precache( void );
 	void SetYawSpeed( void );
 	int Classify( void );
-	void SetObjectCollisionBox( void ); /* FUN_100c6320 */
+	void SetObjectCollisionBox( void ); /* base abs box; FUN_100c6320 is unreferenced */
 	int ObjectCaps( void ) { return CBaseMonster::ObjectCaps() | FCAP_IMPULSE_USE; }
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT IdleThink( void );
-	int m_iWalkState; /* this+0x284: 3 = walking toward player */
 };
 
 LINK_ENTITY_TO_CLASS( monster_refugee, CRefugee )
@@ -115,55 +127,47 @@ int CRefugee::Classify( void )
 	return CLASS_HUMAN_PASSIVE; /* FUN_100c6310 returns 3 */
 }
 
+/* SV_LinkEdict calls this, then inserts the edict using absmin/absmax.
+   UTIL_SetSize from here goes pfnSetSize → SV_LinkEdict → this again and
+   the frame never presents. Write the same mins the original SET_SIZE
+   would, and the abs box CBaseEntity::SetObjectCollisionBox writes. */
+static void EFW_WriteLinkedHull( entvars_t *pev, const Vector &mins, const Vector &maxs )
+{
+	pev->mins = mins;
+	pev->maxs = maxs;
+	pev->size = maxs - mins;
+	pev->absmin = pev->origin + mins;
+	pev->absmax = pev->origin + maxs;
+	pev->absmin.x -= 1;
+	pev->absmin.y -= 1;
+	pev->absmin.z -= 1;
+	pev->absmax.x += 1;
+	pev->absmax.y += 1;
+	pev->absmax.z += 1;
+}
+
 void CRefugee::SetObjectCollisionBox( void )
 {
-	/* FUN_100c6320: GET_MODEL_PTR, sequence hull at seqdesc+0x60/+0x6c.
-	   Spawn still hardcodes -16/-16/0 .. 16/16/72; only trust the studio
-	   bbox when the header is IDST and the box is finite. */
-	studiohdr_t *hdr;
-	mstudioseqdesc_t *seq;
-	int index;
-	int i;
-	Vector mins, maxs;
-	{
-		static int s_hull;
-		if( !s_hull )
-		{
-			s_hull = 1;
-			EFW_DebugPrint( ">>> FUN_100c6320" );
-		}
-	}
-
-	hdr = (studiohdr_t *)GET_MODEL_PTR( ENT( pev ) );
-	if( !hdr || hdr->ident != IDSTUDIOHEADER || hdr->numseq <= 0 || hdr->seqindex <= 0 )
-	{
-		UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-		return;
-	}
-	index = pev->sequence;
-	if( index < 0 || index >= hdr->numseq )
-		index = 0;
-	seq = (mstudioseqdesc_t *)( (unsigned char *)hdr + hdr->seqindex ) + index;
-	mins = Vector( seq->bbmin[0], seq->bbmin[1], seq->bbmin[2] );
-	maxs = Vector( seq->bbmax[0], seq->bbmax[1], seq->bbmax[2] );
-	for( i = 0; i < 3; i++ )
-	{
-		if( mins[i] < -128.0f )
-			mins[i] = -128.0f;
-		if( maxs[i] > 128.0f )
-			maxs[i] = 128.0f;
-		if( mins[i] > maxs[i] )
-		{
-			UTIL_SetSize( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
-			return;
-		}
-	}
-	UTIL_SetSize( pev, mins, maxs );
+	/* IdleThink 0x100c6440 calls SET_SIZE (-16,-16,0)-(16,16,72) every
+	   think. FUN_100c6320 would replace that with the raw sequence bbox,
+	   but it has no vtable slot and no callers, so the link keeps the
+	   standing box. Writing it here avoids pfnSetSize re-entering the think. */
+	EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
 }
 
 void CRefugee::SetYawSpeed( void )
 {
-	pev->yaw_speed = 90;
+	/* 0x1000cde0, shared with patrol and barney. Idle and walk are 70,
+	   run is 90, and every other activity falls through to 70. */
+	switch( m_Activity )
+	{
+	case ACT_RUN:
+		pev->yaw_speed = 90;
+		break;
+	default:
+		pev->yaw_speed = 70;
+		break;
+	}
 }
 
 void CRefugee::HandleAnimEvent( MonsterEvent_t *pEvent )
@@ -177,12 +181,1087 @@ void CRefugee::TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE 
 		EFW_StartTalk( (CBasePlayer *)pActivator, this );
 }
 
+/* Set while the hull trace is on the stack. Cleared before any link.
+   SET_ORIGIN from inside the think re-enters IdleThink until the host
+   pump faults, so the think only records the origin. StartFrame links
+   the queue after the pulse returns. */
+static volatile int s_npcStep;
+static volatile int s_linkDepth;
+static edict_t *s_linkEdict[48];
+static Vector s_linkOrigin[48];
+static int s_linkN;
+
+/* A link that re-enters the pump used to leave this guard set, and every
+   later think skipped the hull step. The pulse is the think, so the guard
+   comes down here. s_linkDepth stays up so the re-entered pump does not
+   start a second link. */
+void EFW_BeginNpcPulse( void )
+{
+	if( !s_npcStep )
+		return;
+	s_npcStep = 0;
+	{
+		static int s_clear;
+		if( s_clear < 3 )
+		{
+			s_clear++;
+			EFW_DebugPrint( "npc step flag cleared depth=%d", s_linkDepth );
+		}
+	}
+}
+
+static void EFW_QueueOrigin( entvars_t *pev, const Vector &org )
+{
+	edict_t *e;
+	int i;
+
+	if( !pev )
+		return;
+	pev->origin = org;
+	e = ENT( pev );
+	if( !e )
+		return;
+	for( i = 0; i < s_linkN; i++ )
+	{
+		if( s_linkEdict[i] == e )
+		{
+			s_linkOrigin[i] = org;
+			return;
+		}
+	}
+	if( s_linkN >= (int)( sizeof( s_linkEdict ) / sizeof( s_linkEdict[0] ) ) )
+		return;
+	s_linkEdict[s_linkN] = e;
+	s_linkOrigin[s_linkN] = org;
+	s_linkN++;
+}
+
+void EFW_LinkNpcBody( edict_t *pent )
+{
+	if( !pent || pent->free )
+		return;
+	/* Spawn left SOLID_NOT, and SV_LinkEdict never ran again. A hull trace
+	   only tests edicts in the area nodes, so a queue that never steps is
+	   a ghost. The same queue FlushNpcOrigins already drains links a
+	   walker after the first move. */
+	EFW_QueueOrigin( &pent->v, pent->v.origin );
+}
+
+void EFW_FlushNpcOrigins( void )
+{
+	edict_t *queued[48];
+	Vector origins[48];
+	int n;
+	int i;
+
+	n = s_linkN;
+	if( n <= 0 )
+		return;
+	/* Already inside UTIL_SetOrigin. Leave the queue for the outer link. */
+	if( s_linkDepth )
+		return;
+	if( n > 48 )
+		n = 48;
+	for( i = 0; i < n; i++ )
+	{
+		queued[i] = s_linkEdict[i];
+		origins[i] = s_linkOrigin[i];
+	}
+	/* Moves queued by a touch during the link wait until the next pump. */
+	s_linkN = 0;
+	for( i = 0; i < n; i++ )
+	{
+		if( !queued[i] || queued[i]->free )
+			continue;
+		s_linkDepth++;
+		UTIL_SetOrigin( &queued[i]->v, origins[i] );
+		s_linkDepth--;
+	}
+}
+
+/* TraceMonsterHull does not see hull-1 floors. Mouhtaz landed on the
+   kitchen at z=6, then the next step dropped him to z=-42 while a
+   player hull at the same spot still stops at z=42. The feet box
+   (-16,-16,0)-(16,16,72) is that player hull stood on the feet, so
+   the trace origin is 36 above the feet. End positions come back in
+   feet space. */
+static void EFW_TraceFeetHull( entvars_t *pev, const Vector &start, const Vector &end, TraceResult *tr, IGNORE_MONSTERS igmon = ignore_monsters )
+{
+	Vector a;
+	Vector b;
+
+	a = start;
+	b = end;
+	a.z += 36.0f;
+	b.z += 36.0f;
+	*tr = TraceResult();
+	UTIL_TraceHull( a, b, igmon, human_hull, ENT( pev ), tr );
+	tr->vecEndPos.z -= 36.0f;
+}
+
+/* A blocked MOVE_NORMAL step stops on another solid body. A BSP hit is a
+   wall or a stair, and the step-size landing still applies there. */
+static int EFW_TraceHitBody( entvars_t *pev, const TraceResult *tr )
+{
+	edict_t *hit;
+
+	if( !tr )
+		return 0;
+	if( !tr->fStartSolid && !tr->fAllSolid && tr->flFraction >= 1.0f )
+		return 0;
+	hit = tr->pHit;
+	if( !hit || ( pev && hit == ENT( pev ) ) )
+		return 0;
+	if( hit->free )
+		return 0;
+	if( hit->v.solid == SOLID_BSP )
+		return 0;
+	return 1;
+}
+
+/* SV_MoveStep: stand the hull on the floor within sv_stepsize (18, set in
+   CWorld::Precache). Raise the candidate by that, drop twice that, and
+   take the hit. MOVE_TO_ORIGIN is the engine call that stalls with
+   WALK_MOVE, so this is the same test with the feet hull. */
+static int EFW_LandMonster( entvars_t *pev, const Vector &pos, Vector *out )
+{
+	TraceResult tr;
+	Vector top;
+	Vector bot;
+	const float step = 18.0f;
+
+	top = pos;
+	bot = pos;
+	top.z += step;
+	bot.z -= step;
+	EFW_TraceFeetHull( pev, top, bot, &tr );
+	/* The raised hull is in the ceiling. Retry from the candidate z. */
+	if( tr.fStartSolid || tr.fAllSolid )
+	{
+		top = pos;
+		EFW_TraceFeetHull( pev, top, bot, &tr );
+	}
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
+		return 0;
+	*out = tr.vecEndPos;
+	return 1;
+}
+
+/* 1 = floor within 2, 0 = air, -1 = hull still in solid.
+   mins.z is lifted to 1 so feet resting on the floor are not startsolid.
+   A 4-unit probe treated the middle of a fall as ground and the hull
+   walked before it landed. */
+static int EFW_ProbeSupport( entvars_t *pev )
+{
+	TraceResult tr;
+	Vector down;
+	float saved;
+
+	saved = pev->mins.z;
+	if( saved < 1.0f )
+		pev->mins.z = 1.0f;
+	down = pev->origin;
+	down.z -= 2.0f;
+	EFW_TraceFeetHull( pev, pev->origin, down, &tr );
+	pev->mins.z = saved;
+	if( tr.fStartSolid || tr.fAllSolid )
+		return -1;
+	if( tr.flFraction < 1.0f )
+		return 1;
+	return 0;
+}
+
+/* SV_Physics_Step applies sv_gravity (800) before the think. MOVE_TO_ORIGIN
+   then refuses to walk unless FL_ONGROUND is set. frametime is stuck, so
+   the engine never integrates that fall. Host-interval gravity lands the
+   hull; the step below stays put until the floor is under it. */
+static void EFW_NpcFall( entvars_t *pev )
+{
+	int support;
+	float dt;
+	float grav;
+	float z0;
+	Vector end;
+	TraceResult tr;
+
+	if( !pev || !pev->modelindex || s_npcStep )
+		return;
+	if( pev->movetype == MOVETYPE_NONE )
+		return;
+	if( pev->flags & ( FL_FLY | FL_SWIM ) )
+		return;
+	s_npcStep = 1;
+	support = EFW_ProbeSupport( pev );
+	{
+		Vector chest;
+		Vector tip;
+		TraceResult mid;
+		const char *tn = STRING( pev->targetname );
+		static int s_roster;
+		int chestSolid;
+
+		/* Hull 1 can stand on a floor the point hull never sees, with the
+		   torso still inside the office slab. The hat is the only part
+		   that clears that slab. A point at the chest is inside it. */
+		chest = pev->origin;
+		chest.z += 40.0f;
+		tip = chest;
+		tip.z += 0.1f;
+		UTIL_TraceHull( chest, tip, ignore_monsters, point_hull, ENT( pev ), &mid );
+		chestSolid = ( mid.fStartSolid || mid.fAllSolid ) ? 1 : 0;
+		if( s_roster < 3 && tn && !strcmp( tn, "Roster_Officer" ) )
+		{
+			s_roster++;
+			EFW_DebugPrint( "npc roster support=%d chest=%d z=%.0f",
+				support, chestSolid, pev->origin.z );
+		}
+		if( chestSolid && support >= 0 )
+			support = -1;
+	}
+	if( support == 1 )
+	{
+		const char *tn = STRING( pev->targetname );
+
+		/* Point samples above the roster officer are air, and hull 1
+		   reports a floor at the map origin. The player stands on the
+		   office floor in that same room. A feet-hull drop from above
+		   his chest is that floor. Other monsters stay on the floor
+		   the probe already found. */
+		if( tn && !strcmp( tn, "Roster_Officer" ) )
+		{
+			Vector top;
+			Vector bot;
+			TraceResult tr;
+			float raise;
+
+			for( raise = 48.0f; raise <= 96.0f; raise += 16.0f )
+			{
+				top = pev->origin;
+				bot = pev->origin;
+				top.z += raise;
+				EFW_TraceFeetHull( pev, top, bot, &tr );
+				{
+					static int s_drop;
+					if( s_drop < 6 )
+					{
+						s_drop++;
+						EFW_DebugPrint( "npc roster drop raise=%.0f solid=%d frac=%.2f z=%.0f",
+							raise,
+							( tr.fStartSolid || tr.fAllSolid ) ? 1 : 0,
+							tr.flFraction, tr.vecEndPos.z );
+					}
+				}
+				if( tr.fStartSolid || tr.fAllSolid )
+					continue;
+				if( tr.flFraction < 1.0f && tr.vecEndPos.z > pev->origin.z + 8.0f )
+				{
+					Vector stood;
+					stood = pev->origin;
+					stood.z = tr.vecEndPos.z;
+					s_npcStep = 0;
+					pev->flags |= FL_ONGROUND;
+					pev->velocity.z = 0.0f;
+					EFW_QueueOrigin( pev, stood );
+					return;
+				}
+			}
+		}
+		s_npcStep = 0;
+		pev->flags |= FL_ONGROUND;
+		pev->velocity.z = 0.0f;
+		return;
+	}
+	if( support < 0 )
+	{
+		Vector feet;
+		Vector head;
+		TraceResult buried;
+		int dz;
+
+		/* A low ceiling makes the tall hull startsolid while the feet are
+		   already on the floor. Climbing out of that lands on the bunk.
+		   A point 8 units up is in the air there, and a point dropped from
+		   it hits the floor within a step, so the origin stays.
+		   StartMonster's DROP_TO_FLOOR never runs: that call stalls the
+		   studio bind. The roster office floor is a slab above the map
+		   origin. The same startsolid leaves the body in the gap under
+		   that slab, where the point at the feet is air and the floor is
+		   not below it. Step up through the solid, then stand the tall
+		   hull on the surface that comes out the top. */
+		feet = pev->origin;
+		head = pev->origin;
+		feet.z += 8.0f;
+		head.z += 8.1f;
+		UTIL_TraceHull( feet, head, ignore_monsters, point_hull, ENT( pev ), &buried );
+		{
+			Vector chest;
+			TraceResult mid;
+
+			/* The hat is the only part that clears a floor slab. A point
+			   at the chest is inside that slab, and it is still in the
+			   air under a bunk. */
+			chest = pev->origin;
+			chest.z += 40.0f;
+			head = chest;
+			head.z += 0.1f;
+			UTIL_TraceHull( chest, head, ignore_monsters, point_hull, ENT( pev ), &mid );
+			if( mid.fStartSolid || mid.fAllSolid )
+				buried.fStartSolid = 1;
+		}
+		head = feet;
+		head.z += 0.1f;
+		if( !buried.fStartSolid && !buried.fAllSolid )
+		{
+			Vector drop;
+			TraceResult below;
+
+			drop = feet;
+			drop.z -= 48.0f;
+			UTIL_TraceHull( feet, drop, ignore_monsters, point_hull, ENT( pev ), &below );
+			if( !below.fStartSolid && !below.fAllSolid && below.flFraction < 1.0f
+				&& ( feet.z - below.vecEndPos.z ) <= 18.0f )
+			{
+				static int s_ceil;
+				const char *tn = STRING( pev->targetname );
+
+				if( s_ceil < 6 )
+				{
+					s_ceil++;
+					EFW_DebugPrint( "npc ceiling %s drop=%.0f z=%.0f",
+						( tn && tn[0] ) ? tn : "?",
+						feet.z - below.vecEndPos.z, pev->origin.z );
+				}
+				s_npcStep = 0;
+				pev->flags &= ~FL_ONGROUND;
+				return;
+			}
+		}
+		{
+			int seenSolid = ( buried.fStartSolid || buried.fAllSolid ) ? 1 : 0;
+
+			for( dz = 4; dz <= 160; dz += 4 )
+			{
+				Vector test;
+				Vector stood;
+				TraceResult up;
+
+				test = pev->origin;
+				test.z += (float)dz + 8.0f;
+				head = test;
+				head.z += 0.1f;
+				UTIL_TraceHull( test, head, ignore_monsters, point_hull, ENT( pev ), &up );
+				if( up.fStartSolid || up.fAllSolid )
+				{
+					seenSolid = 1;
+					continue;
+				}
+				if( !seenSolid )
+					continue;
+				test.z -= 8.0f;
+				/* LandMonster uses hull 1. That hull falls through the
+				   office slab onto the floor under it. A drop of more
+				   than one step means the surface the point just left
+				   is the one to stand on. */
+				if( EFW_LandMonster( pev, test, &stood ) && ( test.z - stood.z ) <= 18.0f )
+					test = stood;
+				else
+				{
+					Vector drop;
+					TraceResult skin;
+
+					drop = test;
+					drop.z -= 24.0f;
+					UTIL_TraceHull( test, drop, ignore_monsters, point_hull, ENT( pev ), &skin );
+					if( !skin.fStartSolid && !skin.fAllSolid && skin.flFraction < 1.0f
+						&& ( test.z - skin.vecEndPos.z ) <= 18.0f )
+						test.z = skin.vecEndPos.z;
+				}
+				{
+					static int s_unbury;
+					const char *tn = STRING( pev->targetname );
+					if( s_unbury < 8 )
+					{
+						s_unbury++;
+						EFW_DebugPrint( "npc unbury %s z=%.0f -> %.0f at %.0f %.0f",
+							( tn && tn[0] ) ? tn : "?",
+							pev->origin.z, test.z, test.x, test.y );
+					}
+				}
+				s_npcStep = 0;
+				pev->flags |= FL_ONGROUND;
+				pev->velocity.z = 0.0f;
+				EFW_QueueOrigin( pev, test );
+				return;
+			}
+		}
+		s_npcStep = 0;
+		pev->flags &= ~FL_ONGROUND;
+		return;
+	}
+	/* The 2-unit probe only looks down. Feet already at or under the
+	   surface read as air, and one gravity step (800*dt^2) is a
+	   fraction==1 teleport through that floor. LandMonster also looks
+	   up one step. A floor there means the hull is standing: set
+	   FL_ONGROUND and leave the origin alone. Linking here re-enters
+	   the think and overflows the host pump. */
+	{
+		Vector stood;
+
+		if( EFW_LandMonster( pev, pev->origin, &stood ) )
+		{
+			float drop = pev->origin.z - stood.z;
+
+			if( drop <= 1.0f )
+			{
+				static int s_stand;
+
+				s_npcStep = 0;
+				pev->flags |= FL_ONGROUND;
+				pev->velocity.z = 0.0f;
+				if( s_stand < 8 )
+				{
+					s_stand++;
+					EFW_DebugPrint( "npc stand z=%.0f floor=%.0f at %.0f %.0f",
+						pev->origin.z, stood.z, pev->origin.x, pev->origin.y );
+				}
+				return;
+			}
+		}
+	}
+	pev->flags &= ~FL_ONGROUND;
+	dt = EFW_HostInterval();
+	grav = 800.0f;
+	if( pev->gravity > 0.0f )
+		grav *= pev->gravity;
+	pev->velocity.z -= grav * dt;
+	if( pev->velocity.z < -2000.0f )
+		pev->velocity.z = -2000.0f;
+	z0 = pev->origin.z;
+	end = pev->origin;
+	end.z += pev->velocity.z * dt;
+	EFW_TraceFeetHull( pev, pev->origin, end, &tr );
+	s_npcStep = 0;
+	if( tr.fStartSolid || tr.fAllSolid )
+		return;
+	if( tr.flFraction < 1.0f && tr.flFraction > 0.0f )
+	{
+		end = tr.vecEndPos;
+		pev->velocity.z = 0.0f;
+		pev->flags |= FL_ONGROUND;
+		{
+			static int s_land;
+			float dz = end.z - z0;
+			if( dz < 0.0f )
+				dz = -dz;
+			if( dz >= 1.0f && s_land < 6 )
+			{
+				s_land++;
+				EFW_DebugPrint( "npc land z=%.0f -> %.0f at %.0f %.0f",
+					z0, end.z, end.x, end.y );
+			}
+		}
+		EFW_QueueOrigin( pev, end );
+		return;
+	}
+	{
+		static int s_fall;
+		float dz = end.z - z0;
+		if( dz < 0.0f )
+			dz = -dz;
+		if( dz >= 1.0f && s_fall < 6 )
+		{
+			s_fall++;
+			EFW_DebugPrint( "npc fall z=%.0f -> %.0f at %.0f %.0f",
+				z0, end.z, end.x, end.y );
+		}
+	}
+	EFW_QueueOrigin( pev, end );
+}
+
+/* FUN_1005d500 / MoveExecute. WALK_MOVE stalls Host_Frame on these studios.
+   Trace the PE hull (-16..16, 0..72). A horizontal step hits other bodies
+   the way MOVE_NORMAL does; the floor probe still ignores them so a
+   neighbor is not a stair. MoveExecute walks
+   groundSpeed * framerate * interval in chunks of 16 (the stair limit). */
+static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed );
+
+/* SV_MoveToOrigin MOVE_NORMAL steps along ideal_yaw. When that step cannot
+   be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
+   the other 45-degree headings. This is that search with the hull trace,
+   not WALK_MOVE. */
+static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
+{
+	Vector wish;
+	Vector end;
+	Vector stepLand;
+	TraceResult tr;
+	float savedMins;
+	float horiz;
+
+	wish = dir;
+	wish.z = 0.0f;
+	if( wish.Length() < 0.001f )
+		return 0;
+	wish = wish.Normalize();
+	end = start + wish * step;
+	savedMins = pev->mins.z;
+	if( savedMins < 1.0f )
+		pev->mins.z = 1.0f;
+	EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
+	if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
+	{
+		int stepUp;
+		float baseZ = start.z;
+
+		for( stepUp = 1; stepUp <= 9; stepUp++ )
+		{
+			Vector raised = start;
+
+			raised.z = baseZ + stepUp * 2.0f;
+			EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
+			if( !tr.fStartSolid && !tr.fAllSolid )
+			{
+				end = raised + wish * step;
+				EFW_TraceFeetHull( pev, raised, end, &tr, dont_ignore_monsters );
+				break;
+			}
+		}
+	}
+	pev->mins.z = savedMins;
+	/* Same acceptance as the direct chunk: a destination with a floor
+	   counts, even when the feet-level trace started in the ground.
+	   A body in the way is not a stair; landing at the far end would
+	   step through that person. */
+	if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
+	{
+		horiz = ( stepLand - start ).Length2D();
+		if( horiz >= 0.5f )
+		{
+			*out = stepLand;
+			return 1;
+		}
+	}
+	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		return 0;
+	stepLand = start + ( end - start ) * tr.flFraction;
+	{
+		Vector grounded;
+
+		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, stepLand, &grounded ) )
+			stepLand = grounded;
+		else
+			stepLand.z = start.z;
+	}
+	horiz = ( stepLand - start ).Length2D();
+	if( horiz < 0.5f )
+		return 0;
+	*out = stepLand;
+	return 1;
+}
+
+static float EFW_NormYaw360( float yaw )
+{
+	while( yaw < 0.0f )
+		yaw += 360.0f;
+	while( yaw >= 360.0f )
+		yaw -= 360.0f;
+	return yaw;
+}
+
+static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &goal, float step, Vector *out )
+{
+	float deltax;
+	float deltay;
+	float dirx;
+	float diry;
+	float turnaround;
+	float tryYaw[16];
+	int ntry;
+	int i;
+	Vector landed;
+
+	deltax = goal.x - start.x;
+	deltay = goal.y - start.y;
+	dirx = ( deltax > 10.0f ) ? 0.0f : ( deltax < -10.0f ) ? 180.0f : -1.0f;
+	diry = ( deltay < -10.0f ) ? 270.0f : ( deltay > 10.0f ) ? 90.0f : -1.0f;
+	turnaround = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f - 180.0f );
+	ntry = 0;
+	if( dirx >= 0.0f && diry >= 0.0f )
+	{
+		float diag;
+
+		if( dirx == 0.0f )
+			diag = ( diry == 90.0f ) ? 45.0f : 315.0f;
+		else
+			diag = ( diry == 90.0f ) ? 135.0f : 225.0f;
+		tryYaw[ntry++] = diag;
+	}
+	if( fabsf( deltay ) > fabsf( deltax ) )
+	{
+		if( diry >= 0.0f )
+			tryYaw[ntry++] = diry;
+		if( dirx >= 0.0f )
+			tryYaw[ntry++] = dirx;
+	}
+	else
+	{
+		if( dirx >= 0.0f )
+			tryYaw[ntry++] = dirx;
+		if( diry >= 0.0f )
+			tryYaw[ntry++] = diry;
+	}
+	tryYaw[ntry++] = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f );
+	for( i = 0; i < 8; i++ )
+		tryYaw[ntry++] = (float)( i * 45 );
+	tryYaw[ntry++] = turnaround;
+	for( i = 0; i < ntry; i++ )
+	{
+		float yaw = EFW_NormYaw360( tryYaw[i] );
+		Vector dir;
+		int seen;
+		int j;
+
+		if( fabsf( yaw - turnaround ) < 0.5f && i + 1 != ntry )
+			continue;
+		seen = 0;
+		for( j = 0; j < i; j++ )
+		{
+			if( fabsf( EFW_NormYaw360( tryYaw[j] ) - yaw ) < 0.5f )
+			{
+				seen = 1;
+				break;
+			}
+		}
+		if( seen )
+			continue;
+		dir.x = cosf( yaw * 0.01745329252f );
+		dir.y = sinf( yaw * 0.01745329252f );
+		dir.z = 0.0f;
+		if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
+			continue;
+		{
+			static int s_chase;
+			if( s_chase < 6 )
+			{
+				s_chase++;
+				EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
+					yaw, start.x, start.y, landed.x, landed.y );
+			}
+		}
+		*out = landed;
+		return 1;
+	}
+	{
+		static int s_stuck;
+		if( s_stuck < 4 )
+		{
+			s_stuck++;
+			EFW_DebugPrint( "chase stuck %.0f %.0f", start.x, start.y );
+		}
+	}
+	return 0;
+}
+
+static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
+{
+	Vector delta;
+	Vector start;
+	Vector landed;
+	float len;
+	float total;
+	float moved;
+	int chunks;
+
+	if( !pev || s_npcStep )
+		return 0;
+	/* MOVE_TO_ORIGIN walks only once FL_ONGROUND is set. An embedded hull
+	   is not airborne; the lift below still has to pull it out of the floor. */
+	if( !( pev->flags & ( FL_ONGROUND | FL_FLY | FL_SWIM ) ) )
+	{
+		int support;
+
+		s_npcStep = 1;
+		support = EFW_ProbeSupport( pev );
+		s_npcStep = 0;
+		if( support == 0 )
+			return 0;
+	}
+	delta = goal - pev->origin;
+	delta.z = 0.0f;
+	len = delta.Length();
+	if( len < 1.0f )
+		return 0;
+	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
+	   once, before the 16-unit chunks, including the think whose
+	   StudioFrameAdvance interval is 0. */
+	{
+		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
+		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
+		Vector wish = delta * ( 1.0f / len );
+		if( pMon )
+		{
+			int yawSpeed = (int)pev->yaw_speed;
+			float before;
+			/* 0x1000cde0 default is 70 when SetActivity has not run. */
+			if( yawSpeed < 1 )
+				yawSpeed = 70;
+			before = pev->angles.y;
+			pMon->MakeIdealYaw( goal );
+			EFW_PeChangeYaw( pMon, yawSpeed );
+			{
+				static entvars_t *s_yawWho;
+				static int s_yawLog;
+				if( !s_yawWho )
+					s_yawWho = pev;
+				if( pev == s_yawWho && s_yawLog < 6 )
+				{
+					s_yawLog++;
+					EFW_DebugPrint( "npc yaw ideal=%.0f before=%.0f ang=%.0f spd=%d",
+						pev->ideal_yaw, before, pev->angles.y, yawSpeed );
+				}
+			}
+		}
+		else
+			pev->angles.y = UTIL_VecToYaw( wish );
+	}
+	/* ResetSequenceInfo stores animtime = now. MoveExecute then gets a
+	   zero interval and does not translate. A SetActivity that ran after
+	   the anim call still has that clock; push it ahead so the next pump
+	   is not another hold. dt is the interval StudioFrameAdvance returned. */
+	{
+		float skew = pev->animtime - gpGlobals->time;
+		if( skew < 0.0f )
+			skew = -skew;
+		if( dt < 0.001f || skew <= 0.001f )
+		{
+			if( skew <= 0.001f )
+				pev->animtime = gpGlobals->time + 0.25f;
+			return 0;
+		}
+	}
+	total = speed * dt;
+	if( total > len )
+		total = len;
+	if( total < 0.001f )
+		return 0;
+	s_npcStep = 1;
+	start = pev->origin;
+	landed = start;
+	moved = 0.0f;
+	chunks = 0;
+	while( total > 0.001f && chunks < 8 )
+	{
+		Vector wish;
+		Vector end;
+		Vector stepLand;
+		TraceResult tr;
+		float savedMins;
+		float step;
+		float stepLen;
+		float remain;
+
+		delta = goal - start;
+		delta.z = 0.0f;
+		remain = delta.Length();
+		if( remain < 1.0f )
+			break;
+		step = total;
+		if( step > 16.0f )
+			step = 16.0f;
+		if( step > remain )
+			step = remain;
+		wish = delta * ( step / remain );
+		end = start + wish;
+		savedMins = pev->mins.z;
+		if( savedMins < 1.0f )
+			pev->mins.z = 1.0f;
+		EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
+		/* Feet-origin mins.z == 0 sits in the floor and the trace is
+		   startsolid. StartMonster adds 1 to origin.z; DROP_TO_FLOOR
+		   cannot lift an origin already inside the floor. Another
+		   character is not the floor: climbing off their hull is the
+		   bunk pop. */
+		if( ( tr.fAllSolid || tr.fStartSolid ) && !EFW_TraceHitBody( pev, &tr ) )
+		{
+			int stepUp;
+			float baseZ = start.z;
+			/* sv_stepsize is 18. A taller climb is the pop past a ceiling. */
+			for( stepUp = 1; stepUp <= 9; stepUp++ )
+			{
+				Vector raised = start;
+				raised.z = baseZ + stepUp * 2.0f;
+				EFW_TraceFeetHull( pev, raised, raised, &tr, dont_ignore_monsters );
+				if( !tr.fStartSolid && !tr.fAllSolid )
+				{
+					start = raised;
+					end = start + wish;
+					EFW_TraceFeetHull( pev, start, end, &tr, dont_ignore_monsters );
+					{
+						static int s_lift;
+						if( s_lift < 6 )
+						{
+							s_lift++;
+							EFW_DebugPrint( "floor lift z=%.0f -> %.0f solid=%d frac=%.2f",
+								baseZ, start.z, tr.fStartSolid, tr.flFraction );
+						}
+					}
+					break;
+				}
+			}
+		}
+		pev->mins.z = savedMins;
+		{
+			static int s_hullLog;
+			if( s_hullLog < 6 )
+			{
+				s_hullLog++;
+				EFW_DebugPrint( "hull step frac=%.2f solid=%d all=%d",
+					tr.flFraction, tr.fStartSolid, tr.fAllSolid );
+			}
+		}
+		/* Prefer the step-size landing at the full chunk. A blocked hull
+		   falls back to the partial slide, then lands if a floor is near.
+		   The far landing ignores bodies, so a person in the trace must
+		   keep the contact instead of the floor beyond them. */
+		if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
+		{
+			float dz = stepLand.z - start.z;
+			if( dz < 0.0f )
+				dz = -dz;
+			if( dz >= 1.0f )
+			{
+				static int s_ground;
+				if( s_ground < 6 )
+				{
+					s_ground++;
+					EFW_DebugPrint( "step ground z=%.0f -> %.0f at %.0f %.0f",
+						start.z, stepLand.z, stepLand.x, stepLand.y );
+				}
+			}
+		}
+		else if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
+		{
+			/* The hull is flush with a face. A point trace from the chest
+			   misses a thin func_wall and the next origin starts inside
+			   it, so every chase heading is startsolid. Stay on the face
+			   and let the heading search slide along it. */
+			stepLand = start;
+		}
+		else
+		{
+			stepLand = start + ( end - start ) * tr.flFraction;
+			{
+				Vector grounded;
+				if( EFW_TraceHitBody( pev, &tr ) )
+				{
+					static int s_body;
+					stepLand.z = start.z;
+					if( s_body < 6 )
+					{
+						const char *who = STRING( tr.pHit->v.targetname );
+						s_body++;
+						EFW_DebugPrint( "body stop frac=%.2f at %.0f %.0f hit=%s",
+							tr.flFraction, stepLand.x, stepLand.y,
+							( who && who[0] ) ? who : STRING( tr.pHit->v.classname ) );
+					}
+				}
+				else if( EFW_LandMonster( pev, stepLand, &grounded ) )
+					stepLand = grounded;
+				else
+					stepLand.z = start.z;
+			}
+		}
+		stepLen = ( stepLand - start ).Length();
+		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
+		   instead of stopping on the wall. */
+		if( stepLen < 0.5f )
+		{
+			Vector chased;
+
+			if( !EFW_ChaseChunk( pev, start, goal, step, &chased ) )
+				break;
+			stepLand = chased;
+			stepLen = ( stepLand - start ).Length();
+			if( stepLen < 0.5f )
+				break;
+		}
+		landed = stepLand;
+		start = stepLand;
+		moved += stepLen;
+		chunks++;
+		/* MoveExecute always subtracts the requested chunk. A fraction just
+		   under 1 is still a clear step; stop only when the next chunk
+		   cannot move. */
+		total -= step;
+	}
+	{
+		static int s_exec;
+		if( s_exec < 6 && chunks > 0 )
+		{
+			s_exec++;
+			EFW_DebugPrint( "move execute iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
+				dt, speed, speed * dt, moved, chunks );
+		}
+		else if( s_exec < 12 && speed > 120.0f && chunks > 0 )
+		{
+			s_exec++;
+			EFW_DebugPrint( "move execute run iv=%.3f spd=%.0f wish=%.1f moved=%.1f chunks=%d",
+				dt, speed, speed * dt, moved, chunks );
+		}
+	}
+	if( moved < 0.5f )
+	{
+		s_npcStep = 0;
+		return 0;
+	}
+	s_npcStep = 0;
+	EFW_QueueOrigin( pev, landed );
+	return 1;
+}
+
+/* PE ChangeYaw 0x100603b0: speed = yawSpeed * frametime * 10.
+   monsteryawspeedfix is the later SDK path (yawSpeed * delta * 2) and
+   sv.time does not move between thinks, so that path never sees a
+   frame. The host pump is the frametime this call would have had. */
+static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed )
+{
+	float savedFix;
+	float savedFrame;
+
+	if( !pMon )
+		return;
+	savedFix = monsteryawspeedfix.value;
+	savedFrame = gpGlobals->frametime;
+	monsteryawspeedfix.value = 0.0f;
+	gpGlobals->frametime = EFW_HostInterval();
+	pMon->ChangeYaw( yawSpeed );
+	monsteryawspeedfix.value = savedFix;
+	gpGlobals->frametime = savedFrame;
+}
+
+/* FUN_1009b420: if bits_CAP_TURN_HEAD, yaw toward the point and
+   SetBoneController(0). Spawn writes that capability as 0x7c0. */
+static void EFW_IdleHeadTurn( CBaseMonster *pMon, const Vector &spot )
+{
+	float yaw;
+
+	if( !pMon || !( pMon->m_afCapability & bits_CAP_TURN_HEAD ) )
+		return;
+	if( !pMon->pev->modelindex )
+		return;
+	yaw = UTIL_VecToYaw( spot - pMon->pev->origin ) - pMon->pev->angles.y;
+	if( yaw > 180.0f )
+		yaw -= 360.0f;
+	if( yaw < -180.0f )
+		yaw += 360.0f;
+	pMon->SetBoneController( 0, yaw );
+}
+
+static float EFW_NpcGroundSpeed( CBaseMonster *pMon )
+{
+	float speed;
+
+	speed = pMon->m_flGroundSpeed * pMon->pev->framerate;
+	if( speed < 1.0f )
+		speed = 64.0f;
+	return speed;
+}
+
+/* FUN_1005d160 anim half: StudioFrameAdvance, idle fidget, DispatchAnimEvents.
+   Move()'s WALK_MOVE is not called. Returns the interval MoveExecute uses. */
+static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
+{
+	entvars_t *pev;
+	float flInterval;
+	float skew;
+
+	if( !pMon )
+		return 0.0f;
+	pev = pMon->pev;
+	if( !pev->modelindex || s_npcStep )
+		return 0.0f;
+	/* Physics runs before MonsterThink. Land, then animate. */
+	EFW_NpcFall( pev );
+	if( s_npcStep )
+		return 0.0f;
+	/* MonsterThink calls StudioFrameAdvance(0). ResetSequenceInfo sets
+	   animtime to gpGlobals->time, so that call returns 0 and the feet
+	   do not move on the SetActivity think. A clock that was just reset
+	   (or still 0) gets interval 0. After the call, animtime is stamped
+	   0.25s ahead. That keeps the next skew above the hold, and it meets
+	   the client clock, which leads gpGlobals->time by that same 0.25s.
+	   StudioEstimateFrame adds (cl.time - animtime) * framerate * fps, so
+	   a stamp one second behind drew the pose 1.25s ahead of this frame.
+	   A stamp a full second ahead makes the step-position ratio largely
+	   negative and walks the model off its origin. */
+	if( !pev->animtime )
+		pev->animtime = ( gpGlobals->time > 0.0f ) ? gpGlobals->time : 0.001f;
+	skew = pev->animtime - gpGlobals->time;
+	if( skew < 0.0f )
+		skew = -skew;
+	if( skew <= 0.001f )
+		flInterval = 0.0f;
+	else
+		flInterval = EFW_HostInterval();
+	flInterval = pMon->StudioFrameAdvance( flInterval );
+	if( pMon->m_MonsterState != MONSTERSTATE_SCRIPT && pMon->m_MonsterState != MONSTERSTATE_DEAD
+		&& pMon->m_Activity == ACT_IDLE && pMon->m_fSequenceFinished )
+	{
+		int iSequence;
+
+		if( pMon->m_fSequenceLoops )
+			iSequence = pMon->LookupActivity( pMon->m_Activity );
+		else
+			iSequence = pMon->LookupActivityHeaviest( pMon->m_Activity );
+		if( iSequence != ACTIVITY_NOT_AVAILABLE )
+		{
+			pev->sequence = iSequence;
+			pMon->ResetSequenceInfo();
+			{
+				static int s_fidget;
+				if( s_fidget < 4 )
+				{
+					s_fidget++;
+					EFW_DebugPrint( "idle fidget %s seq=%d",
+						( name && name[0] ) ? name : "?", pev->sequence );
+				}
+			}
+		}
+	}
+	pMon->DispatchAnimEvents( flInterval );
+	if( skew <= 0.001f && pMon->m_Activity == ACT_WALK && name && EFW_FStrEq( name, "Amir" ) )
+	{
+		static int s_hold;
+		if( s_hold < 4 )
+		{
+			s_hold++;
+			EFW_DebugPrint( "seq hold Amir frame=%.1f origin=%.0f %.0f",
+				pev->frame, pev->origin.x, pev->origin.y );
+		}
+	}
+	{
+		static int s_frame;
+		if( s_frame < 6 && ( pMon->m_Activity == ACT_WALK || pMon->m_Activity == ACT_RUN ) )
+		{
+			s_frame++;
+			EFW_DebugPrint( "walk frame %s seq=%d frame=%.1f iv=%.3f gs=%.0f",
+				( name && name[0] ) ? name : "?", pev->sequence, pev->frame,
+				flInterval, pMon->m_flGroundSpeed );
+		}
+	}
+	/* StudioFrameAdvance and ResetSequenceInfo both store animtime = now.
+	   Leave it 0.25s ahead so the next pump is not another hold and the
+	   client does not add a second of sequence on top of this frame. */
+	pev->animtime = gpGlobals->time + 0.25f;
+	return flInterval;
+}
+
 void CRefugee::IdleThink( void )
 {
-	CBasePlayer *pPlayer;
-	const char *tn;
+	CBasePlayer *pPlayer = NULL;
+	const char *tn = "";
 	Vector delta;
-	float dist;
+	float dist = 0.0f;
 	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
 	static int s_idleLog;
 
@@ -196,8 +1275,12 @@ void CRefugee::IdleThink( void )
 		}
 	}
 	pev->framerate = 1.0f;
-	/* PE uses +0.1s. Frozen WASM sv.time never reaches time+0.1, so think
-	   every ServerFrame (same function; denser ticks). */
+	/* 0x100c64c0 SET_SIZE (-16,-16,0)-(16,16,72) every think, including
+	   the deadflag==2 path after it zeroes the box. The link virtual is
+	   the base abs box, so this write is the hull the player stops on. */
+	EFW_WriteLinkedHull( pev, Vector( -16, -16, 0 ), Vector( 16, 16, 72 ) );
+	/* FUN_1005d160 ends IdleThink with vtable+8(0.1), overwriting the
+	   earlier +3. Frozen sv.time never reaches it, so the pulse is the think. */
 	pev->nextthink = gpGlobals->time;
 	if( !pev->modelindex )
 		return;
@@ -208,11 +1291,75 @@ void CRefugee::IdleThink( void )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
 	UTIL_FindEntityByTargetname( NULL, "mad_scientist_entity" );
-	/* UTIL_SetSize after SET_MODEL stalled WASM Host_Frame; Spawn already
-	   hardcodes the PE -16..72 hull and FUN_100c6320 only trusts IDST. */
+	/* The standing box was written above. pfnSetSize from the think
+	   re-enters the link virtual and stalls the frame. */
 	pPlayer = EFW_Player();
-	if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
+	/* 0x100c8160 is strstr(targetname, "queue"), not exact equality.
+	   The yard line is named detainee_queue and must not approach. */
+	if( pPlayer && tn && strstr( tn, "queue" ) )
 	{
+		delta = pPlayer->pev->origin - pev->origin;
+		dist = delta.Length();
+		if( m_Activity == ACT_RESET )
+			SetActivity( ACT_IDLE );
+		pev->movetype = MOVETYPE_STEP;
+		{
+			static int s_qtick;
+			static int s_qlog;
+			s_qtick++;
+			if( s_qlog < 6 && dist > 100.0f && dist < 300.0f && ( s_qtick % 15 ) == 1 )
+			{
+				s_qlog++;
+				EFW_DebugPrint( "queue stay %s dist=%.0f origin=%.0f %.0f",
+					tn, dist, pev->origin.x, pev->origin.y );
+			}
+		}
+	}
+	else if( pPlayer && !EFW_FStrEq( tn, "queue" ) )
+	{
+		/* IdleThink pushes 3.0 through vtable+8, then FUN_1005d160
+		   pushes 0.1 and that write is the one left in nextthink.
+		   Queue names never enter this branch. */
+		float now = EFW_HostClock();
+		int slot = ENTINDEX( edict() );
+		static float s_nextPe[512];
+		static int s_peLog;
+		int peThink = 0;
+
+		if( slot > 0 && slot < 512
+			&& ( s_nextPe[slot] <= 0.0f || now >= s_nextPe[slot] ) )
+		{
+			s_nextPe[slot] = now + 0.1f;
+			peThink = 1;
+			if( s_peLog < 4 )
+			{
+				s_peLog++;
+				EFW_DebugPrint( ">>> FUN_1005d160 +0.1 %s t=%.1f",
+					( tn && tn[0] ) ? tn : "?", now );
+			}
+		}
+		if( peThink )
+		{
+		{
+			static float s_slipAt;
+			/* The roster thinks in one pump, so DAT_10132ca8 strides by
+			   that count. The count shares a factor of 2 with 0x52, and
+			   the other half never lands on the multiple (Nasir stayed
+			   idle in front of the camera while Mouhtaz walked). PE frames
+			   are shorter than the 0.1s think, so membership slips. One
+			   extra count per pump is that slip. */
+			if( s_slipAt != now )
+			{
+				static int s_slipLog;
+				s_slipAt = now;
+				s_walkTick++;
+				if( s_slipLog < 1 )
+				{
+					s_slipLog = 1;
+					EFW_DebugPrint( "walk slip tick=%d", s_walkTick );
+				}
+			}
+		}
 		s_walkTick++;
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
@@ -222,31 +1369,130 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "IdleThink %s mi=%d dist=%.0f tick=%d",
 				( tn && tn[0] ) ? tn : "?", pev->modelindex, dist, s_walkTick );
 		}
+		/* Spawn's vtable+0x1a8(1) is CTalkMonster::SetActivity(ACT_IDLE).
+		   The studio is bound after Spawn, so the first think does it. */
+		if( m_Activity == ACT_RESET )
+		{
+			EFW_DebugPrint( "SetActivity IDLE %s before seq=%d",
+				( tn && tn[0] ) ? tn : "?", pev->sequence );
+			SetActivity( ACT_IDLE );
+			EFW_DebugPrint( "SetActivity IDLE %s after seq=%d act=%d",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity );
+		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
-			EFW_DebugPrint( "now walking %s", ( tn && tn[0] ) ? tn : "?" );
-			m_iWalkState = 3;
-			m_hEnemy = pPlayer;
+			/* vtable+0x1a8(3), FUN_1005d290, then FUN_1005d500(this, ACT_WALK, 0)
+			   which is MoveToTarget. FRefreshRoute's local move calls WALK_MOVE
+			   and stalls the WASM frame, so the route is not built. The hull
+			   step below is that move. */
+			EFW_DebugPrint( "SetActivity WALK %s before seq=%d dist=%.0f",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, dist );
+			SetActivity( ACT_WALK );
+			m_movementGoal = MOVEGOAL_NONE;
+			m_movementActivity = ACT_IDLE;
+			Forget( bits_MEMORY_MOVE_FAILED );
+			m_movementGoal = MOVEGOAL_TARGETENT;
+			m_movementActivity = ACT_WALK;
+			m_hTargetEnt = pPlayer;
+			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
+				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
+			/* FUN_1005d500 is this first Move. Later thinks keep stepping
+			   from FUN_1005d160 while the goal stays in the 100..300 band. */
+			{
+				float speed = EFW_NpcGroundSpeed( this );
+				float dt = EFW_HostInterval();
+				int moved;
+				static int s_peMove;
+
+				if( dt < 0.001f )
+					dt = 0.05f;
+				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+				if( s_peMove < 6 )
+				{
+					s_peMove++;
+					EFW_DebugPrint( "pe move %s moved=%d dist=%.0f origin=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", moved, dist,
+						pev->origin.x, pev->origin.y );
+				}
+			}
 		}
-		/* FUN_100c6440 Spirit walk state 3 (FUN_1005d500). WALK_MOVE without
-		   a studio stalls Host_Frame, so close the gap by origin lerp. */
-		if( m_iWalkState == 3 && dist > 100.0f )
+		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
-			Vector step;
-			float len = dist;
-			if( len < 1.0f )
-				len = 1.0f;
-			step = delta * ( 12.0f / len );
-			step.z = 0;
-			UTIL_SetOrigin( pev, pev->origin + step );
-			pev->angles.y = UTIL_VecToYaw( delta );
-			if( ( pPlayer->pev->origin - pev->origin ).Length() <= 100.0f )
-				m_iWalkState = 0;
+			/* 0x100c6654: movement activity ACT_WALK and dist < 100 calls
+			   vtable+0x1a8(ACT_IDLE). Move() at 0x1005d500 runs only in the
+			   100..300 band. ResetSequenceInfo sets animtime to now, so the
+			   host-interval advance must not play that sequence; framerate 0
+			   is that zero step. The next IdleThink entry restores it. */
+			SetActivity( ACT_IDLE );
+			pev->framerate = 0.0f;
+			{
+				static int s_close;
+				static float s_yaw;
+				static float s_px, s_py;
+				static int s_held;
+				if( s_close < 3 )
+				{
+					s_close++;
+					s_yaw = pev->angles.y;
+					s_px = pPlayer->pev->origin.x;
+					s_py = pPlayer->pev->origin.y;
+					EFW_DebugPrint( "close idle %s yaw=%.0f dist=%.0f player=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", pev->angles.y, dist,
+						pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				}
+				else if( !s_held )
+				{
+					float dx = pPlayer->pev->origin.x - s_px;
+					float dy = pPlayer->pev->origin.y - s_py;
+					if( dx * dx + dy * dy > 80.0f * 80.0f )
+					{
+						s_held = 1;
+						EFW_DebugPrint( "close hold %s yaw %.0f -> %.0f player=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", s_yaw, pev->angles.y,
+							pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+					}
+				}
+			}
 		}
-		else if( dist <= 100.0f )
-			m_iWalkState = 0;
+		else if( m_movementGoal == MOVEGOAL_TARGETENT
+			&& m_movementActivity == ACT_WALK
+			&& dist > 100.0f && dist < 300.0f )
+		{
+			/* FUN_1005d160 calls vtable+0x154 (0x1005f200) on every think
+			   once the modulo branch has stored the target goal. That is
+			   the rest of the walk. Move() itself stalls, so one hull
+			   step is that call. */
+			float speed = EFW_NpcGroundSpeed( this );
+			float dt = EFW_HostInterval();
+			int moved;
+			static int s_follow;
+
+			if( dt < 0.001f )
+				dt = 0.05f;
+			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+			if( s_follow < 8 )
+			{
+				s_follow++;
+				EFW_DebugPrint( "pe follow %s moved=%d dist=%.0f origin=%.0f %.0f",
+					( tn && tn[0] ) ? tn : "?", moved, dist,
+					pev->origin.x, pev->origin.y );
+			}
+		}
+		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
+		pev->movetype = MOVETYPE_STEP;
+		{
+			static int s_mv;
+			if( !s_mv )
+			{
+				s_mv = 1;
+				EFW_DebugPrint( "IdleThink movetype STEP %s", ( tn && tn[0] ) ? tn : "?" );
+			}
+		}
+		}
 	}
-	/* FUN_100c6440 StudioFrameAdvance; skip until SET_MODEL returns for detainees. */
+	/* FUN_1005d160 still advances the pose on the pulses the 0.1s
+	   gate skips, so the client frame does not stall. */
+	EFW_AdvanceNpcAnim( this, tn );
 }
 
 void CRefugee::Precache( void )
@@ -366,7 +1612,8 @@ void CRefugee::Spawn( void )
 	ALERT( at_error, "efw: refugee %s model %s at %.0f %.0f %.0f ents=%d\n",
 		( tn && tn[0] ) ? tn : "(unnamed)", STRING( pev->model ),
 		pev->origin.x, pev->origin.y, pev->origin.z, NUMBER_OF_ENTITIES() );
-	m_iWalkState = 0;
+	m_movementActivity = ACT_RESET;
+	m_movementGoal = MOVEGOAL_NONE;
 	SetUse( &CRefugee::TalkUse );
 	if( EFW_DeferStudio() )
 	{
@@ -391,7 +1638,6 @@ public:
 	void HandleAnimEvent( MonsterEvent_t *pEvent );
 	void EXPORT TalkUse( CBaseEntity *pActivator, CBaseEntity *pCaller, USE_TYPE useType, float value );
 	void EXPORT PatrolThink( void );
-	void WalkToward( const Vector &dest );
 	int CanSeePlayer( CBasePlayer *pPlayer );
 	int CanHearPlayer( CBasePlayer *pPlayer );
 	float Dist2D( CBaseEntity *pOther );
@@ -400,7 +1646,6 @@ public:
 	float m_flAlertTime; /* this+0x3a8 */
 	float m_flStateTime; /* this+0x3ac */
 	int m_iCaught;
-	int m_iHearLatch; /* FUN_100c5e30 this+0x2e4 == 8 consume-once */
 };
 
 LINK_ENTITY_TO_CLASS( monster_patrol_guard, CPatrolGuard )
@@ -413,7 +1658,16 @@ int CPatrolGuard::Classify( void )
 
 void CPatrolGuard::SetYawSpeed( void )
 {
-	pev->yaw_speed = 120;
+	/* Same 0x1000cde0 as refugees: idle/walk 70, run 90. */
+	switch( m_Activity )
+	{
+	case ACT_RUN:
+		pev->yaw_speed = 90;
+		break;
+	default:
+		pev->yaw_speed = 70;
+		break;
+	}
 }
 
 void CPatrolGuard::HandleAnimEvent( MonsterEvent_t *pEvent )
@@ -463,46 +1717,57 @@ int CPatrolGuard::CanSeePlayer( CBasePlayer *pPlayer )
 	}
 	if( dot < 0.5f )
 		return 0;
-	from = pev->origin + Vector( 0, 0, 40 );
-	to = pPlayer->pev->origin + Vector( 0, 0, 40 );
+	/* FUN_100c5c50: first TRACE_LINE is origin to origin. If that
+	   fraction is below 1, both ends are raised 40 and traced again. */
+	from = pev->origin;
+	to = pPlayer->pev->origin;
 	UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
-	if( tr.flFraction >= 1.0f )
-		return 1;
-	to.z += 40.0f;
-	UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
-	return tr.flFraction >= 1.0f;
+	{
+		float feet = tr.flFraction;
+		float chest = -1.0f;
+		int hit;
+		if( feet < 1.0f )
+		{
+			from.z += 40.0f;
+			to.z += 40.0f;
+			UTIL_TraceLine( from, to, ignore_monsters, edict(), &tr );
+			chest = tr.flFraction;
+		}
+		hit = ( feet >= 1.0f || chest >= 1.0f ) ? 1 : 0;
+		{
+			static int s_ray;
+			if( s_ray < 4 )
+			{
+				const char *rn = STRING( pev->targetname );
+				s_ray++;
+				EFW_DebugPrint( "see ray %s feet=%.2f z=%.0f->%.0f chest=%.2f hit=%d",
+					( rn && rn[0] ) ? rn : "?", feet, pev->origin.z,
+					pPlayer->pev->origin.z, chest, hit );
+			}
+		}
+		return hit;
+	}
 }
 
 int CPatrolGuard::CanHearPlayer( CBasePlayer *pPlayer )
 {
-	/* FUN_100c5e30: if this+0x2e4 == 8, clear and return 1. Latch is set when
-	   the player is loud (2D vel > 80) within 256u — original memory bit 8. */
-	Vector d;
-	if( !pPlayer )
+	(void)pPlayer;
+	/* FUN_100c5e30 is 29 bytes. this+0x2e4 is m_iTriggerCondition, written
+	   by KeyValue for "TriggerCondition". 8 is AITRIGGER_HEARPLAYER. The
+	   function clears that field and returns 1. It does not read velocity.
+	   Level 2 guards have no TriggerCondition key, so this stays 0. */
+	if( m_iTriggerCondition != AITRIGGER_HEARPLAYER )
 		return 0;
-	d = pPlayer->pev->origin - pev->origin;
-	d.z = 0;
-	if( d.Length() <= 256.0f )
 	{
-		Vector vel = pPlayer->pev->velocity;
-		vel.z = 0;
-		if( vel.Length() > 80.0f )
-			m_iHearLatch = 8;
-	}
-	if( m_iHearLatch == 8 )
-	{
+		static int s_hear;
+		if( !s_hear )
 		{
-			static int s_hear;
-			if( !s_hear )
-			{
-				s_hear = 1;
-				EFW_DebugPrint( ">>> FUN_100c5e30" );
-			}
+			s_hear = 1;
+			EFW_DebugPrint( ">>> FUN_100c5e30" );
 		}
-		m_iHearLatch = 0;
-		return 1;
 	}
-	return 0;
+	m_iTriggerCondition = AITRIGGER_NONE;
+	return 1;
 }
 
 float CPatrolGuard::Dist2D( CBaseEntity *pOther )
@@ -513,25 +1778,6 @@ float CPatrolGuard::Dist2D( CBaseEntity *pOther )
 	d = pOther->pev->origin - pev->origin;
 	d.z = 0;
 	return d.Length();
-}
-
-void CPatrolGuard::WalkToward( const Vector &dest )
-{
-	Vector delta = dest - pev->origin;
-	float len;
-
-	delta.z = 0;
-	len = delta.Length();
-	if( len < 12.0f )
-		return;
-	pev->angles.y = UTIL_VecToYaw( delta );
-	SetActivity( ACT_WALK );
-	/* WALK_MOVE without a studio stalls Host_Frame; lerp like IdleThink. */
-	if( len < 1.0f )
-		len = 1.0f;
-	delta = delta * ( 8.0f / len );
-	delta.z = 0;
-	UTIL_SetOrigin( pev, pev->origin + delta );
 }
 
 void EFW_PatrolAlertAll( void )
@@ -554,19 +1800,22 @@ void EFW_PatrolAlertAll( void )
 	while( ( pGuard = UTIL_FindEntityByClassname( pGuard, "monster_patrol_guard" ) ) != NULL )
 	{
 		CPatrolGuard *pg = (CPatrolGuard *)pGuard;
+		/* FUN_100c5480: EHANDLE +0x168 = player, MoveToTarget(ACT_RUN), alert 4.
+		   FRefreshRoute stalls, so only the goal fields are stored. */
+		pg->m_hTargetEnt = pPlayer;
 		pg->m_hEnemy = pPlayer;
+		pg->m_moveWaitTime = 0;
+		pg->m_movementActivity = ACT_RUN;
+		pg->m_movementGoal = MOVEGOAL_TARGETENT;
 		pg->m_iAlert = 4;
 		if( pPlayer )
 			pg->m_vecLastSeen = pPlayer->pev->origin;
-		pg->SetActivity( ACT_WALK );
+		if( pg->m_Activity != ACT_RUN )
+			pg->SetActivity( ACT_RUN );
 		{
-			static int s_think;
-			if( !s_think )
-			{
-				s_think = 1;
-				EFW_DebugPrint( ">>> FUN_100c54e0" );
-				pg->PatrolThink();
-			}
+			const char *gn = STRING( pg->pev->targetname );
+			EFW_DebugPrint( "patrol alert RUN %s seq=%d act=%d",
+				( gn && gn[0] ) ? gn : "?", pg->pev->sequence, (int)pg->m_Activity );
 		}
 	}
 }
@@ -577,7 +1826,11 @@ void CPatrolGuard::PatrolThink( void )
 	const char *tn = STRING( pev->targetname );
 	int see = 0;
 	int hear = 0;
-	float now = gpGlobals->time;
+	/* FUN_100c5b60 reads gpGlobals->time. The listen server stays paused,
+	   so that clock never reaches the 0.7s notice or the later 1s and 5s
+	   waits. The pump clock is those seconds. nextthink stays on sv.time;
+	   the StartFrame pulse is what runs this think. */
+	float now = EFW_HostClock();
 	{
 		static int s_patrol;
 		if( !s_patrol )
@@ -587,7 +1840,7 @@ void CPatrolGuard::PatrolThink( void )
 		}
 	}
 
-	pev->nextthink = now + 0.1f;
+	pev->nextthink = gpGlobals->time + 0.1f;
 	if( !pev->modelindex )
 		return;
 	/* FUN_100c7490 / DAT_101348ac pause. */
@@ -606,11 +1859,23 @@ void CPatrolGuard::PatrolThink( void )
 		return;
 	}
 	pev->framerate = 1.0f;
-	pev->movetype = MOVETYPE_NONE;
+	/* FUN_100c54e0 writes movetype 4 (MOVETYPE_STEP) on the non-pause path. */
+	pev->movetype = MOVETYPE_STEP;
+	{
+		static int s_mv;
+		if( !s_mv )
+		{
+			s_mv = 1;
+			EFW_DebugPrint( "patrol movetype STEP" );
+		}
+	}
+	/* The print call sits before the switch and consumes TriggerCondition.
+	   Each case calls FUN_100c5e30 again, so the state machine does not
+	   see the same true result. */
+	if( CanHearPlayer( pPlayer ) )
+		EFW_DebugPrint( "can hear player!!!!!!!!" );
 	see = CanSeePlayer( pPlayer );
 	hear = CanHearPlayer( pPlayer );
-	if( hear )
-		EFW_DebugPrint( "can hear player!!!!!!!!" );
 
 	/* FUN_100c54e0 patrol alert FSM, this+0x398. */
 	switch( m_iAlert )
@@ -633,6 +1898,8 @@ void CPatrolGuard::PatrolThink( void )
 		}
 		if( now - m_flAlertTime >= 0.7f )
 		{
+			EFW_DebugPrint( "efw: patrol notice %s dt=%.2f",
+				( tn && tn[0] ) ? tn : "?", now - m_flAlertTime );
 			EFW_Squark( tn, "Hey, what was that? I thought I saw something.", 10 );
 			if( pPlayer )
 				m_vecLastSeen = pPlayer->pev->origin;
@@ -684,41 +1951,197 @@ void CPatrolGuard::PatrolThink( void )
 	default:
 		break;
 	}
+	{
+		static int s_sense;
+		float spd = 0.0f;
+		if( pPlayer )
+		{
+			Vector vel = pPlayer->pev->velocity;
+			vel.z = 0;
+			spd = vel.Length();
+		}
+		if( ( see || hear || m_iAlert ) && s_sense < 6 )
+		{
+			s_sense++;
+			EFW_DebugPrint( "patrol sense %s see=%d hear=%d alert=%d vel=%.0f trig=%d",
+				( tn && tn[0] ) ? tn : "?", see, hear, m_iAlert, spd,
+				m_iTriggerCondition );
+		}
+		if( see && spd > 80.0f )
+		{
+			static int s_runSee;
+			if( s_runSee < 4 )
+			{
+				s_runSee++;
+				EFW_DebugPrint( "patrol sense run %s see=%d hear=%d alert=%d vel=%.0f",
+					( tn && tn[0] ) ? tn : "?", see, hear, m_iAlert, spd );
+			}
+		}
+	}
 
+	/* Tail of FUN_100c54e0. MoveToTarget / MoveToLocation call FRefreshRoute
+	   (WALK_MOVE) and stall, so only their goal fields are stored. Alert 0
+	   falls through to MonsterThink; the path_corner walk stands in for the
+	   schedule RunAI would run and that we still cannot call. */
 	if( m_iAlert == 4 )
 	{
-		WalkToward( m_vecLastSeen );
+		if( m_movementGoal == MOVEGOAL_NONE && pPlayer )
+		{
+			m_hTargetEnt = pPlayer;
+			m_moveWaitTime = 0;
+			m_movementActivity = ACT_RUN;
+			m_movementGoal = MOVEGOAL_TARGETENT;
+			if( m_Activity != ACT_RUN )
+			{
+				SetActivity( ACT_RUN );
+				EFW_DebugPrint( "patrol chase RUN %s seq=%d",
+					( tn && tn[0] ) ? tn : "?", pev->sequence );
+			}
+		}
 		m_hEnemy = pPlayer;
 	}
 	else if( m_iAlert == 2 || m_iAlert == 3 )
-		WalkToward( m_vecLastSeen );
-	else if( !FStringNull( pev->target ) )
+	{
+		Vector seen = m_vecLastSeen - pev->origin;
+		seen.z = 0;
+		/* Move() advances a location route at ShouldAdvanceRoute's 8. */
+		if( seen.Length() > 8.0f )
+		{
+			m_moveWaitTime = 0;
+			m_movementActivity = ACT_WALK;
+			m_movementGoal = MOVEGOAL_LOCATION;
+			m_vecMoveGoal = m_vecLastSeen;
+			if( m_Activity != ACT_WALK )
+			{
+				SetActivity( ACT_WALK );
+				EFW_DebugPrint( "patrol investigate WALK %s seq=%d",
+					( tn && tn[0] ) ? tn : "?", pev->sequence );
+			}
+		}
+		if( pPlayer )
+			m_hTargetEnt = pPlayer;
+	}
+	else if( m_Activity == ACT_RESET )
+		SetActivity( ACT_IDLE );
+	if( m_iAlert == 2 || m_iAlert == 3 || m_iAlert == 4 )
+		EFW_IdleHeadTurn( this, m_vecLastSeen );
+
+	/* MonsterThink anim, then the hull step stands in for Move. */
+	float flInterval = EFW_AdvanceNpcAnim( this, tn );
+	{
+		static entvars_t *s_animWho;
+		static int s_animLog;
+		if( !s_animWho )
+			s_animWho = pev;
+		if( pev == s_animWho && s_animLog < 8 )
+		{
+			s_animLog++;
+			EFW_DebugPrint( "patrol anim %s alert=%d seq=%d frame=%.2f act=%d mt=%d",
+				( tn && tn[0] ) ? tn : "?", m_iAlert, pev->sequence, pev->frame,
+				(int)m_Activity, pev->movetype );
+		}
+	}
+	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
+	{
+		float speed = EFW_NpcGroundSpeed( this );
+		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
+		{
+			static int s_chaseLog;
+			if( s_chaseLog < 6 )
+			{
+				s_chaseLog++;
+				EFW_DebugPrint( "patrol chase step %s moved=%d seq=%d act=%d spd=%.0f origin=%.0f %.0f dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", moved, pev->sequence, (int)m_Activity, speed,
+					pev->origin.x, pev->origin.y, Dist2D( pPlayer ) );
+			}
+		}
+	}
+	else if( m_movementGoal == MOVEGOAL_LOCATION )
+	{
+		Vector delta = m_vecMoveGoal - pev->origin;
+		float remain;
+		delta.z = 0;
+		remain = delta.Length();
+		/* FUN_1005f6e0: the waypoint distance is 2D, and the route
+		   advances at 8. A 12-unit stop left the last-seen walk short. */
+		if( remain > 8.0f )
+		{
+			if( remain < 20.0f )
+			{
+				static int s_close;
+				if( s_close < 6 )
+				{
+					s_close++;
+					EFW_DebugPrint( "investigate close %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", remain );
+				}
+			}
+			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval );
+		}
+		else
+		{
+			{
+				static int s_arrive;
+				if( s_arrive < 4 )
+				{
+					s_arrive++;
+					EFW_DebugPrint( "investigate arrive %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", remain );
+				}
+			}
+			m_movementGoal = MOVEGOAL_NONE;
+			if( m_Activity != ACT_IDLE )
+				SetActivity( ACT_IDLE );
+		}
+	}
+	else if( ( m_iAlert == 0 || m_iAlert == 1 ) && !FStringNull( pev->target ) )
 	{
 		if( !m_pGoalEnt )
 			m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
 		if( m_pGoalEnt )
 		{
 			Vector delta = m_pGoalEnt->pev->origin - pev->origin;
+			float speed;
+			int moved;
 			delta.z = 0;
-			if( delta.Length() < 32.0f )
+			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
+			if( delta.Length() <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
 			{
-				if( !FStringNull( m_pGoalEnt->pev->target ) )
-					m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+				{
+					static int s_corner;
+					if( s_corner < 4 )
+					{
+						s_corner++;
+						EFW_DebugPrint( "corner advance %s dist=%.1f",
+							( tn && tn[0] ) ? tn : "?", delta.Length() );
+					}
+				}
+				m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+				if( m_pGoalEnt )
+				{
+					delta = m_pGoalEnt->pev->origin - pev->origin;
+					delta.z = 0;
+				}
 			}
-			else
+			if( m_pGoalEnt && delta.Length() > 8.0f )
 			{
-				Vector step;
-				float len = delta.Length();
-				pev->angles.y = UTIL_VecToYaw( delta );
-				if( len < 1.0f )
-					len = 1.0f;
-				step = delta * ( 8.0f / len );
-				step.z = 0;
-				UTIL_SetOrigin( pev, pev->origin + step );
+				if( m_Activity != ACT_WALK )
+					SetActivity( ACT_WALK );
+				speed = EFW_NpcGroundSpeed( this );
+				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed, flInterval );
+				{
+					static int s_stepLog;
+					if( s_stepLog < 6 )
+					{
+						s_stepLog++;
+						EFW_DebugPrint( "patrol step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", moved, pev->sequence, speed,
+							pev->origin.x, pev->origin.y );
+					}
+				}
 			}
 		}
 	}
-	/* FUN_100c54e0 StudioFrameAdvance; skip until SET_MODEL returns, same as IdleThink. */
 }
 
 void CPatrolGuard::Spawn( void )
@@ -748,10 +2171,12 @@ void CPatrolGuard::Spawn( void )
 	m_flFieldOfView = 0.5;
 	m_MonsterState = MONSTERSTATE_NONE;
 	m_iAlert = 0;
+	/* FUN_1000d1d0: m_afCapability = 0x7c0 (use, hear, doors, turn head). */
+	m_afCapability = bits_CAP_USE | bits_CAP_HEAR | bits_CAP_AUTO_DOORS
+		| bits_CAP_OPEN_DOORS | bits_CAP_TURN_HEAD;
 	m_flAlertTime = 0;
 	m_flStateTime = 0;
 	m_iCaught = 0;
-	m_iHearLatch = 0;
 	SetUse( &CPatrolGuard::TalkUse );
 	{
 		static int s_pt;
@@ -775,6 +2200,264 @@ void CPatrolGuard::Spawn( void )
 	}
 }
 
+/* monster_barney in the PE is this mod's officer/electrician, not a stock
+   security guard. Spawn's MonsterInit stores MonsterInitThink, which jumps
+   to StartMonster. StartMonster's DROP_TO_FLOOR and WALK_MOVE stall once
+   the studio is bound, so this is the safe tail: STEP, MonsterThink's
+   animation, and the path_corner walk StartMonster would schedule. */
+void EFW_OfficerThink( CBaseMonster *pMon )
+{
+	entvars_t *pev;
+	const char *tn;
+
+	if( !pMon )
+		return;
+	pev = pMon->pev;
+	if( !pev->modelindex || s_npcStep )
+		return;
+	tn = STRING( pev->targetname );
+	if( EFW_GetHudInt( 6 ) )
+	{
+		pev->framerate = 0.0f;
+		pev->movetype = MOVETYPE_NONE;
+		return;
+	}
+	pev->framerate = 1.0f;
+	/* Roster_Officer (166 -962 0) stands inside the roster desk. Mail_Officer
+	   (326 -899 10) and efw_compound_gate_guard (310 -435 0) stand inside the
+	   yard tarp. A feet hull still fits in those pockets, so a startsolid
+	   test leaves the mesh under the cover. MOVETYPE_STEP then shoves a
+	   raised hull back under the floor. Step +X, the open side, drop the
+	   feet hull onto the floor there, and keep the spot only when a
+	   chest-height ray from 64 units that way is clear. Skip the step push
+	   so the engine cannot put them back under the cover. */
+	{
+		int slot;
+
+		slot = -1;
+		if( tn && !strcmp( tn, "Roster_Officer" ) )
+			slot = 0;
+		else if( tn && !strcmp( tn, "Mail_Officer" ) )
+			slot = 1;
+		else if( tn && !strcmp( tn, "efw_compound_gate_guard" ) )
+			slot = 2;
+		if( slot >= 0 )
+		{
+			static Vector s_home[3];
+			static int s_haveHome[3];
+			static int s_stood[3];
+
+			if( !s_haveHome[slot] )
+			{
+				s_home[slot] = pev->origin;
+				s_home[slot].z = 0.0f;
+				s_haveHome[slot] = 1;
+			}
+			if( !s_stood[slot] )
+			{
+				int ring;
+				int ringMax;
+				static const float kDrop[3] = { 80.0f, 64.0f, 48.0f };
+
+				/* Roster keeps the office floor at z=44. Mail and the gate
+				   guard keep the yard gravel at z=0. A drop onto the tarp
+				   (mail landed at z=61) still has a clear chest ray above
+				   the cover, so a yard landing above the gravel is dropped. */
+				ringMax = ( slot == 0 ) ? 80 : 160;
+				for( ring = 0; ring <= ringMax; ring += 4 )
+				{
+					int hi;
+					int landed;
+					Vector stood;
+					Vector from;
+					Vector chest;
+					TraceResult los;
+
+					stood.x = s_home[slot].x + (float)ring;
+					stood.y = s_home[slot].y;
+					stood.z = 0.0f;
+					landed = 0;
+					if( slot == 0 )
+					{
+						TraceResult tr;
+						Vector end;
+
+						stood.z = 44.0f;
+						end = stood;
+						end.z += 1.0f;
+						EFW_TraceFeetHull( pev, stood, end, &tr );
+						if( tr.fStartSolid || tr.fAllSolid )
+							continue;
+						landed = 1;
+					}
+					else
+					{
+						for( hi = 0; hi < 3 && !landed; hi++ )
+						{
+							TraceResult tr;
+							Vector top;
+							Vector bot;
+
+							top.x = stood.x;
+							top.y = stood.y;
+							top.z = kDrop[hi];
+							bot = top;
+							bot.z = -16.0f;
+							EFW_TraceFeetHull( pev, top, bot, &tr );
+							if( tr.fStartSolid || tr.fAllSolid )
+								continue;
+							if( tr.flFraction >= 1.0f || tr.flFraction <= 0.0f )
+								continue;
+							stood.z = tr.vecEndPos.z;
+							landed = 1;
+						}
+						if( !landed || stood.z > 16.0f )
+						{
+							stood.z = 0.0f;
+							landed = 1;
+						}
+					}
+					if( !landed )
+						continue;
+					from = stood;
+					from.x += 64.0f;
+					from.z += 48.0f;
+					chest = stood;
+					chest.z += 48.0f;
+					UTIL_TraceLine( from, chest, ignore_monsters, ENT( pev ), &los );
+					if( los.fStartSolid || los.fAllSolid || los.flFraction < 0.99f )
+						continue;
+					EFW_QueueOrigin( pev, stood );
+					EFW_DebugPrint( "npc stand %s x=%.0f y=%.0f z=%.0f ring=%d",
+						tn, stood.x, stood.y, stood.z, ring );
+					s_stood[slot] = 1;
+					break;
+				}
+			}
+			/* The +X step leaves the desk and the tarp. Map yaw 180
+			   looks back along -X into that cover, so the open side
+			   meets the back. Face +X. The gate guard's yaw 270 looks
+			   along the gate, not into the tarp, and stays. */
+			if( s_stood[slot] && slot != 2 )
+			{
+				float yaw = pev->angles.y;
+				while( yaw < 0.0f )
+					yaw += 360.0f;
+				while( yaw >= 360.0f )
+					yaw -= 360.0f;
+				if( yaw > 1.0f )
+				{
+					static int s_face;
+					pev->angles.y = 0.0f;
+					pev->ideal_yaw = 0.0f;
+					if( s_face < 2 )
+					{
+						s_face++;
+						EFW_DebugPrint( "officer face %s yaw=0", tn );
+					}
+				}
+			}
+			pev->movetype = MOVETYPE_NONE;
+			pev->velocity = Vector( 0, 0, 0 );
+			/* FUN_1000d1d0 calls vtable+0x134, MonsterInit. StartMonster
+			   then sets ACT_IDLE, and that fills m_flFrameRate from
+			   look_idle. Without it StudioFrameAdvance adds nothing and
+			   the uniform stays on frame 0. */
+			if( pMon->m_Activity == ACT_RESET )
+			{
+				pMon->SetActivity( ACT_IDLE );
+				{
+					static int s_idle;
+					if( s_idle < 3 )
+					{
+						s_idle++;
+						EFW_DebugPrint( "officer idle %s seq=%d rate=%.0f",
+							tn, pev->sequence, pMon->m_flFrameRate );
+					}
+				}
+			}
+			EFW_AdvanceNpcAnim( pMon, tn );
+			return;
+		}
+	}
+	pev->movetype = MOVETYPE_STEP;
+	{
+		static int s_mv;
+		if( !s_mv )
+		{
+			s_mv = 1;
+			EFW_DebugPrint( "officer movetype STEP" );
+		}
+	}
+	if( !FStringNull( pev->target ) )
+	{
+		if( !pMon->m_pGoalEnt )
+			pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
+		if( pMon->m_pGoalEnt )
+		{
+			Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+			delta.z = 0;
+			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
+			if( delta.Length() <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
+			{
+				{
+					static int s_corner;
+					if( s_corner < 4 )
+					{
+						s_corner++;
+						EFW_DebugPrint( "corner advance %s dist=%.1f",
+							tn, delta.Length() );
+					}
+				}
+				pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
+			}
+		}
+	}
+	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
+	{
+		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+		delta.z = 0;
+		if( delta.Length() > 8.0f && pMon->m_Activity != ACT_WALK )
+			pMon->SetActivity( ACT_WALK );
+	}
+	else if( pMon->m_Activity == ACT_RESET || pMon->m_Activity == ACT_WALK )
+	{
+		if( pMon->m_Activity != ACT_IDLE )
+			pMon->SetActivity( ACT_IDLE );
+	}
+	float flInterval = EFW_AdvanceNpcAnim( pMon, tn );
+	{
+		static int s_anim;
+		if( s_anim < 8 && EFW_FStrEq( tn, "efw_electrician" ) )
+		{
+			s_anim++;
+			EFW_DebugPrint( "officer anim %s seq=%d frame=%.2f act=%d mt=%d",
+				tn, pev->sequence, pev->frame, (int)pMon->m_Activity, pev->movetype );
+		}
+	}
+	if( pMon->m_pGoalEnt && pMon->m_Activity == ACT_WALK )
+	{
+		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+		float speed;
+		int moved;
+		delta.z = 0;
+		if( delta.Length() > 8.0f )
+		{
+			speed = EFW_NpcGroundSpeed( pMon );
+			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed, flInterval );
+			{
+				static int s_step;
+				if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
+				{
+					s_step++;
+					EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
+						tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
+				}
+			}
+		}
+	}
+}
+
 void EFW_EnableNpcThink( edict_t *pent )
 {
 	CBaseEntity *pEnt;
@@ -794,10 +2477,8 @@ void EFW_EnableNpcThink( edict_t *pent )
 		pRef->SetThink( &CRefugee::IdleThink );
 		/* Fire this frame: +0.1 never elapses while gpGlobals->time is stuck. */
 		pent->v.nextthink = gpGlobals->time;
-		/* MOVETYPE_STEP without SET_MODEL stalls ServerFrame after a few
-		   seconds (same as think-without-studio). IdleThink still runs. */
-		pent->v.movetype = MOVETYPE_NONE;
-		pent->v.solid = SOLID_NOT;
+		/* Bind already set SOLID_BBOX. Leave it so the player hull can meet
+		   them. IdleThink sets MOVETYPE_STEP once the model index exists. */
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}
@@ -806,8 +2487,17 @@ void EFW_EnableNpcThink( edict_t *pent )
 		CPatrolGuard *pGuard = (CPatrolGuard *)pEnt;
 		pGuard->SetThink( &CPatrolGuard::PatrolThink );
 		pent->v.nextthink = gpGlobals->time;
-		pent->v.movetype = MOVETYPE_NONE;
-		pent->v.solid = SOLID_NOT;
+		/* Bind already set SOLID_BBOX. Leave it. PatrolThink sets
+		   MOVETYPE_STEP once the model index exists. */
+		pent->v.flags |= FL_MONSTER;
+		return;
+	}
+	if( !strcmp( cn, "monster_barney" ) )
+	{
+		/* Stock CallMonsterThink runs StartMonster's route through WALK_MOVE.
+		   The pulse calls EFW_OfficerThink instead. */
+		pEnt->SetThink( NULL );
+		pent->v.nextthink = 0;
 		pent->v.flags |= FL_MONSTER;
 		return;
 	}

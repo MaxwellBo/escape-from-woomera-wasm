@@ -14,8 +14,11 @@ typedef struct edict_s edict_t;
 int EFW_ClientCommand( edict_t *pEntity );
 void EFW_PlayerSpawn( CBasePlayer *pPlayer );
 void EFW_PlayerPreThink( CBasePlayer *pPlayer );
+struct usercmd_s;
+void EFW_NoteUsercmd( const struct usercmd_s *cmd );
 void EFW_LinkUserMessages( void );
 void EFW_OverrideNpcModel( CBaseEntity *pEntity );
+const char *EFW_BarneyStudio( const char *targetname ); /* FUN_1000d1d0 */
 int EFW_RefugeeCount( void );
 void EFW_Precache( void );
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc );
@@ -29,6 +32,7 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480 */
 CBaseEntity *EFW_AimEntity( CBasePlayer *pPlayer, float dist );
 int EFW_LookUse( CBasePlayer *pPlayer ); /* FUN_100c4af0 */
+CBaseEntity *EFW_FindNamedNearest( const char *name, CBasePlayer *pPlayer );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_OnDispatchSpawn( edict_t *pent ); /* edict-budget log during map spawn */
@@ -36,6 +40,7 @@ int EFW_ShouldSpawn( edict_t *pent ); /* skip nested worldspawn during FUN_100b2
 int EFW_RejectSpawn( edict_t *pent ); /* pfnSpawn -1 frees duplicate edicts; never worldspawn */
 int EFW_BeginWorldPrecache( void ); /* re-entry guard around CWorld::Precache */
 void EFW_EndWorldPrecache( void );
+void EFW_ApplyWorldSky( void ); /* FUN_100b6140: skyname → day256 / evening256 */
 int EFW_PrecacheOnce( const char *szClassname ); /* one CREATE_NAMED_ENTITY per class */
 void EFW_WPrecache( void ); /* FUN_100b2f80 tail: weapon_efw_* */
 void EFW_OnServerActivate( void );
@@ -59,6 +64,17 @@ void EFW_EnginePrint( const char *line );
 #define WEAPON_EFW_BLUEPHONECARD		23
 #define WEAPON_EFW_WASHINGPOWDER	24
 #define WEAPON_EFW_PILERS			WEAPON_EFW_PLIERS
+
+/* FUN_10044f70 and FUN_10043dd0 walk DAT_100a37a8 in columns of 10
+   inside a stride of 11, and stop before index 0x37. Ids 10, 21, 32,
+   43, and 54 are never read. 21 is weapon_efw_RedPhoneCard, so the
+   starting phone card is not a Give button and not an inventory icon. */
+static inline int EFW_HudWeaponVisited( int id )
+{
+	if( id < 0 || id >= 0x37 )
+		return 0;
+	return ( id % 11 ) != 10;
+}
 
 #define EFW_ITEM_PLIERS			( 1 << 0 )
 #define EFW_ITEM_PILERS			( 1 << 1 )

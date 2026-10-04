@@ -70,6 +70,32 @@ int main( void )
 	fail += expect_action( &s.questions[0].replies[0], 1, "AddDiary(16)" );
 
 	{
+		static const char kNest[] =
+			"Q<GREET>: sad?\n"
+			"A: koran.\n"
+			"#Q: What did you do?\n"
+			" A: complain.\n"
+			"##Q: And then?\n"
+			"  A: nothing.\n"
+			"Q<ESCAPE>: escape.\n"
+			"A: hide.\n";
+		EfwScript_Parse( &s, "Elika", kNest, -1 );
+		if( s.questionCount != 4 || s.questions[0].depth != 0 || s.questions[0].replyCount != 1
+			|| s.questions[1].depth != 1 || strcmp( s.questions[1].text, "What did you do?" ) != 0
+			|| strcmp( s.questions[1].replies[0].text, "complain." ) != 0
+			|| s.questions[2].depth != 2 || s.questions[3].depth != 0
+			|| strcmp( s.questions[3].topic, "ESCAPE" ) != 0 )
+		{
+			printf( "nest q=%d d=%d/%d/%d/%d replies0=%d\n",
+				s.questionCount,
+				s.questions[0].depth, s.questions[1].depth,
+				s.questions[2].depth, s.questions[3].depth,
+				s.questions[0].replyCount );
+			fail++;
+		}
+	}
+
+	{
 		static const char kUnwanted[] =
 			"Q<GREET>: Hello.\n"
 			"A: hi.\n"

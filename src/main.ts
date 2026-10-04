@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll126`;
+    return `${url}?v=efw-dll349`;
   return url;
 }
 
@@ -49,6 +49,395 @@ let engine: XashInstance | null = null;
 let loopbackNet: EfwLoopbackNet | null = null;
 let logLines = 0;
 
+/* GoldSrc SPR (IDSP v2): uint16 palette count, RGB palette, then one frame.
+   texFormat 3 is alphatest (index 255 transparent). These are the
+   FUN_10044f70 CommandButton images. */
+const promptSpriteUrl: Record<string, string> = {};
+
+function decodeGoldSrcSpr(data: Uint8Array): string | null {
+  if (data.length < 80 || data[0] !== 0x49 || data[1] !== 0x44 || data[2] !== 0x53 || data[3] !== 0x50)
+    return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const tex = view.getInt32(12, true);
+  let off = 40;
+  const ncol = view.getUint16(off, true);
+  off += 2;
+  if (ncol < 1 || ncol > 256 || off + ncol * 3 + 20 > data.length)
+    return null;
+  const pal = data.subarray(off, off + ncol * 3);
+  off += ncol * 3;
+  off += 4;
+  const w = view.getInt32(off + 8, true);
+  const h = view.getInt32(off + 12, true);
+  off += 16;
+  if (w < 1 || h > 1024 || h < 1 || w > 1024 || off + w * h > data.length)
+    return null;
+  const canvasEl = document.createElement('canvas');
+  canvasEl.width = w;
+  canvasEl.height = h;
+  const ctx = canvasEl.getContext('2d');
+  if (!ctx)
+    return null;
+  const img = ctx.createImageData(w, h);
+  const pix = data.subarray(off, off + w * h);
+  for (let i = 0; i < pix.length; i++) {
+    const b = pix[i];
+    const o = i * 4;
+    if (tex === 3 && b === 255)
+      continue;
+    if (tex === 2) {
+      img.data[o] = 255;
+      img.data[o + 1] = 255;
+      img.data[o + 2] = 255;
+      img.data[o + 3] = b;
+      continue;
+    }
+    const p = b * 3;
+    img.data[o] = pal[p];
+    img.data[o + 1] = pal[p + 1];
+    img.data[o + 2] = pal[p + 2];
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvasEl.toDataURL('image/png');
+}
+
+function stagedBytes(rel: string): Uint8Array | undefined {
+  const want = `${GAME_DIR}/${rel}`.toLowerCase();
+  const direct = staged.woomera.get(`${GAME_DIR}/${rel}`);
+  if (direct)
+    return direct;
+  for (const [key, value] of staged.woomera) {
+    if (key.toLowerCase() === want)
+      return value;
+  }
+  return undefined;
+}
+
+function ensurePromptSprites() {
+  if (promptSpriteUrl.speech)
+    return;
+  const files: Array<[string, string]> = [
+    ['speech', 'sprites/efw_speech_bubble.spr'],
+    ['give', 'sprites/efw_give_icon.spr'],
+    ['hide', 'sprites/efw_hide_icon.spr'],
+    ['pliers', 'sprites/efw_item_pliers.spr'],
+    ['lever', 'sprites/efw_item_lever.spr'],
+    ['branch', 'sprites/efw_item_branch.spr'],
+    ['phone', 'sprites/efw_item_simcard.spr'],
+    ['idtag', 'sprites/efw_item_idtag.spr'],
+    ['card', 'sprites/efw_item_phonecard.spr'],
+    ['powder', 'sprites/efw_item_washingpowder.spr'],
+  ];
+  for (const [key, rel] of files) {
+    const bytes = stagedBytes(rel);
+    if (!bytes)
+      continue;
+    const url = decodeGoldSrcSpr(bytes);
+    if (url)
+      promptSpriteUrl[key] = url;
+  }
+}
+
+function itemPromptSprite(id: number): string | undefined {
+  switch (id) {
+    case 16: return promptSpriteUrl.pliers;
+    case 17: return promptSpriteUrl.lever;
+    case 18: return promptSpriteUrl.branch;
+    case 19: return promptSpriteUrl.phone;
+    case 20: return promptSpriteUrl.idtag;
+    case 21:
+    case 22:
+    case 23: return promptSpriteUrl.card;
+    case 24: return promptSpriteUrl.powder;
+    default: return promptSpriteUrl.give;
+  }
+}
+
+/* FUN_10044f70: talk uses the speech bubble; give/use uses that weapon's
+   item sprite (weapon info +0xbc). Pickup loads efw_give_icon.spr when
+   HasWep misses, and the weapon sprite when that item is already held. */
+function promptSpriteFor(cmd: string, hint?: string): string | undefined {
+  ensurePromptSprites();
+  if (hint === 'give')
+    return promptSpriteUrl.give;
+  const c = cmd.trim();
+  if (hint === 'wep') {
+    const numbered = c.match(/^efw_(?:Give|UseWithMarker|Pickup)\s+(\d+)/);
+    if (numbered)
+      return itemPromptSprite(Number(numbered[1]));
+  }
+  if (c.startsWith('efw_Talk'))
+    return promptSpriteUrl.speech;
+  if (c.startsWith('efw_HideUnderBuilding'))
+    return promptSpriteUrl.hide;
+  if (c.startsWith('efw_PickupPliers'))
+    return promptSpriteUrl.pliers;
+  const numbered = c.match(/^efw_(?:Give|UseWithMarker|Pickup)\s+(\d+)/);
+  if (numbered)
+    return itemPromptSprite(Number(numbered[1]));
+  if (c.startsWith('efw_Pickup') || c.startsWith('efw_Give'))
+    return promptSpriteUrl.give;
+  /* menuselect is the HUD topic list (FUN_100c6e60), not a world sprite. */
+  return undefined;
+}
+
+function stylePromptButton(btn: HTMLButtonElement, cmd: string, nx: string, ny: string, nw: string, nh: string, hint?: string) {
+  const menu = cmd.trim().match(/^menuselect\s+(\d+)/);
+  if (menu) {
+    /* FUN_100c6e60 draws the topic list in the HUD. The HTML control is only
+       the click target over those lines. */
+    btn.classList.remove('efw-prompt');
+    btn.classList.add('efw-menu');
+    btn.setAttribute('aria-label', btn.textContent || cmd);
+    btn.textContent = '';
+    btn.style.backgroundImage = '';
+    delete btn.dataset.ax;
+    delete btn.dataset.ay;
+    /* FUN_1001db00 draws the Press rows on the lower panel. Keep the
+       strip off the console until that draw reports the pen. */
+    btn.style.left = '0%';
+    btn.style.width = '100%';
+    btn.style.top = '-20%';
+    btn.style.height = '0%';
+    btn.style.pointerEvents = 'none';
+    const saved = menuHit.get(Number(menu[1]));
+    if (saved)
+      placeMenuHit(Number(menu[1]), saved.y, saved.h, btn);
+    return;
+  }
+  btn.classList.remove('efw-menu');
+  const url = promptSpriteFor(cmd, hint);
+  if (!url) {
+    btn.classList.remove('efw-prompt');
+    btn.querySelector(':scope > .efw-prompt-label')?.remove();
+    btn.style.backgroundImage = '';
+    delete btn.dataset.ax;
+    delete btn.dataset.ay;
+    btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
+    btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
+    btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
+    btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    return;
+  }
+  /* Projected point is the orbit center (FUN_10045f20). The label is a
+     separate caption, drawn under the quad only while the cursor is on it. */
+  btn.dataset.ax = String(Number(nx) + Number(nw) / 2);
+  btn.dataset.ay = String(Number(ny) + Number(nh));
+  btn.classList.add('efw-prompt');
+  btn.style.backgroundImage = `url("${url}")`;
+  mountPromptLabel(btn);
+}
+
+function mountPromptLabel(btn: HTMLButtonElement) {
+  const label = (btn.textContent || '').trim();
+  btn.setAttribute('aria-label', label);
+  for (const node of [...btn.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE)
+      node.remove();
+  }
+  let cap = btn.querySelector(':scope > .efw-prompt-label');
+  if (!(cap instanceof HTMLSpanElement)) {
+    cap = document.createElement('span');
+    cap.className = 'efw-prompt-label';
+    btn.appendChild(cap);
+  }
+  cap.textContent = label;
+}
+
+/* FUN_1001db00 hit: Press-line pen, in engine pixels. The strip stays
+   parked until a choices=1 draw reports the row. */
+const menuHit = new Map<number, { y: number; h: number }>();
+
+function parkMenuHits() {
+  menuHit.clear();
+  document.querySelectorAll('#efw-vgui button.efw-menu').forEach((node) => {
+    if (!(node instanceof HTMLButtonElement)) return;
+    node.style.top = '-20%';
+    node.style.height = '0%';
+    node.style.pointerEvents = 'none';
+  });
+}
+
+function placeMenuHit(slot: number, y: number, h: number, btn?: HTMLButtonElement) {
+  const canvas = document.getElementById('canvas') as HTMLCanvasElement | null;
+  const H = canvas?.height || 0;
+  menuHit.set(slot, { y, h });
+  const node = btn ?? document.querySelector(`#efw-vgui button[data-cmd="menuselect ${slot}"]`);
+  if (!(node instanceof HTMLButtonElement) || H < 1) return;
+  const hh = Math.max(15, h);
+  node.style.left = '0%';
+  node.style.width = '100%';
+  node.style.top = `${((y / H) * 100).toFixed(2)}%`;
+  node.style.height = `${((hh / H) * 100).toFixed(2)}%`;
+  node.style.pointerEvents = 'auto';
+}
+
+function applyMenuHit(text: string): boolean {
+  const menu = text.match(/>>> FUN_1001db00 menu reveal=(-?\d+)\/(\d+) choices=(\d+)/);
+  if (menu) {
+    if (menu[3] === '0')
+      parkMenuHits();
+    return false;
+  }
+  const hit = text.match(/>>> FUN_1001db00 hit (\d+) y=(\d+) h=(\d+)/);
+  if (!hit) return false;
+  placeMenuHit(Number(hit[1]), Number(hit[2]), Number(hit[3]));
+  return false;
+}
+
+/* FUN_10045f20 reads cl.time minus DAT_100bc354. That client clock stays
+   near 1, so the open ease would sit at radius 0. The page clock is the
+   stand-in, the same way the host pump stands in for gpGlobals->time.
+   The console and the MEMFS poll both replay CLR plus the same ADDs.
+   Times are remembered per button set so that replay does not jump the
+   icons back to the character. A CLR with no following ADD forgets them. */
+let promptPoseSig = '';
+let promptPoseAt = 0;
+let promptPoseRaf = 0;
+let promptPoseLogged = 0;
+let promptHoverLogged = 0;
+let promptPosePendingClear = false;
+const promptPoseTimes = new Map<string, number>();
+/* FUN_10046900 feeds mouse pixels to FUN_10045ff0. The hotspot is a
+   32px square on the orbit center, in the same pixels as ScreenWidth. */
+let promptPointerX = -9999;
+let promptPointerY = -9999;
+/* FUN_10046040 caption. The engine draws it with pfnDrawCharacter once
+   the 32px square is hot. Empty clears the line. */
+let hotCapLine = '';
+let hotCapSent = '';
+
+function notePromptPointer(ev: PointerEvent) {
+  const canvas = document.getElementById('canvas');
+  if (!(canvas instanceof HTMLCanvasElement))
+    return;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1)
+    return;
+  promptPointerX = (ev.clientX - rect.left) * (canvas.width / rect.width);
+  promptPointerY = (ev.clientY - rect.top) * (canvas.height / rect.height);
+}
+
+function forgetPromptPose() {
+  promptPoseSig = '';
+  promptPoseAt = 0;
+  promptPoseLogged = 0;
+  promptHoverLogged = 0;
+  promptPoseTimes.clear();
+  if (promptPoseRaf) {
+    cancelAnimationFrame(promptPoseRaf);
+    promptPoseRaf = 0;
+  }
+}
+
+function layoutPromptColumn(layer: HTMLElement) {
+  const buttons = [...layer.querySelectorAll('button.efw-prompt')] as HTMLButtonElement[];
+  if (!buttons.length) {
+    hotCapLine = '';
+    return;
+  }
+  /* FUN_10045f20 adds pixels to the projected anchor, not a 640-wide
+     fraction. base = pi * (1 + 2*index/count). Over the first 0.5s,
+     u = 1 - min(2*dt, 1), radius = (1-u^3)*130,
+     angle = base - u^3*pi + sin(dt*pi*0.8)*0.01.
+     FUN_10044bf0 draws a centered quad of that side in screen pixels.
+     FUN_10046040 drops the quad when the center is within 32px of an edge. */
+  const sig = buttons.map((b) => b.dataset.cmd || '').join('|');
+  if (sig !== promptPoseSig) {
+    promptPoseSig = sig;
+    let opened = promptPoseTimes.get(sig);
+    if (opened == null) {
+      opened = performance.now();
+      promptPoseTimes.set(sig, opened);
+      promptPoseLogged = 0;
+    }
+    promptPoseAt = opened;
+  }
+  const dt = Math.max(0, (performance.now() - promptPoseAt) / 1000);
+  const clamped = Math.min(1, dt * 2);
+  const u = 1 - clamped;
+  const u3 = u * u * u;
+  const radiusScale = 1 - u3;
+  const wobble = Math.sin(dt * Math.PI * 0.8) * 0.01;
+  const radius = 130 * radiusScale;
+  const canvas = document.getElementById('canvas');
+  const sw = canvas instanceof HTMLCanvasElement && canvas.width > 0 ? canvas.width : 640;
+  const sh = canvas instanceof HTMLCanvasElement && canvas.height > 0 ? canvas.height : 480;
+  /* FUN_10046040: sin(cl.time * pi * 10/7). Idle side is
+     (sin*0.0225+1.5225)*64. Hover is (sin*0.15+1.65)*64, white.
+     FUN_10045ff0 sets that hover flag only inside the 32px square. */
+  const wave = Math.sin((performance.now() / 1000) * Math.PI * 1.4285715);
+  if (promptPoseLogged === 0) {
+    promptPoseLogged = 1;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+  } else if (promptPoseLogged === 1 && clamped >= 0.5) {
+    promptPoseLogged = 2;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)}`);
+  } else if (promptPoseLogged === 2 && clamped >= 1) {
+    promptPoseLogged = 3;
+    const idle = (wave * 0.0225 + 1.5225) * 64;
+    log(`efw: orbit ease dt=${dt.toFixed(2)} r=${radius.toFixed(1)} side=${idle.toFixed(1)} sw=${sw} hot=32`);
+  }
+  const n = buttons.length;
+  const radiusX = (130 * radiusScale) / sw;
+  const radiusY = (130 * radiusScale) / sh;
+  let hovering = false;
+  let hotLine = '';
+  buttons.forEach((b, i) => {
+    const ax = Number(b.dataset.ax || '0.5');
+    const ay = Number(b.dataset.ay || '0.5');
+    const angle = Math.PI * (1 + (2 * i) / n) - u3 * Math.PI + wobble;
+    const cx = ax + Math.sin(angle) * radiusX;
+    const cy = ay + Math.cos(angle) * radiusY;
+    const cxPx = cx * sw;
+    const cyPx = cy * sh;
+    const onScreen = cxPx - 32 > 0 && cxPx + 32 < sw && cyPx - 32 > 0 && cyPx + 32 < sh;
+    const dx = promptPointerX - cxPx;
+    const dy = promptPointerY - cyPx;
+    const hover = onScreen && Math.abs(dx) <= 32 && Math.abs(dy) <= 32;
+    if (hover) {
+      hovering = true;
+      const label = (b.getAttribute('aria-label') || '').replace(/[\n\r;"]/g, ' ').trim();
+      if (label)
+        hotLine = `${Math.round(cxPx)} ${Math.round(cyPx)} ${label}`;
+    }
+    b.classList.toggle('efw-hot', hover);
+    b.style.visibility = onScreen ? 'visible' : 'hidden';
+    const mul = hover ? wave * 0.15 + 1.65 : wave * 0.0225 + 1.5225;
+    const side = mul * 64;
+    const sprW = side / sw;
+    const sprH = side / sh;
+    b.style.left = `${((cx - sprW / 2) * 100).toFixed(2)}%`;
+    b.style.top = `${((cy - sprH / 2) * 100).toFixed(2)}%`;
+    b.style.width = `${(sprW * 100).toFixed(2)}%`;
+    b.style.height = `${(sprH * 100).toFixed(2)}%`;
+  });
+  if (hovering && promptHoverLogged < 3) {
+    let bucket = 0;
+    if (wave <= -0.85)
+      bucket = 2;
+    else if (wave >= 0.85)
+      bucket = 1;
+    if (bucket >= promptHoverLogged) {
+      promptHoverLogged = bucket + 1;
+      const side = (wave * 0.15 + 1.65) * 64;
+      log(`efw: orbit hover s=${wave.toFixed(2)} side=${side.toFixed(1)}`);
+    }
+  } else if (!hovering && promptHoverLogged >= 3) {
+    promptHoverLogged = 0;
+  }
+  hotCapLine = hotLine;
+  if ((clamped < 1 || hovering) && promptPoseRaf === 0) {
+    promptPoseRaf = requestAnimationFrame(() => {
+      promptPoseRaf = 0;
+      const live = document.getElementById('efw-vgui');
+      if (live)
+        layoutPromptColumn(live);
+    });
+  }
+}
+
 function applyEfwVgui(text: string): boolean {
   const layer = document.getElementById('efw-vgui');
   if (!layer) return false;
@@ -56,8 +445,17 @@ function applyEfwVgui(text: string): boolean {
   if (idx < 0) return false;
   const msg = text.slice(idx).replace(/\s+$/, '');
   if (msg === 'EFWVGUI CLR') {
+    /* Keep the last Press-row positions. The file poll repeats this
+       clear, and the draw log does not repeat the rows. */
     layer.innerHTML = '';
     layer.hidden = true;
+    promptPosePendingClear = true;
+    queueMicrotask(() => {
+      if (!promptPosePendingClear)
+        return;
+      promptPosePendingClear = false;
+      forgetPromptPose();
+    });
     return true;
   }
   if (msg.startsWith('EFWVGUI SCHEME ')) {
@@ -84,10 +482,12 @@ function applyEfwVgui(text: string): boolean {
     return true;
   }
   if (!msg.startsWith('EFWVGUI ADD ')) return true;
+  promptPosePendingClear = false;
   const rest = msg.slice('EFWVGUI ADD '.length);
-  const tab = rest.indexOf('\t');
-  const head = tab >= 0 ? rest.slice(0, tab) : rest;
-  const label = tab >= 0 ? rest.slice(tab + 1) : head;
+  const fields = rest.split('\t');
+  const head = fields[0] || '';
+  const label = fields.length > 1 ? fields[1] : head;
+  const hint = (fields[2] || '').trim();
   const parts = head.split(' ');
   if (parts.length < 5) return true;
   const [nx, ny, nw, nh, ...cmdParts] = parts;
@@ -98,10 +498,8 @@ function applyEfwVgui(text: string): boolean {
   const existing = buttons.find((b) => b.dataset.cmd === cmd);
   if (existing) {
     existing.textContent = label || cmd;
-    existing.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
-    existing.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
-    existing.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
-    existing.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+    stylePromptButton(existing, cmd, nx, ny, nw, nh, hint);
+    layoutPromptColumn(layer);
     return true;
   }
   if (buttons.length >= 6)
@@ -110,27 +508,45 @@ function applyEfwVgui(text: string): boolean {
   btn.type = 'button';
   btn.dataset.cmd = cmd;
   btn.textContent = label || cmd;
-  btn.style.left = `${(Number(nx) * 100).toFixed(2)}%`;
-  btn.style.top = `${(Number(ny) * 100).toFixed(2)}%`;
-  btn.style.width = `${Math.max(8, Number(nw) * 100).toFixed(2)}%`;
-  btn.style.height = `${Math.max(4, Number(nh) * 100).toFixed(2)}%`;
+  stylePromptButton(btn, cmd, nx, ny, nw, nh, hint);
   if (layer.dataset.font) {
     btn.style.fontFamily = layer.style.fontFamily;
     btn.style.fontSize = layer.style.fontSize;
     btn.style.color = layer.style.color;
   }
+  const activate = () => {
+    log(`> ${cmd}`);
+    runEngineCmd('pausable 0');
+    /* FUN_100463c0 flies the button under the cursor, then drops the panel. */
+    if (btn.classList.contains('efw-prompt')) {
+      const prompts = [...layer.querySelectorAll('button.efw-prompt')];
+      const idx = prompts.indexOf(btn);
+      if (idx >= 0)
+        runEngineCmd(`efw_iconfly ${idx}`);
+      promptContext = false;
+      for (const node of prompts)
+        node.remove();
+      layer.hidden = true;
+      forgetPromptPose();
+      hotCapLine = '';
+      if (hotCapSent) {
+        runEngineCmd('efw_hotcap');
+        hotCapSent = '';
+      }
+      runGameCmd('efw_context 0');
+    }
+    runGameCmd(cmd);
+  };
   btn.addEventListener('pointerdown', (ev) => {
-    ev.preventDefault();
     ev.stopPropagation();
   });
   btn.addEventListener('click', (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    log(`> ${cmd}`);
-    runEngineCmd('pausable 0');
-    runGameCmd(cmd);
+    activate();
   });
   layer.appendChild(btn);
+  layoutPromptColumn(layer);
   layer.hidden = false;
   /* Original CommandButtons own the cursor; unlock so the HTML stand-in is clickable. */
   if (document.pointerLockElement)
@@ -143,11 +559,11 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
   0x3c: { title: 'You realise that the guard will search you and find the pliers, and so decide not to leave the kitchen.' },
   0x3d: { title: "You wait until the electrician is not looking, and quickly grab the pliers from the workbench. He doesn't notice, and you hide them under your shirt. Heart pounding, you wonder how to safely get them to Amir." },
   0x3e: { title: 'Again, you wait for the ideal moment to retrieve the pliers from under your shirt and slowly lower them into the bin, careful to not make a sound.' },
-  0x3f: { title: "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed.", next: 'efw_changelevel efw_prototype_level2' },
+  0x3f: { title: "You realise that this is an ideal place to hide yourself for the next few hours, and wait until night falls. Now that the trader has agreed to take your ID tag from the fence, you won't be missed.", next: 'efw_ShowMenu 79' },
   0x40: { title: "There's a hole. You could hide here, if you ever needed to." },
   0x41: { title: "You could hide here, but you'd be caught at dusk when the guards saw your ID tag and came searching." },
   0x42: { title: 'You could hide here and come out at night to get the pliers, if only you had a way to break into the rubbish bin cage.' },
-  0x43: { title: 'You return to the hiding place, with the pliers safely tucked away underneath your shirt.', next: 'efw_changelevel efw_prototype_level3' },
+  0x43: { title: 'You return to the hiding place, with the pliers safely tucked away underneath your shirt.', next: 'efw_ShowMenu 80' },
   0x44: { title: "You could hide again, but you haven't got the pliers yet." },
   0x45: { title: 'You recognise the bin in front of you as the one from the kitchen earlier today. You open the top and dig around inside, and sure enough, the pliers are still there. You retrieve them from the foodscraps and rubbish, and hide them in your clothes. Now to work out how to safely get these back to your fellow plotters.' },
   0x46: { title: 'Isolation.', next: 'efw_changelevel efw_prototype_level2' },
@@ -157,7 +573,7 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
   0x4a: { title: 'Introduction' },
   0x4b: { title: 'Introduction' },
   0x4c: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
-  0x4d: { title: 'Run out of hope!' },
+  0x4d: { title: 'Run out of hope!', next: 'efw_ShowMenu 78' },
   0x4e: { title: 'Ending', next: 'efw_changelevel efw_prototype_level1' },
   0x4f: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level2' },
   0x50: { title: 'Decoy', next: 'efw_changelevel efw_prototype_level3' },
@@ -166,6 +582,12 @@ const EFW_STORY: Record<number, { title: string; next?: string }> = {
 };
 let storyNext = '';
 let storyPaused = false;
+
+function storyIsSprite(code: number): boolean {
+  /* FUN_10047830 loads a Storyboard SPR for these codes. */
+  return code === 0x3f || code === 0x43 || code === 0x46
+    || (code >= 0x49 && code <= 0x52);
+}
 
 function storyboardPauses(code: number): boolean {
   /* FUN_10047830 EFW_Menu Panel ctors; 0x3c–0x45 (not 0x3f/0x43) are ShowMenu.
@@ -197,11 +619,10 @@ function showLetterbox(code: number, caption?: string) {
   layer.hidden = false;
   if (story) story.hidden = true;
   if (interact) interact.hidden = true;
-  if (storyboardPauses(code) && !storyPaused) {
+  /* FUN_10048790 stores the caption, then the Panel sends efw_pause 1.
+     A page pause before that length is set is the context-open edge. */
+  if (storyboardPauses(code))
     storyPaused = true;
-    runEngineCmd('pausable 0');
-    runGameCmd('efw_pause 1');
-  }
   if (document.pointerLockElement)
     document.exitPointerLock();
   log(`efw: letterbox 0x${code.toString(16)}`);
@@ -214,6 +635,25 @@ function dismissLetterbox() {
     runEngineCmd('pausable 0');
     runGameCmd('efw_pause 0');
   }
+}
+
+/* The SPR comic is the engine storyboard. This layer is the click catcher
+   over it, and while it is up the orbit buttons stay visibility:hidden.
+   efw_story_key clears the engine panel on any key. Hide the catcher with
+   that key so the buttons can draw. storyNext stays put so the page can
+   still loadMap the stored changelevel. */
+function hideStoryCatcher(): boolean {
+  const story = document.getElementById('efw-story');
+  const letter = document.getElementById('efw-letter');
+  const storyUp = !!(story && !story.hidden);
+  const letterUp = !!(letter && !letter.hidden);
+  if (!storyUp && !letterUp)
+    return false;
+  if (story)
+    story.hidden = true;
+  if (letter)
+    letter.hidden = true;
+  return true;
 }
 
 function dismissEfwStory() {
@@ -242,7 +682,22 @@ function dismissEfwStory() {
   }
 }
 
+function isNarrationMenu(code: number): boolean {
+  /* FUN_100c81d0 calls FUN_100c6e60 for these codes. 0x3f and 0x43
+     add hope and send EFW_Menu. The blue panel is the caption. */
+  return code === 0x3c || code === 0x3d || code === 0x3e
+    || code === 0x40 || code === 0x41 || code === 0x42
+    || code === 0x44 || code === 0x45;
+}
+
 function showEfwStory(code: number, fallback?: string) {
+  if (isNarrationMenu(code)) {
+    const layer = document.getElementById('efw-story');
+    if (layer && !layer.classList.contains('efw-story-spr'))
+      layer.hidden = true;
+    log(`efw: FUN_100c81d0 menu 0x${code.toString(16)}`);
+    return;
+  }
   if (code === 0x48) {
     /* FUN_10048650: 0xd4 Panel, no storyboard SPR. FUN_10048710 pauses. */
     if (!storyPaused) {
@@ -271,6 +726,7 @@ function showEfwStory(code: number, fallback?: string) {
     return;
   text.textContent = title;
   storyNext = spec?.next || '';
+  layer.classList.toggle('efw-story-spr', storyIsSprite(code));
   layer.hidden = false;
   const interact = document.getElementById('efw-interact');
   if (interact) interact.hidden = true;
@@ -337,7 +793,8 @@ function setHopeHud(n: number): void {
   const el = document.getElementById('efw-hope');
   const label = document.getElementById('efw-hope-label');
   const row = document.getElementById('efw-hope-ticks');
-  if (el) el.hidden = false;
+  /* The GL redraw draws FUN_1001daa0. This DOM copy sat on those bars. */
+  if (el) el.hidden = true;
   if (label) label.textContent = `HOPE  ${hope}`;
   if (!row) return;
   if (row.childElementCount !== 10) {
@@ -416,7 +873,6 @@ function applyDiaryHud(text: string): boolean {
   const fade = text.match(/>>> FUN_1001db00 diaryfade=([\d.]+) inv=([\d.]+) veil=([\d.]+) page=(\d+)/);
   if (fade) {
     const df = Number(fade[1]);
-    const inf = Number(fade[2]);
     const page = fade[4];
     const el = document.getElementById('efw-diary');
     const label = document.getElementById('efw-diary-label');
@@ -426,10 +882,11 @@ function applyDiaryHud(text: string): boolean {
       el.style.setProperty('--efw-diary-fade', String(df));
     }
     if (label) label.textContent = `DIARY  ${page}`;
+    /* FUN_10043dd0 draws the names in the client HUD. The HTML copy
+       sat the two labels on top of each other. */
     if (inv) {
-      inv.hidden = inf <= 0;
-      inv.style.setProperty('--efw-fade', String(inf));
-      inv.classList.toggle('full', inf >= 1);
+      inv.hidden = true;
+      inv.replaceChildren();
     }
     return false;
   }
@@ -457,7 +914,8 @@ function applyContextHud(text: string): boolean {
     return false;
   }
   if (text.includes('>>> FUN_10046590 none')) {
-    if (none) none.hidden = false;
+    /* FUN_10046590 already DrawHudString's this line. */
+    if (none) none.hidden = true;
     return false;
   }
   return false;
@@ -466,16 +924,10 @@ function applyContextHud(text: string): boolean {
 function applyInteractHud(text: string): boolean {
   const m = text.match(/>>> FUN_10046590 interact=(.*)$/);
   if (!m) return false;
-  const name = m[1].trim();
   const el = document.getElementById('efw-interact');
-  const span = document.getElementById('efw-interact-name');
-  if (!el) return false;
-  if (!name) {
-    el.hidden = true;
-    return false;
-  }
-  el.hidden = false;
-  if (span) span.textContent = name === '-' ? '' : name;
+  /* FUN_10046590 paints the name bar and the click line. The HTML copy
+     sat a second caption on that bar. */
+  if (el) el.hidden = true;
   return false;
 }
 
@@ -488,68 +940,28 @@ function applyLetterHud(text: string): boolean {
     return false;
   }
   if (text.includes('>>> FUN_10043bb0') || text.includes('>>> FUN_1001d750')) {
-    const cont = document.getElementById('efw-letter-cont');
-    if (cont && text.includes('>>> FUN_10043bb0'))
-      cont.hidden = false;
+    /* FUN_10043bb0 draws "Press left mouse button to continue". */
     return false;
   }
   return false;
 }
 
 function applyInvHud(text: string): boolean {
-  const fadeOnly = text.match(/>>> FUN_10043dd0 fade=([\d.]+)(?: n=(\d+)(?: (.*))?)?$/);
   const el = document.getElementById('efw-inv');
   if (!el) return false;
-  if (fadeOnly) {
-    const fade = Number(fadeOnly[1]);
-    el.hidden = fade <= 0;
-    el.style.setProperty('--efw-fade', String(fade));
-    el.classList.toggle('full', fade >= 1);
-    if (fade >= 1 && fadeOnly[2]) {
-      const n = Number(fadeOnly[2]);
-      const names = (fadeOnly[3] || '').split(',').map((s) => s.trim()).filter(Boolean);
-      el.innerHTML = '';
-      names.forEach((name) => {
-        const i = document.createElement('i');
-        i.textContent = name;
-        el.appendChild(i);
-      });
-      if (n <= 0) el.innerHTML = '';
-    }
-    if (fade < 1) el.classList.remove('full');
-    return false;
-  }
-  const m = text.match(/>>> FUN_10043dd0 n=(\d+)(?: (.*))?$/);
-  if (!m) return false;
-  const n = Number(m[1]);
-  const names = (m[2] || '').split(',').map((s) => s.trim()).filter(Boolean);
-  el.innerHTML = '';
-  if (n <= 0) {
+  /* Names are DrawHudString in FUN_10043dd0, 128px apart. */
+  if (text.includes('>>> FUN_10043dd0')) {
     el.hidden = true;
-    return false;
+    el.replaceChildren();
   }
-  names.forEach((name) => {
-    const i = document.createElement('i');
-    i.textContent = name;
-    el.appendChild(i);
-  });
-  el.hidden = false;
-  el.classList.add('full');
-  el.style.setProperty('--efw-fade', '1');
   return false;
 }
 
-function applyPrevQuestion(text: string): boolean {
-  const m = text.match(/>>> prevq (.+)$/);
+function applyPrevQuestion(_text: string): boolean {
   const el = document.getElementById('efw-prevq');
-  const p = document.getElementById('efw-prevq-text');
-  if (text.includes('Conversation hidden, partner too far') || text.includes('<conversation inactive>')) {
-    if (el) el.hidden = true;
-    return false;
-  }
-  if (!m) return false;
-  if (el) el.hidden = false;
-  if (p) p.textContent = m[1];
+  /* FUN_1001db00 draws the previous line in the menu. The page header
+     duplicated that line in white above the view. */
+  if (el) el.hidden = true;
   return false;
 }
 
@@ -565,13 +977,33 @@ function log(text: string) {
   applyInvHud(normalized);
   applyLetterHud(normalized);
   applyPrevQuestion(normalized);
+  applyMenuHit(normalized);
   if (normalized.includes('efw: ServerActivate ents='))
     onServerActivateSeen();
+  if (normalized.includes('not valid from the console'))
+    armBootConsoleClose();
   if (normalized.includes('CHANGE_LEVEL returned') || normalized.includes('CHANGE_LEVEL StartFrame'))
     logChangeLevelProgress(normalized);
   if (normalized.includes('HUD_Redraw skip') || normalized.includes('StartFrame done live=')
       || normalized.includes('efw: world present live='))
     resumeAfterFirstClientFrame();
+  if (normalized.includes('>>> FUN_10043750') || /efw: HUD_Draw n=(\d+)/.test(normalized)) {
+    const n = /efw: HUD_Draw n=(\d+)/.exec(normalized);
+    if (n)
+      maybeCloseBootConsole(Number(n[1]));
+    if (!n || Number(n[1]) > 8) {
+      setTimeout(() => {
+        runEngineCmd('con_notifytime -1');
+        log('listen: con_notifytime -1');
+      }, 400);
+    }
+  }
+  if (consoleForPlaque && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip'))
+    schedulePlaqueClose();
+  if (chapterNeedsGameKey && listenReady && !changeWatch && normalized.includes('HUD_Redraw skip')) {
+    chapterNeedsGameKey = false;
+    setTimeout(() => dismissChapterOverlay(), 2500);
+  }
   if (/\bSpawning\b/.test(normalized) && normalized.includes('loopback'))
     finishListenSpawn();
   if (applyEfwStory(normalized)) return;
@@ -647,10 +1079,19 @@ let lastResumeMs = 0;
    Hold key_console only for SCR_BeginLoadingPlaque, then release after
    HUD_Redraw (proof of ca_active). */
 let consoleForPlaque = false;
+let plaqueCloseTimer: ReturnType<typeof setTimeout> | null = null;
+/* 0 idle, 1 engine rejected `begin` while key_dest was still the console,
+   2 the follow-up toggle has run. Con_ToggleConsole_f returns immediately
+   unless cls.state is ca_active, so the HUD_Redraw toggle is a no-op and
+   the half-screen console stays over the view. The rejection is the proof
+   key_dest is still key_console; the next toggle takes the close branch. */
+let bootConsoleState = 0;
 /* First-map libmenu pause is why engine StartFrame never advances without
    HostPump. Software present hung on UI_SetActiveMenu(false). WebGL2
    (gles3compat) is the new present path that can survive key_game. */
 let firstMapKeyGame = false;
+let chapterChanging = false;
+let chapterNeedsGameKey = false;
 function resumeEngineLoop() {
   const now = Date.now();
   /* resume() increments currentlyRunningMainloop and aborts the in-flight
@@ -667,31 +1108,96 @@ function resumeEngineLoop() {
   }
 }
 
+function dismissChapterOverlay() {
+  /* Same open-then-close as the first map. One toggle leaves the console
+     up; the second calls UI_SetActiveMenu(false) and the chapter view
+     stays on screen. */
+  log('listen: chapter double toggleconsole → key_game');
+  runEngineCmd('pausable 0');
+  runEngineCmd('toggleconsole');
+  setTimeout(() => {
+    runEngineCmd('toggleconsole');
+    runEngineCmd('setpause 0');
+    runEngineCmd('unpause');
+    runEngineCmd('pausable 0');
+    log('listen: chapter key_game');
+  }, 300);
+}
+
+function schedulePlaqueClose() {
+  if (!consoleForPlaque || plaqueCloseTimer)
+    return;
+  /* HUD_Redraw skip is the ca_active proof. A toggle any earlier is ignored
+     and the loading console stays over the next chapter. */
+  plaqueCloseTimer = setTimeout(() => {
+    plaqueCloseTimer = null;
+    releaseConsoleToGame();
+  }, 3500);
+}
+
 function releaseConsoleToGame() {
   if (!consoleForPlaque)
     return;
   consoleForPlaque = false;
+  if (plaqueCloseTimer) {
+    clearTimeout(plaqueCloseTimer);
+    plaqueCloseTimer = null;
+  }
+  /* The first-map double toggle must not run after this close, or it
+     opens the console again on top of the next chapter. */
+  firstMapKeyGame = true;
   /* ca_active is required: otherwise Con_ToggleConsole_f reopens the menu. */
   runEngineCmd('toggleconsole');
   log('listen: toggleconsole while ca_active (UI_SetActiveMenu false)');
 }
 
+function armBootConsoleClose() {
+  if (bootConsoleState !== 0 || consoleForPlaque || changeWatch)
+    return;
+  bootConsoleState = 1;
+  log('listen: begin rejected from console — close once HUD is up');
+}
+
+function maybeCloseBootConsole(hudN: number) {
+  if (bootConsoleState !== 1 || hudN < 40)
+    return;
+  if (consoleForPlaque || changeWatch || chapterChanging)
+    return;
+  bootConsoleState = 2;
+  /* Outside the print callback. toggleconsole from inside Con_Printf
+     nests Cmd_ExecuteString in the frame that is still painting. */
+  setTimeout(() => {
+    if (consoleForPlaque || changeWatch) {
+      bootConsoleState = 1;
+      return;
+    }
+    runEngineCmd('toggleconsole');
+    log('listen: toggleconsole closed boot console');
+  }, 400);
+}
+
 function dismissMenuAfterHud() {
   if (consoleForPlaque) {
-    releaseConsoleToGame();
+    /* HUD_Redraw can fire while CHANGE_LEVEL is still connecting.
+       toggleconsole then leaves the console open over the next chapter.
+       The ServerActivate world-present timeout closes it once the view
+       origin is live. */
     startHostPumps();
+    log('listen: hold plaque console until world present');
     return;
   }
   if (firstMapKeyGame)
     return;
   firstMapKeyGame = true;
-  /* HUD_Redraw skip proves ca_active. Open then close console so
-     Con_ToggleConsole_f calls UI_SetActiveMenu(false) → key_game.
-     Deferred: never nest Cmd_ExecuteString inside HUD_Redraw. */
-  log('listen: gles3compat first-map double toggleconsole → key_game');
+  /* HUD_Redraw proves ca_active, and the boot console is already
+     key_console (Con_DestHeight is half the framebuffer). One
+     Con_ToggleConsole_f closes it and calls UI_SetActiveMenu(false).
+     A second toggle opens it again: the 3D view stays the bottom half
+     and the intro pixels above it are never redrawn. Deferred so
+     Cmd_ExecuteString is not nested inside HUD_Redraw. */
+  log('listen: gles3compat first-map toggleconsole → key_game');
   runEngineCmd('toggleconsole');
   setTimeout(() => {
-    runEngineCmd('toggleconsole');
     runEngineCmd('setpause 0');
     runEngineCmd('unpause');
     runEngineCmd('pausable 0');
@@ -704,7 +1210,7 @@ function dismissMenuAfterHud() {
     runEngineCmd('r_norefresh 0');
     runEngineCmd('r_drawworld 1');
     runEngineCmd('r_drawentities 1');
-    runEngineCmd('r_fullbright 1');
+    runEngineCmd('r_fullbright 0');
     runEngineCmd('r_novis 1');
     runEngineCmd('gl_clear 1');
     runEngineCmd('ui_renderworld 1');
@@ -713,14 +1219,23 @@ function dismissMenuAfterHud() {
   }, 250);
 }
 
+function applyMapSky() {
+  /* sv_skyname alone does not rebuild the skybox. skyname does.
+     Level 2 is the dusk set; the other maps are day256. */
+  if (!startedMap) return;
+  const sky = startedMap.indexOf('level2') >= 0 ? 'evening256' : 'day256';
+  runEngineCmd(`skyname ${sky}`);
+}
+
 function forceWorldPresent() {
   runEngineCmd('r_norefresh 0');
   runEngineCmd('r_drawworld 1');
   runEngineCmd('r_drawentities 1');
-  runEngineCmd('r_fullbright 1');
+  runEngineCmd('r_fullbright 0');
   runEngineCmd('r_novis 1');
   runEngineCmd('gl_clear 1');
   runEngineCmd('ui_renderworld 1');
+  applyMapSky();
 }
 
 function resumeAfterFirstClientFrame() {
@@ -735,6 +1250,10 @@ function resumeAfterFirstClientFrame() {
      aborted the rAF runner, so CHANGE_LEVEL never reached SV_Exec. */
   setTimeout(() => {
     if (changeWatch) return;
+    /* Client cvars register after ServerActivate, which puts the
+       default back. 0 does not expire a notify line while the client
+       clock is frozen (the test is cl.time - stamp > cvar). -1 does. */
+    runEngineCmd('con_notifytime -1');
     dismissMenuAfterHud();
   }, 80);
 }
@@ -754,8 +1273,24 @@ function startHostPumps() {
   /* Keep pulsing StartFrame after key_game. Libmenu used to pause the
      listen server; a 80-tick cap left hope/TalkScan frozen once HostPump
      stopped even though WebGL2 was still presenting. */
+  let lastPumpMs = 0;
   pumpTimer = setInterval(() => {
-    runEngineCmd('efw_pump');
+    const now = performance.now();
+    const dt = lastPumpMs ? Math.min(0.25, (now - lastPumpMs) / 1000) : 0.12;
+    lastPumpMs = now;
+    runEngineCmd(`efw_pump ${dt.toFixed(3)}`);
+    /* FUN_10045f20 keeps moving for half a second after the buttons exist.
+       The vgui file does not rewrite, so the pump is what steps the ease
+       when a paint callback does not land between wasm frames. */
+    const poseLayer = document.getElementById('efw-vgui');
+    if (poseLayer?.querySelector('button.efw-prompt'))
+      layoutPromptColumn(poseLayer);
+    else
+      hotCapLine = '';
+    if (hotCapLine !== hotCapSent) {
+      runEngineCmd(hotCapLine ? `efw_hotcap ${hotCapLine}` : 'efw_hotcap');
+      hotCapSent = hotCapLine;
+    }
     pumps++;
     if (pumps === 1 || (pumps % 80) === 0)
       log(`listen: hostpump n=${pumps}`);
@@ -797,7 +1332,15 @@ function loadMap(name: string, reason: string) {
   lastActivateMs = 0;
   resumedAfterClientFrame = false;
   consoleForPlaque = false;
-  firstMapKeyGame = false;
+  chapterChanging = true;
+  chapterNeedsGameKey = true;
+  if (plaqueCloseTimer) {
+    clearTimeout(plaqueCloseTimer);
+    plaqueCloseTimer = null;
+  }
+  firstMapKeyGame = true;
+  if (bootConsoleState === 2)
+    bootConsoleState = 0;
   if (pumpTimer) {
     clearInterval(pumpTimer);
     pumpTimer = null;
@@ -819,13 +1362,14 @@ function loadMap(name: string, reason: string) {
     log(`listen: pfnChangeLevel ${name}`);
     runEngineCmd('pausable 0');
     runEngineCmd('sv_validate_changelevel 0');
-    /* Plaque SCR_UpdateScreen hangs the software renderer. key_console
-       makes SCR_BeginLoadingPlaque return before that present.
-       Do not toggleconsole again until HUD_Redraw: closing the console
-       while !ca_active calls UI_SetActiveMenu(true) and brings libmenu back. */
-    runEngineCmd('toggleconsole');
-    consoleForPlaque = true;
-    log('listen: key_console for plaque (skip software present hang)');
+    /* WebGL presents through the loading plaque, so do not open the
+       console here. While cls.state is ca_connected the engine draws the
+       console anyway; toggleconsole before ca_active is a no-op, and the
+       same call once background cvars are set opens the main menu. */
+    runEngineCmd('sv_background 0');
+    runEngineCmd('cl_background 0');
+    consoleForPlaque = false;
+    log('listen: changelevel without plaque console');
     runEngineCmd(`efw_changelevel ${name}`);
     /* Do not resumeMainLoop here. A live rAF is what runs SV_ExecChangeLevel
        on the next COM_Frame; kicking resume aborts that runner (dll65/74). */
@@ -886,7 +1430,8 @@ function onServerActivateSeen() {
   /* First map: keep the world presenting. r_norefresh 1 here used to paint
      a black canvas for the whole session because HUD_Redraw often never
      ran. Only blank the plaque during CHANGE_LEVEL. */
-  runEngineCmd('r_drawviewmodel 0');
+  /* GoldSrc draws the held view model (v_idtag and the rest). */
+  runEngineCmd('r_drawviewmodel 1');
   if (changing) {
     runEngineCmd('r_norefresh 1');
   } else {
@@ -900,7 +1445,8 @@ function onServerActivateSeen() {
   runEngineCmd('ui_renderworld 1');
   setTimeout(() => {
     runEngineCmd('developer 0');
-    runEngineCmd('con_notifytime 0');
+    runEngineCmd('con_notifytime -1');
+    applyMapSky();
     runEngineCmd('pausable 0');
     runEngineCmd('cancelselect');
     runEngineCmd('ui_renderworld 1');
@@ -939,15 +1485,18 @@ function onServerActivateSeen() {
     runEngineCmd('r_drawentities 1');
     runEngineCmd('ui_renderworld 1');
     runEngineCmd('scr_loading 0');
+    runEngineCmd('con_notifytime -1');
     finishListenSpawn();
     runEngineCmd('status');
     log('listen: r_norefresh 0 r_drawworld 1 (world present)');
-    if (!firstMapKeyGame)
+    if (!chapterChanging && !firstMapKeyGame && !consoleForPlaque)
       dismissMenuAfterHud();
+    chapterChanging = false;
   }, 2500);
   if (!pausableTimer) {
     pausableTimer = setInterval(() => {
       runEngineCmd('pausable 0');
+      runEngineCmd('con_notifytime -1');
     }, 4000);
   }
 }
@@ -1025,6 +1574,78 @@ function unzipZipOnMain(buf: Uint8Array): Record<string, Uint8Array> {
   return unzipSync(buf);
 }
 
+/* Retail halflife.wad is not in the Uplink set. These names are on
+   drawn faces (texinfo flags 0). Xash paints the missing-texture
+   checker there: the yard lamp heads are metal_bord06 plus
+   skkylightdim, and the kitchen shelf is generic007. Each stand-in
+   is already in woomera.wad. clip, origin, and aaatrigger stay,
+   because their texinfo flag is TEX_SPECIAL. */
+const WAD_STANDIN: Record<string, string> = {
+  metal_bord01: 'metal_edge',
+  metal_bord06: 'metal_edge',
+  skkylightdim: 'fluro',
+  skkylite: 'fluro',
+  generic007: 'electric',
+  freezer_bx2: 'fridge_door',
+  freezer_bx3: 'fridge_door',
+  freezer_bx5: 'fridge_door',
+  freezer_bx6: 'fridge_door',
+  freezer_bx8: 'fridge_door',
+  xcrate9a: 'cardboard',
+  xcrate9b: 'cardboard',
+  xcrate9c: 'cardboard',
+  paper4: '{paper',
+  paper6: '{paper',
+  fiftsfile1: 'file',
+  fiftsfile2b: 'file',
+  out_roof1: 'roof',
+  subway_seat: 'benchtop',
+  rope: 'pipe',
+  '{blue': 'folder_blue',
+  '{grass2': '{dmcgrassb',
+  '8ball1': 'greywall_plain',
+  '-0out_cuby': 'sky',
+  '-1out_cuby': 'sky',
+  '-2out_cuby': 'sky',
+  '-3out_cuby': 'sky',
+  '-4out_cuby': 'sky',
+  '-5out_cuby': 'sky',
+};
+
+function retargetMissingWadTextures(bsp: Uint8Array): { bsp: Uint8Array; replaced: number } {
+  if (bsp.length < 124) return { bsp, replaced: 0 };
+  const view = new DataView(bsp.buffer, bsp.byteOffset, bsp.byteLength);
+  if (view.getInt32(0, true) !== 30) return { bsp, replaced: 0 };
+  const lumpOff = view.getInt32(4 + 2 * 8, true);
+  const lumpLen = view.getInt32(4 + 2 * 8 + 4, true);
+  if (lumpOff < 0 || lumpLen < 4 || lumpOff + lumpLen > bsp.length)
+    return { bsp, replaced: 0 };
+  const count = view.getInt32(lumpOff, true);
+  if (count < 1 || count > 512 || lumpOff + 4 + count * 4 > bsp.length)
+    return { bsp, replaced: 0 };
+  const out = bsp.slice();
+  const outView = new DataView(out.buffer, out.byteOffset, out.byteLength);
+  let replaced = 0;
+  for (let i = 0; i < count; i++) {
+    const rel = outView.getInt32(lumpOff + 4 + i * 4, true);
+    if (rel < 0) continue;
+    const at = lumpOff + rel;
+    if (at < 0 || at + 16 > out.length) continue;
+    let name = '';
+    for (let c = 0; c < 16; c++) {
+      const ch = out[at + c];
+      if (ch === 0) break;
+      name += String.fromCharCode(ch);
+    }
+    const next = WAD_STANDIN[name];
+    if (!next || next.length > 15) continue;
+    for (let c = 0; c < 16; c++) out[at + c] = 0;
+    for (let c = 0; c < next.length; c++) out[at + c] = next.charCodeAt(c);
+    replaced++;
+  }
+  return replaced ? { bsp: out, replaced } : { bsp, replaced: 0 };
+}
+
 function unzipZipInWorker(buf: Uint8Array): Promise<Record<string, Uint8Array>> {
   return new Promise((resolve, reject) => {
     let worker: Worker;
@@ -1095,8 +1716,27 @@ async function stageModZip() {
     if (rel.toLowerCase() === 'liblist.gam') {
       payload = new TextEncoder().encode(patchLibList(new TextDecoder().decode(data)));
     }
+    if (rel.toLowerCase().endsWith('.bsp')) {
+      const patched = retargetMissingWadTextures(payload);
+      if (patched.replaced) {
+        payload = patched.bsp;
+        log(`wad stand-in ${rel} ${patched.replaced}`);
+      }
+    }
     staged.woomera.set(`${GAME_DIR}/${out}`, payload);
     bytes += (data as Uint8Array).length;
+  }
+  /* evening256 shipped five faces. Xash drops the whole skybox when one
+     face is missing and draws the Quake cloud sphere instead, so level 2
+     never showed the dusk set. The down face is the up face: the ground
+     covers it. */
+  {
+    const up = staged.woomera.get(`${GAME_DIR}/gfx/env/evening256up.tga`);
+    const dn = `${GAME_DIR}/gfx/env/evening256dn.tga`;
+    if (up && !staged.woomera.has(dn)) {
+      staged.woomera.set(dn, up);
+      log('sky: evening256dn copied from evening256up');
+    }
   }
   assetsStatus.textContent = `${staged.woomera.size} files (${fmtMB(bytes)}), skipped ${skipped} Win32/unused`;
   markDone('step-assets');
@@ -1305,6 +1945,22 @@ function nativeScreenSize(): ViewSize {
   };
 }
 
+function pinDevicePixelRatio() {
+  /* Xash multiplies the -width/-height client area by devicePixelRatio.
+     This display reports 0.984375, so the 800×600 wrap became a 787×590
+     backing store. FUN_10043750 then centers the 800×600 storyboard at
+     ox=-6, oy=-5 and the page stretches that buffer back to the wrap,
+     clipping the comic. The client area is the CSS box. */
+  try {
+    Object.defineProperty(window, 'devicePixelRatio', {
+      configurable: true,
+      get: () => 1,
+    });
+  } catch (err) {
+    log(`dpr shim failed: ${formatErr(err)}`);
+  }
+}
+
 function viewBox(): ViewSize {
   const wrap = canvas.parentElement;
   const fallback = { width: 960, height: 720 };
@@ -1435,6 +2091,7 @@ async function captureInput() {
 
 async function boot() {
   if (engine || btnLaunch.disabled) return;
+  pinDevicePixelRatio();
   btnLaunch.disabled = true;
   launchStatus.textContent = 'starting engine…';
   engineStatus.textContent = 'initializing WASM';
@@ -1487,7 +2144,7 @@ async function boot() {
       '+r_drawentities',
       '1',
       '+r_drawviewmodel',
-      '0',
+      '1',
       '+r_drawparticles',
       '0',
       '+r_norefresh',
@@ -1499,7 +2156,7 @@ async function boot() {
       '+ui_renderworld',
       '1',
       '+r_fullbright',
-      '1',
+      '0',
       '+cl_himodels',
       '0',
     ];
@@ -1664,7 +2321,23 @@ async function boot() {
 
 btnLaunch.addEventListener('click', () => void boot());
 canvas.addEventListener('click', () => void captureInput());
-canvas.addEventListener('pointerdown', () => canvas.focus());
+/* FUN_10048710: a click on the interact bar opens the command buttons
+   (efw_pause 1, FUN_10046370). The next click dismisses them. The first
+   press only locks the pointer; the game click is the one after that. */
+let promptContext = false;
+canvas.addEventListener('pointerdown', (ev) => {
+  canvas.focus();
+  const caught = ev.button === 0 && hideStoryCatcher();
+  if (ev.button === 0)
+    runGameCmd('efw_story_key');
+  if (caught) {
+    dismissEfwStory();
+    return;
+  }
+  if (ev.button !== 0 || document.pointerLockElement !== canvas) return;
+  promptContext = !promptContext;
+  runGameCmd(promptContext ? 'efw_context 1' : 'efw_context 0');
+});
 document.addEventListener('pointerlockchange', syncCaptureUi);
 document.addEventListener('pointerlockerror', () => log('pointer lock error'));
 consoleInput.addEventListener('keydown', (e) => e.stopPropagation());
@@ -1700,6 +2373,8 @@ document.getElementById('efw-letter')?.addEventListener('click', (ev) => {
   ev.preventDefault();
   ev.stopPropagation();
   dismissLetterbox();
+  /* Caption InputSignal: EFW_DismissCaption on mouse1. */
+  runGameCmd('efw_story_key');
 });
 document.getElementById('btn-talk')?.addEventListener('click', () => {
   log('> talk (efw_Talk Amir)');
@@ -1754,12 +2429,92 @@ function walkSlot(key: string): keyof typeof walkKeys | null {
 function syncWalkLatch() {
   const fwd = (walkKeys.w ? 1 : 0) + (walkKeys.s ? -1 : 0);
   const side = (walkKeys.d ? 1 : 0) + (walkKeys.a ? -1 : 0);
+  /* CL_CreateMove writes efw_pmove into the usercmd. Libmenu pauses the
+     listen server, so that usercmd never lands on pev->button and PM_Move
+     never spends it. The host pump walks from efw_move. */
   runGameCmd(`efw_move ${fwd} ${side}`);
+  runGameCmd(`efw_pmove ${fwd} ${side}`);
 }
+function syncJump(on: boolean) {
+  /* Listen-server console runs the client command. Stufftext from
+     efw_cjump does not reach CL_CreateMove. */
+  runGameCmd(`efw_pjump ${on ? 1 : 0}`);
+}
+function syncDuck(on: boolean) {
+  runGameCmd(`efw_pduck ${on ? 1 : 0}`);
+}
+function syncSpeed(on: boolean) {
+  /* +speed is SHIFT in config.cfg. The pump rebuilds the wish from
+     cl_forwardspeed, so the key has to reach the server as efw_pspeed. */
+  runGameCmd(`efw_pspeed ${on ? 1 : 0}`);
+}
+function syncUseHold(on: boolean) {
+  /* +use on the ground cuts maxspeed to a third. The pump does not read
+     the usercmd magnitude, so the hold has to reach the server. */
+  runGameCmd(`efw_puse ${on ? 1 : 0}`);
+}
+
+/* Coalesce pointer deltas to one usercmd look per frame. The client DLL
+   adds them to cmd->viewangles; PM_Move turns. efw_turn remains the
+   server latch for anything that still calls it directly. */
+const lookPending = { yaw: 0, pitch: 0 };
+let lookFlushQueued = false;
+function queueLook(yaw: number, pitch: number) {
+  if (!yaw && !pitch) return;
+  lookPending.yaw += yaw;
+  lookPending.pitch += pitch;
+  if (lookFlushQueued) return;
+  lookFlushQueued = true;
+  requestAnimationFrame(() => {
+    lookFlushQueued = false;
+    const y = lookPending.yaw;
+    const p = lookPending.pitch;
+    lookPending.yaw = 0;
+    lookPending.pitch = 0;
+    if (!y && !p) return;
+    /* Same console path as efw_pmove. efw_clook's stufftext never reaches
+       CL_CreateMove, so the view delta is applied here. */
+    runGameCmd(`efw_plook ${y.toFixed(3)} ${p.toFixed(3)}`);
+  });
+}
+
+document.addEventListener('pointermove', notePromptPointer);
+
+document.addEventListener('mousemove', (e) => {
+  if (!inputCaptured()) return;
+  if (!e.movementX && !e.movementY) return;
+  queueLook(-e.movementX * 0.08, e.movementY * 0.08);
+});
 
 document.addEventListener('keydown', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  if (!e.repeat) {
+    const caught = hideStoryCatcher();
+    runGameCmd('efw_story_key');
+    if (caught) {
+      dismissEfwStory();
+      return;
+    }
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncJump(true);
+    return;
+  }
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncDuck(true);
+    return;
+  }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+    e.preventDefault();
+    if (e.repeat) return;
+    syncSpeed(true);
+    return;
+  }
   const walk = walkSlot(e.key);
   if (walk) {
     if (e.repeat) return;
@@ -1770,11 +2525,11 @@ document.addEventListener('keydown', (e) => {
   if (e.repeat)
     return;
   if (e.key === 'ArrowLeft' || e.key === 'q' || e.key === 'Q') {
-    runGameCmd('efw_turn 12');
+    queueLook(12, 0);
     return;
   }
   if (e.key === 'ArrowRight' || e.key === 'z' || e.key === 'Z') {
-    runGameCmd('efw_turn -12');
+    queueLook(-12, 0);
     return;
   }
   if (e.key === 'e' || e.key === 'E' || e.key === 'Escape' || e.key === 'Enter') {
@@ -1789,6 +2544,7 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'e' || e.key === 'E') {
     log('> E (IN_USE)');
     runEngineCmd('pausable 0');
+    syncUseHold(true);
     runGameCmd('efw_inuse');
     runGameCmd('use');
   } else if (e.key === 'i' || e.key === 'I') {
@@ -1798,6 +2554,22 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('keyup', (e) => {
   if (e.target === consoleInput || e.target instanceof HTMLInputElement)
     return;
+  if (e.code === 'Space') {
+    syncJump(false);
+    return;
+  }
+  if (e.code === 'ControlLeft' || e.code === 'ControlRight') {
+    syncDuck(false);
+    return;
+  }
+  if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+    syncSpeed(false);
+    return;
+  }
+  if (e.key === 'e' || e.key === 'E') {
+    syncUseHold(false);
+    return;
+  }
   const walk = walkSlot(e.key);
   if (!walk) return;
   walkKeys[walk] = false;

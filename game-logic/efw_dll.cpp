@@ -11,11 +11,13 @@
 #include "client.h"
 #include "efw_dll.h"
 #include "efw_persist.h"
+#include "usercmd.h"
 
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 extern int gmsgTextMsg;
 
@@ -27,6 +29,7 @@ int gmsgEFWCtPrv = 0;
 
 static EfwDllState g_efw;
 static int s_hudPulse; /* StartFrame pulses; ThinkHope drains once per pulse if sv.time is frozen */
+static int EFW_UseNearbyDoor( CBasePlayer *pPlayer );
 
 typedef char EFW_SCAN_SIZE_CHECK[( sizeof( EfwScanSlot ) == EFW_SCAN_BYTES ) ? 1 : -1];
 
@@ -353,10 +356,26 @@ void EFW_AdjustHope( float delta )
 	EFW_SetHudFloat( 1, hope );
 }
 
+static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
+static float s_hostInterval; /* same pump delta, read by MoveExecute steps */
+static float s_hostClock; /* sum of those deltas; Squark's 1s gate reads this */
+
+float EFW_HostClock( void )
+{
+	return s_hostClock;
+}
+
+float EFW_HostInterval( void )
+{
+	/* MonsterThink schedules itself at +0.1s. The pump is that clock. */
+	if( s_hostInterval < 0.001f || s_hostInterval > 0.25f )
+		return 0.1f;
+	return s_hostInterval;
+}
+
 void EFW_ThinkHope( void )
 {
 	static int s_hopeN;
-	static int s_hopePulse;
 	float hope;
 	float now = gpGlobals->time;
 	float elapsed;
@@ -371,24 +390,19 @@ void EFW_ThinkHope( void )
 		}
 	}
 
-	if( EFW_GetHudInt( 6 ) )
-		return;
-	if( g_efw.hopeClock <= 0.0f )
-		g_efw.hopeClock = now;
-	elapsed = now - g_efw.hopeClock;
-	if( elapsed <= 0.0f )
+	/* FUN_100c6ad0 does not read the storyboard pause. gpGlobals->time
+	   still advances while hud int 6 is set, so hope drains under the
+	   comic and 0x4d replaces it. This listen server bursts StartFrame,
+	   so the pump's wall clock is that time. ThinkHope spends it once. */
+	if( s_hopeWall > 0.0f )
 	{
-		/* Frozen gpGlobals->time: drain once per StartFrame pulse. */
-		if( s_hopePulse == s_hudPulse )
-			return;
-		elapsed = gpGlobals->frametime;
-		if( elapsed <= 0.0f )
-			elapsed = 0.05f;
+		elapsed = s_hopeWall;
+		s_hopeWall = 0.0f;
 	}
-	s_hopePulse = s_hudPulse;
-	g_efw.hopeClock = now;
-	if( elapsed > 0.2f )
-		elapsed = 0.2f;
+	else
+		return;
+	if( elapsed > 0.25f )
+		elapsed = 0.25f;
 	hope = EFW_GetHudFloat( 1 );
 	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
@@ -399,11 +413,20 @@ void EFW_ThinkHope( void )
 	s_hopeN++;
 	if( s_hopeN == 1 || ( s_hopeN % 40 ) == 0 )
 		EFW_DebugPrint( ">>> hope %.1f time=%.2f", hope, now );
-	if( hope <= 0.0f && g_efw.player && !g_efw.hopeFailed )
+	/* FUN_100c6ad0 has no latch: hope <= 0 pushes 0x4d, then
+	   FUN_100c81d0, on every think. A one-shot flag let a key clear
+	   the isolation comic and leave the yard in view. */
+	if( hope <= 0.0f && g_efw.player )
 	{
-		g_efw.hopeFailed = 1;
 		EFW_FailOrNarrate( g_efw.player, 0x4d );
-		EFW_DebugPrint( "Run out of hope!" );
+		{
+			static int s_out;
+			if( !s_out )
+			{
+				s_out = 1;
+				EFW_DebugPrint( "Run out of hope!" );
+			}
+		}
 	}
 }
 
@@ -483,7 +506,20 @@ void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code )
 	idx = code - 0x3c;
 	if( idx >= 0 && idx < (int)( sizeof( kNarrate ) / sizeof( kNarrate[0] ) ) && kNarrate[idx] )
 	{
+		/* FUN_100c6e60 content path: the title counts, the partner push is
+		   0, and the last argument is 200 (0x43480000) stored at
+		   DAT_1011d130. talkActive becomes 1 and talkNpc is cleared, so
+		   FUN_100c6c10 waits out the 20s clock and skips the range hide. */
+		EfwDllState *st = EFW_Dll();
+		st->talkActive = 1;
+		st->talkNpc = NULL;
+		st->hideDist = EFW_HIDE_DIST;
+		st->menuMode = 0;
 		EFW_ShowDllMenu( pPlayer, kNarrate[idx], NULL, 0 );
+		/* ShowDllMenu stamps gpGlobals->time. sv.time stays paused, so
+		   the 20s compare in FUN_100c6c10 uses the host clock. */
+		st->talkStart = EFW_HostClock();
+		EFW_DebugPrint( "efw: caption arm t=%.2f", st->talkStart );
 		return;
 	}
 	if( code != 0x47 )
@@ -664,6 +700,31 @@ void EFW_DropTablePush( void *owner, void *weapon )
 	g_dropWep[g_dropN] = weapon;
 	g_dropOwner[g_dropN] = owner;
 	g_dropN++;
+}
+
+static void EFW_DropTableRemove( void *weapon )
+{
+	int i;
+
+	/* FUN_100c2e20 drops the pair out of DAT_10132470 before unlink. */
+	if( !weapon )
+		return;
+	for( i = 0; i < g_dropN; i++ )
+	{
+		if( g_dropWep[i] != weapon )
+			continue;
+		if( i + 1 < g_dropN )
+		{
+			memmove( &g_dropWep[i], &g_dropWep[i + 1],
+				(size_t)( g_dropN - i - 1 ) * sizeof( g_dropWep[0] ) );
+			memmove( &g_dropOwner[i], &g_dropOwner[i + 1],
+				(size_t)( g_dropN - i - 1 ) * sizeof( g_dropOwner[0] ) );
+		}
+		g_dropN--;
+		g_dropWep[g_dropN] = NULL;
+		g_dropOwner[g_dropN] = NULL;
+		return;
+	}
 }
 
 int EFW_DropTableHas( CBasePlayer *pPlayer, int weaponId )
@@ -897,19 +958,35 @@ void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **line
 		strncpy( st->menuTitle, title, sizeof( st->menuTitle ) - 1 );
 	st->menuTitle[sizeof( st->menuTitle ) - 1] = '\0';
 	{
-		char body[512];
-		body[0] = '\0';
+		char raw[512];
+		char body[640];
+		const char *sent;
+		raw[0] = '\0';
 		if( title && title[0] )
-			strncpy( body, title, sizeof( body ) - 1 );
+			strncpy( raw, title, sizeof( raw ) - 1 );
+		raw[sizeof( raw ) - 1] = '\0';
 		/* FUN_100c6e60: if DAT_10134480 is set, append
-		   " ... PREVIOUS QUESTION: " + that line onto the EFWShow body. */
+		   "@@@@PREVIOUS_QUESTION:" + that line onto the EFWShow body.
+		   The client splits on that marker. */
 		if( st->prevQuestion[0] )
 		{
-			strncat( body, " ... PREVIOUS QUESTION: ", sizeof( body ) - strlen( body ) - 1 );
-			strncat( body, st->prevQuestion, sizeof( body ) - strlen( body ) - 1 );
+			strncat( raw, "@@@@PREVIOUS_QUESTION:", sizeof( raw ) - strlen( raw ) - 1 );
+			strncat( raw, st->prevQuestion, sizeof( raw ) - strlen( raw ) - 1 );
 			EFW_DebugPrint( ">>> prevq %s", st->prevQuestion );
 		}
-		EFW_SendEfwShowChunks( pPlayer, 0, body );
+		sent = raw;
+		/* Partner targetname (pev+0x1cc) is non-empty: sprintf "%s:\n    %s". */
+		if( raw[0] && st->talkNpc )
+		{
+			const char *speaker = EFW_MenuSpeakerName( st->talkNpc );
+			if( speaker && speaker[0] )
+			{
+				snprintf( body, sizeof( body ), "%s:\n    %s", speaker, raw );
+				sent = body;
+				EFW_DebugPrint( ">>> FUN_100c6e60 speaker=%s", speaker );
+			}
+		}
+		EFW_SendEfwShowChunks( pPlayer, 0, sent );
 	}
 	if( nLines < 0 )
 		nLines = 0;
@@ -1087,6 +1164,62 @@ void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit )
 	}
 }
 
+/* FUN_100c2a20 stores GetTickCount()+0x1f4 at weapon+0x12c.
+   FUN_100c29f0 refuses AddToPlayer while that stamp is still ahead of
+   GetTickCount. sv.time does not move here, so the half second is host time. */
+static struct
+{
+	edict_t *ed;
+	float until;
+} s_idArm[4];
+
+void EFW_ArmIdTagPickup( edict_t *ed )
+{
+	int i;
+	int freeSlot;
+	float until;
+
+	if( !ed )
+		return;
+	until = EFW_HostClock() + 0.5f;
+	freeSlot = -1;
+	for( i = 0; i < 4; i++ )
+	{
+		if( s_idArm[i].ed == ed )
+		{
+			s_idArm[i].until = until;
+			return;
+		}
+		if( freeSlot < 0 && !s_idArm[i].ed )
+			freeSlot = i;
+	}
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	s_idArm[freeSlot].ed = ed;
+	s_idArm[freeSlot].until = until;
+}
+
+int EFW_IdTagPickupBlocked( edict_t *ed )
+{
+	int i;
+	float now;
+
+	if( !ed )
+		return 0;
+	now = EFW_HostClock();
+	for( i = 0; i < 4; i++ )
+	{
+		if( s_idArm[i].ed != ed )
+			continue;
+		/* cmp [this+0x12c], GetTickCount; jae skip. Equal still waits. */
+		if( now <= s_idArm[i].until )
+			return 1;
+		s_idArm[i].ed = NULL;
+		return 0;
+	}
+	return 0;
+}
+
 CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 {
 	Vector pos;
@@ -1127,7 +1260,11 @@ CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMark )
 	pItem->Materialize();
 	pTag->pev->solid = SOLID_NOT;
 	pTag->pev->effects |= EF_NODRAW;
-	pTag->pev->dmgtime = gpGlobals->time + 0.5f; /* GetTickCount + 0x1f4 at this+0x12c */
+	/* FUN_100c2a20 zeros pev+0x194 aiment and pev+0x198 owner.
+	   efw_Pickup skips any weapon that still has an owner. */
+	pTag->pev->aiment = NULL;
+	pTag->pev->owner = NULL;
+	EFW_ArmIdTagPickup( pTag->edict() ); /* GetTickCount + 0x1f4 at this+0x12c */
 	EFW_AddKeyword( "Player'sIDTagOnFence", 1 );
 	EFW_Print( EFW_Player(), "ID Tag has been placed on the wall" );
 	EFW_Squark( "efw_compound_gate_guard", "Okay RAR-124, you can pass.", 4 );
@@ -1172,6 +1309,7 @@ CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMark )
 				continue;
 			pPlayer->RemovePlayerItem( pItem, true );
 			pItem->m_pPlayer = NULL;
+			EFW_DropTableRemove( pItem );
 			g_efw.items &= ~EFW_ITEM_IDTAG;
 			return EFW_PlaceIdTag( pItem, pMark );
 		}
@@ -1229,10 +1367,10 @@ static int EFW_CmdIs( const char *cmd, const char *want )
 	return cmd[n] == '\0' || cmd[n] == ' ' || cmd[n] == '\t';
 }
 
-/* FUN_100bfbf0: conversation ServerCommand(efw_GetPackage / efw_EndMailPickupMessage).
-   efw_TriggerMailPickupMessage is in Conversations txt files but not in the DLL
-   strings; reconstruct as FUN_100c77c0 + AddKeyword(OFFICE) so Mail_Officer
-   can reach the package topic. */
+/* FUN_100bfbf0: efw_GetPackage, efw_GetPackage), efw_EndMailPickupMessage,
+   and efw_EndMailPickupMessage). Any other string, including
+   efw_TriggerMailPickupMessage, falls through. OFFICE is AddKeyword'd
+   by the kitchen-bin virtual at 0x100c50a1. */
 void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
 {
 	char buf[64];
@@ -1265,12 +1403,6 @@ void EFW_ServerCommand( CBasePlayer *pPlayer, const char *cmd )
 	if( EFW_CmdIs( buf, "efw_EndMailPickupMessage" ) )
 	{
 		EFW_PAUnlock();
-		return;
-	}
-	if( EFW_CmdIs( buf, "efw_TriggerMailPickupMessage" ) )
-	{
-		EFW_PALockRAR();
-		EFW_AddKeyword( "OFFICE", 1 );
 		return;
 	}
 }
@@ -1314,7 +1446,10 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 	else if( !strcmp( name, "DeleteTopic" ) )
 		EFW_AddKeyword( arg, 0 ); /* FUN_100c3500 flag 0 keeps the node so FUN_100b9990 hides it */
 	else if( !strcmp( name, "AddDiary" ) )
-		EFW_AddDiary( atoi( arg ), 2 );
+		/* FUN_100bf9c0: the bracket action stores the page and calls
+		   FUN_100c6890(page, 1). Mode 1 stashes the cursor while the
+		   menu is up; FUN_100c6c10 opens that page after 0x3c idle ticks. */
+		EFW_AddDiary( atoi( arg ), 1 );
 	else if( !strcmp( name, "ServerCommand" ) )
 		EFW_ServerCommand( pPlayer, arg );
 }
@@ -1406,6 +1541,7 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 	g_efw.hopeClock = gpGlobals->time;
 	g_efw.dt = 0.0f;
 	g_efw.hideDist = EFW_HIDE_DIST;
+	g_efw.talkCursor = -1;
 	g_efw.diaryPending = -1;
 	g_efw.mapLevel = level;
 	/* FUN_100c6780: LoadAll, seed diary 0-1 (level0) or 0-10 (level1/2). */
@@ -1490,6 +1626,8 @@ void EFW_InitFromSpawn( CBasePlayer *pPlayer )
 		EFW_GetHudFloat( 1 ), g_efw.items, g_efw.keywordCount, resetHope, level, g_efw.persistLatch );
 }
 
+static void EFW_LogLine( const char *line );
+
 static void EFW_HostFwd( void )
 {
 	CBasePlayer *pPlayer;
@@ -1504,12 +1642,29 @@ static void EFW_HostFwd( void )
 	ALERT( at_error, "%s", line );
 	if( g_engfuncs.pfnServerPrint )
 		g_engfuncs.pfnServerPrint( line );
+	if( pcmd && !strcmp( pcmd, "efw_trace" ) && CMD_ARGC() > 6 && pPlayer )
+	{
+		Vector start( (float)atof( CMD_ARGV( 1 ) ), (float)atof( CMD_ARGV( 2 ) ), (float)atof( CMD_ARGV( 3 ) ) );
+		Vector end = start + Vector( (float)atof( CMD_ARGV( 4 ) ), (float)atof( CMD_ARGV( 5 ) ), (float)atof( CMD_ARGV( 6 ) ) );
+		TraceResult tr;
+		char tline[192];
+		UTIL_TraceHull( start, end, dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		snprintf( tline, sizeof( tline ),
+			"efw: trace solid=%d frac=%.3f end=%.1f %.1f %.1f n=%.2f %.2f %.2f\n",
+			tr.fStartSolid ? 1 : 0, tr.flFraction,
+			tr.vecEndPos.x, tr.vecEndPos.y, tr.vecEndPos.z,
+			tr.vecPlaneNormal.x, tr.vecPlaneNormal.y, tr.vecPlaneNormal.z );
+		EFW_LogLine( tline );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_inuse" ) )
 	{
 		int hit = 0;
 		if( e && !e->free && e->pvPrivateData )
 		{
 			hit = EFW_LookUse( pPlayer );
+			if( !hit )
+				hit = EFW_UseNearbyDoor( pPlayer );
 			EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
 		}
 		else
@@ -1523,10 +1678,67 @@ static void EFW_HostFwd( void )
 		EFW_LatchMove( fwd, side );
 		return;
 	}
+	if( pcmd && !strcmp( pcmd, "efw_clmove" ) )
+	{
+		int fwd = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		int side = ( CMD_ARGC() > 2 ) ? atoi( CMD_ARGV( 2 ) ) : 0;
+		/* Drop the origin latch so a real usercmd is what changes origin. */
+		EFW_LatchMove( 0, 0 );
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pmove %d %d\n", fwd, side );
+		EFW_DebugPrint( ">>> efw_clmove stuff %d %d pawn=%d", fwd, side, pPlayer ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_cjump" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pjump %d\n", on ? 1 : 0 );
+		EFW_DebugPrint( ">>> efw_cjump stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_cduck" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		if( pPlayer )
+			CLIENT_COMMAND( pPlayer->edict(), "efw_pduck %d\n", on ? 1 : 0 );
+		EFW_DebugPrint( ">>> efw_cduck stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_pspeed" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		EFW_LatchSpeed( on );
+		EFW_DebugPrint( ">>> efw_pspeed %d", on ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_puse" ) )
+	{
+		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		EFW_LatchUseHold( on );
+		EFW_DebugPrint( ">>> efw_puse %d", on ? 1 : 0 );
+		return;
+	}
+	if( pcmd && !strcmp( pcmd, "efw_clook" ) )
+	{
+		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
+		float pitch = ( CMD_ARGC() > 2 ) ? (float)atof( CMD_ARGV( 2 ) ) : 0.0f;
+		/* Same delta the client writes into cmd->viewangles. fixangle stays
+		   clear so the engine does not snap the view back over the usercmd. */
+		if( pPlayer && ( yaw != 0.0f || pitch != 0.0f ) )
+		{
+			EFW_LatchTurn( yaw, pitch );
+			pPlayer->pev->fixangle = 0;
+			CLIENT_COMMAND( pPlayer->edict(), "efw_plook %g %g\n", yaw, pitch );
+		}
+		EFW_DebugPrint( ">>> efw_clook stuff %.1f %.1f pawn=%d", yaw, pitch, pPlayer ? 1 : 0 );
+		return;
+	}
 	if( pcmd && !strcmp( pcmd, "efw_turn" ) )
 	{
 		float yaw = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.0f;
-		EFW_LatchTurn( yaw );
+		float pitch = ( CMD_ARGC() > 2 ) ? (float)atof( CMD_ARGV( 2 ) ) : 0.0f;
+		EFW_LatchTurn( yaw, pitch );
 		return;
 	}
 	if( e && !e->free && e->pvPrivateData )
@@ -1613,10 +1825,10 @@ static void EFW_HostFwd( void )
 				who = a;
 		}
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, g_efw.player );
 		if( !pEnt && !( who && who[0] ) )
 		{
-			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			pEnt = EFW_FindNamedNearest( "Amir", g_efw.player );
 			if( !pEnt )
 				pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		}
@@ -1682,12 +1894,15 @@ static void EFW_HostFwd( void )
 	{
 		CBaseEntity *pEnt = NULL;
 		const char *who = ( CMD_ARGC() > 1 ) ? CMD_ARGV( 1 ) : NULL;
+		/* Several refugees share targetname "detainee". The first edict is
+		   often across the compound, so Talk opened and ThinkConversation
+		   immediately hid it ("partner too far"). Use the nearest. */
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, g_efw.player );
 		if( !pEnt && g_efw.scanCount && g_efw.scan[0].type == 0 && g_efw.scan[0].name[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, g_efw.scan[0].name );
+			pEnt = EFW_FindNamedNearest( g_efw.scan[0].name, g_efw.player );
 		if( !pEnt )
-			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
+			pEnt = EFW_FindNamedNearest( "Amir", g_efw.player );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByClassname( NULL, "monster_refugee" );
 		if( pEnt )
@@ -1750,6 +1965,16 @@ static void EFW_HostPump( void )
 	char line[80];
 
 	n++;
+	{
+		float wall = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.12f;
+		if( wall < 0.0f )
+			wall = 0.0f;
+		if( wall > 0.25f )
+			wall = 0.25f;
+		s_hopeWall += wall;
+		s_hostInterval = wall;
+		s_hostClock += wall;
+	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();
 	pPlayer = EFW_Player();
@@ -1772,9 +1997,10 @@ static void EFW_RegisterHostCmds( void )
 		"efw_diary", "efw_diary_next", "efw_diary_prev", "efw_ShowMenu",
 		"efw_HelpScreen", "efw_HideUnderBuilding", "efw_PickupPliers",
 		"efw_GetPackage", "efw_EndMailPickupMessage", "efw_TriggerMailPickupMessage",
-		"efw_pause", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
+		"efw_pause", "efw_context", "efw_set_state", "efw_changelevel", "efw_setpos", "setpos",
 		"efw_lookuse", "menuselect", "give", "drop", "use", "efw_inuse",
-		"efw_move", "efw_turn",
+		"efw_move", "efw_clmove", "efw_clook", "efw_turn", "efw_trace",
+		"efw_cjump", "efw_cduck", "efw_pspeed", "efw_puse",
 		"efw_yyerror", "efw_flexfatal", NULL
 	};
 	int i;
@@ -1917,6 +2143,14 @@ static int s_walkOn; /* DROP_TO_FLOOR succeeded; stop forcing noclip */
 static int s_bindDone; /* all deferred studios have a MODEL_INDEX */
 static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
 static int s_moveSide;
+static int s_speedKey; /* HostFwd efw_pspeed, or pev->button IN_RUN */
+static int s_useHeld; /* HostFwd efw_puse, or pev->button IN_USE */
+/* CmdStart still runs while libmenu pauses PM_Move, so pev->button stays
+   0. The pump reads this copy of the usercmd. */
+static int s_cmdFwd;
+static int s_cmdSide;
+static int s_cmdButtons;
+static float s_cmdClock;
 static int s_presentOn; /* StartFrame forced r_norefresh 0 / r_drawworld 1 */
 
 void EFW_LatchInUse( void )
@@ -1938,22 +2172,116 @@ void EFW_LatchMove( int fwd, int side )
 	s_moveSide = side;
 }
 
-void EFW_LatchTurn( float yawDelta )
+void EFW_LatchSpeed( int on )
+{
+	s_speedKey = on ? 1 : 0;
+}
+
+void EFW_LatchUseHold( int on )
+{
+	s_useHeld = on ? 1 : 0;
+}
+
+/* A usercmd older than this has stopped arriving. Holding the last one
+   would walk after the client let go. */
+static int EFW_CmdFresh( void )
+{
+	float age;
+
+	age = s_hostClock - s_cmdClock;
+	if( age < 0.0f )
+		age = 0.0f;
+	return age <= 0.45f;
+}
+
+void EFW_NoteUsercmd( const usercmd_s *cmd )
+{
+	static int s_log;
+
+	if( !cmd )
+		return;
+	s_cmdClock = s_hostClock;
+	s_cmdButtons = cmd->buttons;
+	s_cmdFwd = 0;
+	s_cmdSide = 0;
+	if( cmd->forwardmove > 50.0f )
+		s_cmdFwd = 1;
+	else if( cmd->forwardmove < -50.0f )
+		s_cmdFwd = -1;
+	if( cmd->sidemove > 50.0f )
+		s_cmdSide = 1;
+	else if( cmd->sidemove < -50.0f )
+		s_cmdSide = -1;
+	if( ( s_cmdFwd || s_cmdSide ) && s_log < 4 )
+	{
+		char line[128];
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: usercmd fwd=%.0f side=%.0f btn=%d\n",
+			cmd->forwardmove, cmd->sidemove, cmd->buttons );
+		EFW_LogLine( line );
+	}
+}
+
+static int EFW_LiveButtons( CBasePlayer *pPlayer )
+{
+	int buttons;
+
+	buttons = pPlayer ? pPlayer->pev->button : 0;
+	if( EFW_CmdFresh() )
+		buttons |= s_cmdButtons;
+	return buttons;
+}
+
+void EFW_LatchTurn( float yawDelta, float pitchDelta )
 {
 	CBasePlayer *pPlayer = EFW_Player();
-	if( !pPlayer || yawDelta == 0.0f )
+	float yaw;
+	float pitch;
+	if( !pPlayer || ( yawDelta == 0.0f && pitchDelta == 0.0f ) )
 		return;
-	pPlayer->pev->angles.y += yawDelta;
-	while( pPlayer->pev->angles.y > 180.0f )
-		pPlayer->pev->angles.y -= 360.0f;
-	while( pPlayer->pev->angles.y < -180.0f )
-		pPlayer->pev->angles.y += 360.0f;
-	pPlayer->pev->v_angle = pPlayer->pev->angles;
+	/* Keep the pitched view. Copying pev->angles onto v_angle zeroed pitch
+	   because the player hull stores yaw only. */
+	yaw = pPlayer->pev->v_angle.y + yawDelta;
+	pitch = pPlayer->pev->v_angle.x + pitchDelta;
+	while( yaw > 180.0f )
+		yaw -= 360.0f;
+	while( yaw < -180.0f )
+		yaw += 360.0f;
+	if( pitch > 89.0f )
+		pitch = 89.0f;
+	if( pitch < -89.0f )
+		pitch = -89.0f;
+	pPlayer->pev->v_angle.x = pitch;
+	pPlayer->pev->v_angle.y = yaw;
+	pPlayer->pev->v_angle.z = 0.0f;
+	/* svc_setangle follows pev->angles. Pitch has to live there or the
+	   view stays level while only v_angle changes. */
+	pPlayer->pev->angles.x = pitch;
+	pPlayer->pev->angles.y = yaw;
+	pPlayer->pev->angles.z = 0.0f;
 	pPlayer->pev->fixangle = 1;
 }
 
 void EFW_LatchMenuKey( int slot )
 {
+	/* FUN_100c6a50 is GetAsyncKeyState, and FUN_100c6a60 only calls it
+	   while FUN_100c7450 says the menu is up. A menuselect that arrived
+	   earlier is not still down, so it must not arm the next menu. */
+	if( !g_efw.talkActive )
+	{
+		if( slot >= 1 && slot <= 9 )
+		{
+			static int s_ign;
+			if( !s_ign )
+			{
+				s_ign = 1;
+				EFW_DebugPrint( ">>> FUN_100c6a50 ignore vk=%d talk=0", slot );
+			}
+		}
+		s_menuKeyLatch = 0;
+		return;
+	}
 	if( slot >= 1 && slot <= 9 )
 	{
 		{
@@ -1988,7 +2316,15 @@ void EFW_PollMenuKeys( void )
 		}
 	}
 	if( !g_efw.talkActive )
+	{
+		/* The poll does not run while the menu is down, so neither a
+		   HostFwd latch nor a sticky 1..9 impulse can select later. */
+		s_menuKeyLatch = 0;
+		pPlayer = EFW_Player();
+		if( pPlayer && pPlayer->pev->impulse >= 1 && pPlayer->pev->impulse <= 9 )
+			pPlayer->pev->impulse = 0;
 		return;
+	}
 	pPlayer = EFW_Player();
 	if( !pPlayer )
 		return;
@@ -2054,7 +2390,8 @@ static void EFW_FreezeNpcPhysics( void )
 		if( pent->v.modelindex > 0
 			&& ( !strcmp( cn, "monster_refugee" )
 				|| !strcmp( cn, "monster_patrol_guard" )
-				|| !strcmp( cn, "monster_efw_guard" ) ) )
+				|| !strcmp( cn, "monster_efw_guard" )
+				|| !strcmp( cn, "monster_barney" ) ) )
 			continue;
 		pent->v.nextthink = 0;
 		pent->v.movetype = MOVETYPE_NONE;
@@ -2140,6 +2477,32 @@ static int EFW_BindOneDetainee( void )
 			continue;
 		if( pent->v.flags & FL_CLIENT )
 			continue;
+		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
+		/* Stock Spawn left models/barney.mdl. FUN_1000d1d0 replaces that
+		   before the studio is shown. Zero the index so the bind below
+		   loads the mod mesh one entity per frame. */
+		if( cn[0] && !strcmp( cn, "monster_barney" ) )
+		{
+			const char *tn = pent->v.targetname ? STRING( pent->v.targetname ) : "";
+			const char *want = EFW_BarneyStudio( tn );
+			const char *cur = pent->v.model ? STRING( pent->v.model ) : "";
+
+			if( want && strcmp( cur, want ) )
+			{
+				static int s_bar;
+				char line[160];
+
+				pent->v.model = MAKE_STRING( want );
+				pent->v.modelindex = 0;
+				if( s_bar < 6 )
+				{
+					s_bar++;
+					snprintf( line, sizeof( line ), "efw: FUN_1000d1d0 %s %s\n",
+						tn[0] ? tn : "?", want );
+					EFW_LogLine( line );
+				}
+			}
+		}
 		if( pent->v.modelindex > 0 )
 			continue;
 		if( !pent->v.model )
@@ -2157,7 +2520,15 @@ static int EFW_BindOneDetainee( void )
 		if( idx <= 0 )
 			idx = MODEL_INDEX( "models/Security.mdl" );
 		pent->v.modelindex = idx;
-		pent->v.solid = SOLID_NOT;
+		pent->v.effects &= ~EF_NODRAW;
+		pent->v.sequence = 0;
+		pent->v.frame = 0;
+		pent->v.framerate = 1.0f;
+		/* PE CRefugee::Spawn hull. SOLID_BBOX so look-use can see them.
+		   MOVETYPE_NONE: WALK_MOVE on these studios stalls the WASM frame. */
+		pent->v.mins = Vector( -16, -16, 0 );
+		pent->v.maxs = Vector( 16, 16, 72 );
+		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
 		pent->v.movetype = MOVETYPE_NONE;
 		{
@@ -2166,6 +2537,10 @@ static int EFW_BindOneDetainee( void )
 				i, cn[0] ? cn : "?", idx );
 			EFW_LogLine( line );
 		}
+		/* Link after the size is on the edict. Flush runs at the end of
+		   this frame, outside the think, which is the path that does not
+		   re-enter IdleThink. */
+		EFW_LinkNpcBody( pent );
 		EFW_EnableNpcThink( pent );
 		return 1;
 	}
@@ -2179,6 +2554,7 @@ static void EFW_PulseRefugeeThinks( void )
 	int i;
 	int n = 0;
 
+	EFW_BeginNpcPulse();
 	for( i = 1; i < EFW_MaxEnts(); i++ )
 	{
 		edict_t *pent;
@@ -2192,12 +2568,19 @@ static void EFW_PulseRefugeeThinks( void )
 			continue;
 		cn = pent->v.classname ? STRING( pent->v.classname ) : "";
 		if( strcmp( cn, "monster_refugee" ) && strcmp( cn, "monster_patrol_guard" )
-			&& strcmp( cn, "monster_efw_guard" ) )
+			&& strcmp( cn, "monster_efw_guard" ) && strcmp( cn, "monster_barney" ) )
 			continue;
 		pEnt = CBaseEntity::Instance( pent );
 		if( !pEnt )
 			continue;
-		pEnt->Think();
+		if( !strcmp( cn, "monster_barney" ) )
+		{
+			CBaseMonster *pMon = pEnt->MyMonsterPointer();
+			if( pMon )
+				EFW_OfficerThink( pMon );
+		}
+		else
+			pEnt->Think();
 		n++;
 	}
 	if( n && ( s_liveTicks <= 12 || ( s_liveTicks % 40 ) == 0 ) )
@@ -2244,45 +2627,1771 @@ static int EFW_SnapToPlayerStart( CBasePlayer *pPlayer )
 	return DROP_TO_FLOOR( pPlayer->edict() );
 }
 
+/* PM_Move does not run while libmenu leaves the listen server paused.
+   IN_JUMP / IN_DUCK still arrive on pev->button. PM_Jump's impulse is
+   sqrt(2 * sv_gravity * 45). PM_Duck eases the eye from 28 toward -6
+   over 0.4s (view 12 after the origin drop, which this standing hull
+   does not take). */
+static int s_airborne;
+static float s_vz;
+static int s_oldAirButtons;
+static int s_inDuck;
+static float s_duckTime;
+static float s_duckStandZ;
+static int s_floorSet;
+static float s_floorZ;
+static float s_jumpT;
+static float s_jumpVz0;
+static float s_hvx;
+static float s_hvy;
+/* PM_CheckFalling writes punchangle[2]. The refdef never reads that
+   field here, so the same roll is added in EFW_ViewRoll. */
+static float s_punchRoll;
+
+/* V_DropPunchAngle. Length falls by (10 + len/2) per second. */
+static void EFW_DropPunch( float dt )
+{
+	float len;
+	float sign;
+
+	len = s_punchRoll;
+	if( len < 0.0f )
+		len = -len;
+	if( len < 0.01f )
+	{
+		s_punchRoll = 0.0f;
+		return;
+	}
+	if( dt < 0.001f )
+		dt = 0.1f;
+	if( dt > 0.25f )
+		dt = 0.25f;
+	sign = ( s_punchRoll < 0.0f ) ? -1.0f : 1.0f;
+	len -= ( 10.0f + len * 0.5f ) * dt;
+	if( len < 0.0f )
+		len = 0.0f;
+	s_punchRoll = sign * len;
+}
+
+/* PM_AirAccelerate caps the added speed at 30. Ground speed already on
+   s_hv is kept, so a running jump carries, and a standing jump does not
+   pick up the 270 walk. */
+static void EFW_AirAccelerate( float wishx, float wishy, float wishspeed, float dt )
+{
+	float wishspd;
+	float current;
+	float addspeed;
+	float accelspeed;
+	float len;
+
+	if( wishspeed <= 0.0f )
+		return;
+	len = sqrtf( wishx * wishx + wishy * wishy );
+	if( len < 0.01f )
+		return;
+	wishx /= len;
+	wishy /= len;
+	wishspd = wishspeed;
+	if( wishspd > 30.0f )
+		wishspd = 30.0f;
+	current = s_hvx * wishx + s_hvy * wishy;
+	addspeed = wishspd - current;
+	if( addspeed <= 0.0f )
+		return;
+	accelspeed = 10.0f * wishspeed * dt;
+	if( accelspeed > addspeed )
+		accelspeed = addspeed;
+	s_hvx += accelspeed * wishx;
+	s_hvy += accelspeed * wishy;
+}
+
+/* PM_Friction on the ground. sv_friction 4, sv_stopspeed 100, player
+   friction 1. A point 16 units ahead and 34 down from the feet that
+   misses the world multiplies friction by edgefriction (2), so a coast
+   onto a tall lip stops shorter. */
+static void EFW_GroundFriction( CBasePlayer *pPlayer, float dt )
+{
+	float speed;
+	float control;
+	float drop;
+	float newspeed;
+	float friction;
+
+	speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+	if( speed < 0.1f )
+		return;
+	friction = 4.0f;
+	if( pPlayer )
+	{
+		Vector feet;
+		Vector stop;
+		TraceResult tr;
+		int hull;
+		float edge;
+
+		feet = pPlayer->pev->origin;
+		feet.x += ( s_hvx / speed ) * 16.0f;
+		feet.y += ( s_hvy / speed ) * 16.0f;
+		hull = ( pPlayer->pev->flags & FL_DUCKING ) ? head_hull : human_hull;
+		feet.z += ( hull == head_hull ) ? -18.0f : -36.0f;
+		stop = feet;
+		stop.z -= 34.0f;
+		UTIL_TraceHull( feet, stop, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( !tr.fStartSolid && tr.flFraction >= 1.0f )
+		{
+			static int s_edgeLog;
+			char line[128];
+
+			edge = CVAR_GET_FLOAT( "edgefriction" );
+			if( edge < 0.05f )
+				edge = 2.0f;
+			friction *= edge;
+			if( s_edgeLog < 6 )
+			{
+				s_edgeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: edge fr=%.0f spd=%.0f at %.0f %.0f z=%.1f\n",
+					friction, speed,
+					pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+					pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+	}
+	control = ( speed < 100.0f ) ? 100.0f : speed;
+	drop = control * friction * dt;
+	newspeed = speed - drop;
+	if( newspeed < 0.0f )
+		newspeed = 0.0f;
+	newspeed /= speed;
+	s_hvx *= newspeed;
+	s_hvy *= newspeed;
+}
+
+/* PM_Accelerate. accel 10, and pmove->friction is the player value 1.
+   The pump is longer than a cmd, so the caller slices this at 10ms. */
+static void EFW_GroundAccelerate( float wishx, float wishy, float wishspeed, float dt )
+{
+	float current;
+	float addspeed;
+	float accelspeed;
+	float len;
+
+	if( wishspeed <= 0.0f )
+		return;
+	len = sqrtf( wishx * wishx + wishy * wishy );
+	if( len < 0.01f )
+		return;
+	wishx /= len;
+	wishy /= len;
+	current = s_hvx * wishx + s_hvy * wishy;
+	addspeed = wishspeed - current;
+	if( addspeed <= 0.0f )
+		return;
+	accelspeed = 10.0f * dt * wishspeed;
+	if( accelspeed > addspeed )
+		accelspeed = addspeed;
+	s_hvx += accelspeed * wishx;
+	s_hvy += accelspeed * wishy;
+}
+
+/* PM_WalkMove / PM_AirMove wish. cl_forwardspeed and cl_sidespeed are 400.
+   +speed multiplies by cl_movespeedkey (0.3) before the clamp, so one axis
+   is 120. PM_CheckParameters then takes min(clientmaxspeed, sv_maxspeed).
+   FUN_1007ed20 sets clientmaxspeed to 180 except on map level 1, where
+   the engine cap (320) remains. PM_Duck multiplies that clamped cmd by
+   0.333. Holding use on the ground cuts the cap to a third before that
+   clamp. Looking up zeroes the vertical part of the basis and
+   renormalizes, so the planar wish keeps the cmd speed. */
+static void EFW_WishMove( CBasePlayer *pPlayer, int fwd, int side, Vector *dir, float *wishspeed )
+{
+	Vector fwdDir;
+	Vector sideDir;
+	Vector wish;
+	float fmove;
+	float smove;
+	float cmdFwd;
+	float cmdSide;
+	float len;
+	float maxspd;
+
+	*dir = Vector( 0, 0, 0 );
+	*wishspeed = 0.0f;
+	if( !pPlayer || ( !fwd && !side ) )
+		return;
+	cmdFwd = CVAR_GET_FLOAT( "cl_forwardspeed" );
+	cmdSide = CVAR_GET_FLOAT( "cl_sidespeed" );
+	if( cmdFwd < 1.0f )
+		cmdFwd = 400.0f;
+	if( cmdSide < 1.0f )
+		cmdSide = 400.0f;
+	fmove = cmdFwd * (float)fwd;
+	smove = cmdSide * (float)side;
+	if( s_speedKey || ( pPlayer->pev->button & IN_RUN ) )
+	{
+		float key = CVAR_GET_FLOAT( "cl_movespeedkey" );
+		if( key < 0.01f )
+			key = 0.3f;
+		fmove *= key;
+		smove *= key;
+	}
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	fwdDir = gpGlobals->v_forward;
+	sideDir = gpGlobals->v_right;
+	fwdDir.z = 0.0f;
+	sideDir.z = 0.0f;
+	if( fwdDir.Length() > 0.01f )
+		fwdDir = fwdDir.Normalize();
+	else
+		fwdDir = Vector( 0, 0, 0 );
+	if( sideDir.Length() > 0.01f )
+		sideDir = sideDir.Normalize();
+	else
+		sideDir = Vector( 0, 0, 0 );
+	wish = fwdDir * fmove + sideDir * smove;
+	len = wish.Length();
+	if( len < 0.01f )
+		return;
+	maxspd = CVAR_GET_FLOAT( "sv_maxspeed" );
+	if( maxspd < 1.0f )
+		maxspd = 320.0f;
+	/* PM_CheckParameters: a non-zero client maxspeed replaces the cap
+	   when it is lower. FUN_1007ed20 writes 180 on this map. */
+	if( pPlayer->pev->maxspeed > 1.0f && pPlayer->pev->maxspeed < maxspd )
+		maxspd = pPlayer->pev->maxspeed;
+	/* Holding use on the ground cuts maxspeed to a third before the cmd
+	   is clamped. PM_Duck still multiplies after that. */
+	if( ( pPlayer->pev->flags & FL_ONGROUND )
+		&& ( s_useHeld || ( pPlayer->pev->button & IN_USE ) ) )
+		maxspd *= ( 1.0f / 3.0f );
+	if( len > maxspd )
+	{
+		wish = wish * ( maxspd / len );
+		len = maxspd;
+	}
+	/* PM_Duck runs after the maxspeed clamp. 180 * 0.333 = 60 on this map. */
+	if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		wish = wish * 0.333f;
+		len *= 0.333f;
+	}
+	*dir = wish * ( 1.0f / len );
+	*wishspeed = len;
+}
+
+/* PM_Duck drops the origin by 18 and switches to the head hull. A standing
+   trace at that origin starts in the floor, and the step returns without
+   moving. */
+static int EFW_PlayerHull( CBasePlayer *pPlayer )
+{
+	if( pPlayer && ( pPlayer->pev->flags & FL_DUCKING ) )
+		return head_hull;
+	return human_hull;
+}
+
+static float EFW_DuckSpline( float time )
+{
+	float value;
+	float valueSquared;
+
+	value = time / 0.4f;
+	if( value < 0.0f )
+		value = 0.0f;
+	if( value > 1.0f )
+		value = 1.0f;
+	valueSquared = value * value;
+	return 3.0f * valueSquared - 2.0f * valueSquared * value;
+}
+
+/* One PM_WalkMove hull step. Returns 0 when the standing trace is solid
+   and the step-up cannot leave it; s_hv is left alone in that case. */
+static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
+{
+	TraceResult tr;
+	TraceResult over;
+	TraceResult down;
+	Vector step( 0, 0, 18 );
+	Vector start;
+	Vector dest;
+	int hull;
+	int stepped;
+	int wallClip;
+	Vector wallN;
+
+	if( !pPlayer || !out || slice < 0.001f )
+		return 0;
+	start = pPlayer->pev->origin;
+	dest = start + Vector( s_hvx * slice, s_hvy * slice, 0 );
+	hull = EFW_PlayerHull( pPlayer );
+	stepped = 0;
+	wallClip = 0;
+	wallN = Vector( 0, 0, 0 );
+	UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+	if( tr.flFraction < 1.0f && tr.pHit && !tr.pHit->free && tr.pHit->v.solid != SOLID_BSP )
+	{
+		static int s_body;
+		if( s_body < 6 )
+		{
+			char line[192];
+			const char *cn = STRING( tr.pHit->v.classname );
+			float dx = tr.pHit->v.origin.x - start.x;
+			float dy = tr.pHit->v.origin.y - start.y;
+			s_body++;
+			snprintf( line, sizeof( line ),
+				"efw: body %s mins=%.0f %.0f %.0f maxs=%.0f %.0f %.0f dist=%.0f at %.0f %.0f\n",
+				cn[0] ? cn : "?",
+				tr.pHit->v.mins.x, tr.pHit->v.mins.y, tr.pHit->v.mins.z,
+				tr.pHit->v.maxs.x, tr.pHit->v.maxs.y, tr.pHit->v.maxs.z,
+				sqrtf( dx * dx + dy * dy ), start.x, start.y );
+			EFW_LogLine( line );
+		}
+	}
+	if( tr.fStartSolid )
+	{
+		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( over.fStartSolid || over.flFraction < 1.0f )
+			return 0;
+		start = over.vecEndPos;
+		dest = dest + step;
+		UTIL_TraceHull( start, dest, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+			return 0;
+	}
+	/* A walkable plane (normal.z >= 0.7) is a ramp. Step-up treats that
+	   hit as a wall and the hull stays at the old height. Clip the rest
+	   of the slice onto the plane so origin.z follows it. */
+	if( tr.flFraction < 1.0f && tr.vecPlaneNormal.z >= 0.7f )
+	{
+		Vector hit = tr.vecEndPos;
+		Vector n = tr.vecPlaneNormal;
+		float remain;
+		float vx;
+		float vy;
+		float vz;
+		float backoff;
+		TraceResult slide;
+
+		remain = ( 1.0f - tr.flFraction ) * slice;
+		vx = s_hvx;
+		vy = s_hvy;
+		vz = 0.0f;
+		backoff = vx * n.x + vy * n.y;
+		if( backoff < 0.0f )
+		{
+			vx -= backoff * n.x;
+			vy -= backoff * n.y;
+			vz -= backoff * n.z;
+		}
+		UTIL_TraceHull( hit, hit + Vector( vx, vy, vz ) * remain,
+			dont_ignore_monsters, hull, pPlayer->edict(), &slide );
+		dest = slide.fStartSolid ? hit : slide.vecEndPos;
+		if( dest.z > start.z + 0.25f || dest.z < start.z - 0.25f )
+		{
+			static int s_slopeLog;
+			char line[160];
+			if( s_slopeLog < 8 )
+			{
+				s_slopeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: slope z=%.1f -> %.1f n=%.2f %.2f %.2f at %.0f %.0f\n",
+					start.z, dest.z, n.x, n.y, n.z, dest.x, dest.y );
+				EFW_LogLine( line );
+			}
+		}
+		s_hvx = ( dest.x - start.x ) / slice;
+		s_hvy = ( dest.y - start.y ) / slice;
+		*out = dest;
+		return 1;
+	}
+	if( tr.flFraction < 1.0f )
+	{
+		UTIL_TraceHull( start, start + step, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+		if( !over.fStartSolid && over.flFraction >= 1.0f )
+		{
+			UTIL_TraceHull( over.vecEndPos, dest + step, dont_ignore_monsters, hull, pPlayer->edict(), &down );
+			if( !down.fStartSolid && down.flFraction > 0.2f )
+			{
+				TraceResult drop;
+				UTIL_TraceHull( down.vecEndPos, down.vecEndPos - step, dont_ignore_monsters, hull, pPlayer->edict(), &drop );
+				if( !drop.fStartSolid )
+				{
+					dest = drop.vecEndPos;
+					stepped = 1;
+				}
+			}
+		}
+		if( !stepped )
+		{
+			Vector hit = tr.vecEndPos;
+			Vector left = dest - hit;
+			float into = DotProduct( left, tr.vecPlaneNormal );
+			if( into < 0.0f )
+				left = left - tr.vecPlaneNormal * into;
+			left = left + tr.vecPlaneNormal;
+			UTIL_TraceHull( hit, hit + left, dont_ignore_monsters, hull, pPlayer->edict(), &over );
+			if( over.fStartSolid )
+				return 0;
+			dest = over.vecEndPos;
+			/* PM_ClipVelocity overbounce 1. The 4-unit stand-off keeps a
+			   slide out of the plane. A head-on stop has no speed left
+			   along the wall, and that same nudge was walking the hull
+			   back out so the next slice hit the face again. */
+			wallClip = 1;
+			wallN = tr.vecPlaneNormal;
+			{
+				float cx = s_hvx;
+				float cy = s_hvy;
+				float intoV = cx * wallN.x + cy * wallN.y;
+				float slide;
+				if( intoV < 0.0f )
+				{
+					cx -= intoV * wallN.x;
+					cy -= intoV * wallN.y;
+				}
+				slide = sqrtf( cx * cx + cy * cy );
+				if( slide > 1.0f
+					&& wallN.z < 0.5f && wallN.z > -0.5f )
+				{
+					TraceResult gap;
+					Vector back = dest + wallN * 4.0f;
+					UTIL_TraceHull( dest, back, dont_ignore_monsters, hull, pPlayer->edict(), &gap );
+					if( !gap.fStartSolid )
+						dest = gap.vecEndPos;
+				}
+				else if( slide <= 1.0f )
+				{
+					static int s_holdLog;
+					if( s_holdLog < 6 )
+					{
+						char line[128];
+						s_holdLog++;
+						snprintf( line, sizeof( line ),
+							"efw: wall hold at %.0f %.0f z=%.1f\n",
+							dest.x, dest.y, dest.z );
+						EFW_LogLine( line );
+					}
+				}
+			}
+		}
+	}
+	else
+		dest = tr.vecEndPos;
+	if( wallClip )
+	{
+		float backoff = s_hvx * wallN.x + s_hvy * wallN.y;
+		float before = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		static int s_wallLog;
+		if( backoff < 0.0f )
+		{
+			s_hvx -= backoff * wallN.x;
+			s_hvy -= backoff * wallN.y;
+			if( s_hvx > -0.1f && s_hvx < 0.1f )
+				s_hvx = 0.0f;
+			if( s_hvy > -0.1f && s_hvy < 0.1f )
+				s_hvy = 0.0f;
+		}
+		if( s_wallLog < 6 && before > 50.0f )
+		{
+			char line[160];
+			s_wallLog++;
+			snprintf( line, sizeof( line ),
+				"efw: wall spd=%.0f from=%.0f hv=%.0f %.0f at %.0f %.0f\n",
+				sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ), before,
+				s_hvx, s_hvy, dest.x, dest.y );
+			EFW_LogLine( line );
+		}
+	}
+	else
+	{
+		s_hvx = ( dest.x - pPlayer->pev->origin.x ) / slice;
+		s_hvy = ( dest.y - pPlayer->pev->origin.y ) / slice;
+	}
+	*out = dest;
+	return 1;
+}
+
+/* Quake SV_SetIdealPitch. Six point traces, 12 units apart, from 36
+   units ahead, down 160 from the eye. A consistent grade becomes
+   -dir * cl_idealpitchscale. A drop or a mixed grade leaves the old
+   value. The engine sample stays 0 because prediction does not move
+   this hull, so the result is sent to the client drift. */
+static void EFW_IdealPitch( CBasePlayer *pPlayer )
+{
+	float angle;
+	float sinval;
+	float cosval;
+	float eye;
+	float z[6];
+	float scale;
+	float ideal;
+	int i;
+	int j;
+	int step;
+	int dir;
+	int steps;
+	TraceResult tr;
+	Vector top;
+	Vector bot;
+	static float s_sent;
+	static int s_log;
+	static int s_miss;
+
+	if( !pPlayer || !( pPlayer->pev->flags & FL_ONGROUND ) )
+		return;
+	eye = pPlayer->pev->view_ofs.z;
+	if( eye < 1.0f )
+		eye = 28.0f;
+	angle = pPlayer->pev->v_angle.y * 3.14159265f / 180.0f;
+	sinval = sinf( angle );
+	cosval = cosf( angle );
+	for( i = 0; i < 6; i++ )
+	{
+		float dist = (float)( i + 3 ) * 12.0f;
+		top.x = pPlayer->pev->origin.x + cosval * dist;
+		top.y = pPlayer->pev->origin.y + sinval * dist;
+		top.z = pPlayer->pev->origin.z + eye;
+		bot = top;
+		bot.z -= 160.0f;
+		UTIL_TraceLine( top, bot, ignore_monsters, pPlayer->edict(), &tr );
+		if( tr.fStartSolid || tr.flFraction >= 1.0f )
+		{
+			if( s_miss < 6 )
+			{
+				char line[160];
+				s_miss++;
+				snprintf( line, sizeof( line ),
+					"efw: ideal miss i=%d solid=%d frac=%.2f eye=%.1f at %.0f %.0f\n",
+					i, tr.fStartSolid ? 1 : 0, tr.flFraction, eye,
+					pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				EFW_LogLine( line );
+			}
+			return;
+		}
+		z[i] = top.z + tr.flFraction * ( bot.z - top.z );
+	}
+	dir = 0;
+	steps = 0;
+	for( j = 1; j < 6; j++ )
+	{
+		step = (int)( z[j] - z[j - 1] );
+		if( step > -1 && step < 1 )
+			continue;
+		if( dir && ( step - dir > 0 || step - dir < 0 ) )
+		{
+			if( s_miss < 6 )
+			{
+				char line[160];
+				s_miss++;
+				snprintf( line, sizeof( line ),
+					"efw: ideal mix step=%d dir=%d z=%.1f %.1f %.1f %.1f %.1f %.1f\n",
+					step, dir, z[0], z[1], z[2], z[3], z[4], z[5] );
+				EFW_LogLine( line );
+			}
+			return;
+		}
+		steps++;
+		dir = step;
+	}
+	if( !dir )
+		ideal = 0.0f;
+	else if( steps < 2 )
+	{
+		if( s_miss < 6 )
+		{
+			char line[96];
+			s_miss++;
+			snprintf( line, sizeof( line ),
+				"efw: ideal short steps=%d dir=%d\n", steps, dir );
+			EFW_LogLine( line );
+		}
+		return;
+	}
+	else
+	{
+		scale = CVAR_GET_FLOAT( "cl_idealpitchscale" );
+		if( scale < 0.05f )
+			scale = 0.8f;
+		ideal = -(float)dir * scale;
+	}
+	if( ideal > s_sent + 0.4f || ideal < s_sent - 0.4f )
+	{
+		char line[96];
+		s_sent = ideal;
+		CLIENT_COMMAND( pPlayer->edict(), "efw_ipitch %.1f\n", ideal );
+		if( s_log < 8 )
+		{
+			s_log++;
+			snprintf( line, sizeof( line ),
+				"efw: ideal %.1f at %.0f %.0f z=%.1f\n",
+				ideal, pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+				pPlayer->pev->origin.z );
+			EFW_LogLine( line );
+		}
+	}
+}
+
 static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 {
 	float dt;
-	Vector delta;
+	float speed;
 	Vector dest;
+	int fwd;
+	int side;
+	int fromCmd;
+	int inAir;
 	static int s_moveN;
 
 	if( !pPlayer || !s_walkOn )
 		return;
 	if( EFW_GetHudInt( 6 ) )
 		return;
-	if( !s_moveFwd && !s_moveSide )
-		return;
+	/* The usercmd arrives (pev->button, forwardmove on the client) but
+	   libmenu leaves this listen server paused, so PM_Move never spends
+	   it. The pump is the frame. Buttons are that usercmd; the efw_move
+	   latch is only the fallback when no button is held. */
+	fwd = s_moveFwd;
+	side = s_moveSide;
+	fromCmd = 0;
+	if( !fwd && !side && EFW_CmdFresh() )
+	{
+		fwd = s_cmdFwd;
+		side = s_cmdSide;
+		fromCmd = ( fwd || side ) ? 1 : 0;
+	}
+	if( !fwd && !side )
+	{
+		int buttons = EFW_LiveButtons( pPlayer );
+		if( buttons & IN_FORWARD )
+			fwd++;
+		if( buttons & IN_BACK )
+			fwd--;
+		if( buttons & IN_MOVERIGHT )
+			side++;
+		if( buttons & IN_MOVELEFT )
+			side--;
+		fromCmd = ( fwd || side ) ? 1 : 0;
+	}
+	{
+		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
+		int liveBtn = EFW_LiveButtons( pPlayer );
+		int jumpEdge = !s_airborne
+			&& ( liveBtn & IN_JUMP )
+			&& !( s_oldAirButtons & IN_JUMP )
+			&& ( onGround || ( s_floorSet && pPlayer->pev->origin.z > s_floorZ + 1.0f ) );
+		/* Off the ground, or the frame the jump leaves it. PM_AirMove
+		   keeps the velocity already built on the ground. */
+		inAir = ( s_airborne || jumpEdge || !onGround ) ? 1 : 0;
+	}
+	if( !fwd && !side && !inAir )
+	{
+		float spd = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		if( spd < 1.0f )
+		{
+			s_hvx = 0.0f;
+			s_hvy = 0.0f;
+			/* Quake samples the grade every think, including a stand.
+			   The walk early-out used to skip that, so a hull placed
+			   on a slope never told the client to tilt. */
+			if( pPlayer->pev->flags & FL_ONGROUND )
+				EFW_IdealPitch( pPlayer );
+			return;
+		}
+	}
 	dt = g_efw.dt;
 	if( dt <= 0.0f )
-		dt = 0.12f;
+		dt = EFW_HostInterval();
 	if( dt > 0.2f )
 		dt = 0.2f;
-	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	delta = gpGlobals->v_forward * (float)s_moveFwd + gpGlobals->v_right * (float)s_moveSide;
-	delta.z = 0.0f;
+	if( inAir )
 	{
-		float len = delta.Length();
-		if( len < 0.01f )
-			return;
-		delta = delta * ( ( 220.0f * dt ) / len );
+		Vector wish;
+		float wishspeed;
+
+		/* Accelerate here. The position step is the 3D trace in
+		   EFW_ApplyUsercmdAir, so a descent can hit a deck the flat
+		   move would already have crossed. */
+		EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
+		EFW_AirAccelerate( wish.x, wish.y, wishspeed, dt );
+		dest = pPlayer->pev->origin;
 	}
-	dest = pPlayer->pev->origin + delta;
+	else
+	{
+	Vector wish;
+	Vector origin0;
+	float wishspeed;
+	float left;
+	float moved;
+	int slices;
+	/* A GoldSrc cmd is about 10ms. One friction step across the whole
+	   pump (drop = speed * 4 * 0.2) leaves 64 from 320. Twenty 10ms steps
+	   leave about 141, and the hull coasts farther. */
+	origin0 = pPlayer->pev->origin;
+	dest = origin0;
+	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
+	left = dt;
+	slices = 0;
+	while( left > 0.0005f && slices < 25 )
+	{
+		float slice = left;
+		if( slice > 0.01f )
+			slice = 0.01f;
+		EFW_GroundFriction( pPlayer, slice );
+		if( wishspeed > 0.0f )
+			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
+		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		if( speed < 1.0f )
+		{
+			s_hvx = 0.0f;
+			s_hvy = 0.0f;
+			break;
+		}
+		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
+			break;
+		/* Downhill the horizontal slice is clear and the floor falls
+		   away. A lip onto a 45-degree ramp can drop more than one
+		   slice of travel, up to STEPSIZE. Snap that far. A deeper
+		   ledge still misses and leaves the hull in the air. */
+		{
+			float hx = dest.x - pPlayer->pev->origin.x;
+			float hy = dest.y - pPlayer->pev->origin.y;
+			float horiz = sqrtf( hx * hx + hy * hy );
+			float drop = horiz + 2.0f;
+			if( drop < 18.0f )
+				drop = 18.0f;
+			TraceResult floor;
+			Vector bot;
+
+			bot = dest;
+			bot.z -= drop;
+			UTIL_TraceHull( dest, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &floor );
+			if( !floor.fStartSolid && floor.flFraction < 1.0f
+				&& floor.vecPlaneNormal.z >= 0.7f
+				&& dest.z - floor.vecEndPos.z >= 0.5f )
+			{
+				static int s_downLog;
+				if( s_downLog < 8 )
+				{
+					char line[160];
+					s_downLog++;
+					snprintf( line, sizeof( line ),
+						"efw: slope z=%.1f -> %.1f n=%.2f %.2f %.2f at %.0f %.0f\n",
+						dest.z, floor.vecEndPos.z,
+						floor.vecPlaneNormal.x, floor.vecPlaneNormal.y, floor.vecPlaneNormal.z,
+						floor.vecEndPos.x, floor.vecEndPos.y );
+					EFW_LogLine( line );
+				}
+				dest = floor.vecEndPos;
+			}
+		}
+		pPlayer->pev->origin = dest;
+		UTIL_SetOrigin( pPlayer->pev, dest );
+		left -= slice;
+		slices++;
+	}
+	moved = ( dest - origin0 ).Length();
+	{
+		static int s_runLog;
+		static int s_duckRun;
+		static int s_coastLog;
+		char line[192];
+		int ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
+		int slow = ( s_speedKey || ( pPlayer->pev->button & IN_RUN ) ) ? 1 : 0;
+		int useHold = ( s_useHeld || ( pPlayer->pev->button & IN_USE ) ) ? 1 : 0;
+		if( wishspeed > 0.0f && s_runLog < 8 )
+		{
+			s_runLog++;
+			snprintf( line, sizeof( line ),
+				"efw: run hv=%.0f %.0f wish=%.0f moved=%.0f dt=%.3f at %.0f %.0f z=%.1f duck=%d spd=%d use=%d\n",
+				s_hvx, s_hvy, wishspeed, moved, dt,
+				dest.x, dest.y, dest.z, ducked, slow, useHold );
+			EFW_LogLine( line );
+		}
+		else if( wishspeed > 0.0f && ducked && s_duckRun < 4 )
+		{
+			s_duckRun++;
+			snprintf( line, sizeof( line ),
+				"efw: duckrun hv=%.0f %.0f wish=%.0f moved=%.0f at %.0f %.0f z=%.1f viewz=%.0f\n",
+				s_hvx, s_hvy, wishspeed, moved,
+				dest.x, dest.y,
+				dest.z, pPlayer->pev->view_ofs.z );
+			EFW_LogLine( line );
+		}
+		else if( wishspeed <= 0.0f && moved > 1.0f && s_coastLog < 6 )
+		{
+			s_coastLog++;
+			snprintf( line, sizeof( line ),
+				"efw: coast hv=%.0f %.0f moved=%.0f dt=%.3f at %.0f %.0f\n",
+				s_hvx, s_hvy, moved, dt, dest.x, dest.y );
+			EFW_LogLine( line );
+		}
+	}
+	{
+		int ax = (int)fabsf( s_hvx );
+		int ay = (int)fabsf( s_hvy );
+		int steady = ( ay < 15 && ax > 200 ) || ( ax < 15 && ay > 200 );
+		static int s_groundLog;
+		if( !steady && s_groundLog < 48 && slices > 0 )
+		{
+			char line[128];
+			s_groundLog++;
+			snprintf( line, sizeof( line ),
+				"efw: ground hv=%.0f %.0f wish=%d %d at %.0f %.0f\n",
+				s_hvx, s_hvy, fwd, side,
+				dest.x, dest.y );
+			EFW_LogLine( line );
+		}
+	}
+	}
+	pPlayer->pev->velocity.x = s_hvx;
+	pPlayer->pev->velocity.y = s_hvy;
+	if( s_airborne )
+		pPlayer->pev->velocity.z = s_vz;
+	else if( !inAir )
+		pPlayer->pev->velocity.z = 0.0f;
+	if( s_airborne )
+		pPlayer->pev->flags &= ~FL_ONGROUND;
+	else
+	{
+		/* PM_CatagorizePosition: a 2-unit floor trace. A miss means the
+		   step left the ledge, and forcing FL_ONGROUND kept the pawn at
+		   the old height over the drop. */
+		TraceResult down;
+		Vector floorEnd;
+		static int s_ledgeLog;
+
+		floorEnd = dest;
+		floorEnd.z -= 2.0f;
+		UTIL_TraceHull( dest, floorEnd, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
+		if( down.fStartSolid )
+			pPlayer->pev->flags |= FL_ONGROUND;
+		else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
+		{
+			if( dest.z - down.vecEndPos.z >= 0.5f )
+				dest = down.vecEndPos;
+			pPlayer->pev->flags |= FL_ONGROUND;
+			s_vz = 0.0f;
+			pPlayer->pev->velocity.z = 0.0f;
+		}
+		else
+		{
+			pPlayer->pev->flags &= ~FL_ONGROUND;
+			if( s_ledgeLog < 8 )
+			{
+				char line[96];
+				s_ledgeLog++;
+				snprintf( line, sizeof( line ),
+					"efw: ledge z=%.1f at %.0f %.0f\n",
+					dest.z, dest.x, dest.y );
+				EFW_LogLine( line );
+			}
+		}
+	}
 	pPlayer->pev->origin = dest;
-	pPlayer->pev->velocity = delta * ( 1.0f / dt );
-	pPlayer->pev->flags |= FL_ONGROUND;
 	UTIL_SetOrigin( pPlayer->pev, dest );
+	if( pPlayer->pev->flags & FL_ONGROUND )
+		EFW_IdealPitch( pPlayer );
 	s_moveN++;
 	if( s_moveN == 1 || ( s_moveN % 20 ) == 0 )
 	{
 		char line[128];
 		snprintf( line, sizeof( line ),
-			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d\n",
-			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, s_moveFwd, s_moveSide );
+			"efw: walk origin=%.0f %.0f %.0f yaw=%.0f fwd=%d side=%d src=%s\n",
+			dest.x, dest.y, dest.z, pPlayer->pev->angles.y, fwd, side,
+			fromCmd ? "cmd" : "latch" );
+		EFW_LogLine( line );
+	}
+}
+
+/* V_CalcRoll. sv_rollangle is 0 on this host, and the client simvel stays
+   0 while the pump moves the hull, so V_CalcViewRoll leaves the horizon
+   level. GoldSrc uses 2 degrees at sv_rollspeed 200. svc_setangle follows
+   pev->angles, so the roll is written there. */
+static void EFW_ViewRoll( CBasePlayer *pPlayer )
+{
+	float side;
+	float roll;
+	float rollangle;
+	float rollspeed;
+	float sign;
+	Vector right;
+	static int s_log;
+	char line[128];
+
+	if( !pPlayer )
+		return;
+	rollangle = CVAR_GET_FLOAT( "sv_rollangle" );
+	rollspeed = CVAR_GET_FLOAT( "sv_rollspeed" );
+	if( rollangle < 0.05f )
+		rollangle = 2.0f;
+	if( rollspeed < 1.0f )
+		rollspeed = 200.0f;
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	right = gpGlobals->v_right;
+	side = s_hvx * right.x + s_hvy * right.y;
+	sign = ( side < 0.0f ) ? -1.0f : 1.0f;
+	if( side < 0.0f )
+		side = -side;
+	if( side < rollspeed )
+		roll = side * rollangle / rollspeed;
+	else
+		roll = rollangle;
+	roll *= sign;
+	/* PM_CheckFalling sets punchangle[2] = fallSpeed * 0.013. That vector
+	   reaches UpdateClientData and the refdef still stays level.
+	   svc_setangle follows pev->angles, which is what the view uses. */
+	roll += s_punchRoll;
+	pPlayer->pev->v_angle.z = roll;
+	pPlayer->pev->angles.x = pPlayer->pev->v_angle.x;
+	pPlayer->pev->angles.y = pPlayer->pev->v_angle.y;
+	pPlayer->pev->angles.z = roll;
+	pPlayer->pev->fixangle = 1;
+	{
+		static float s_sentRoll;
+		if( roll > s_sentRoll + 0.15f || roll < s_sentRoll - 0.15f )
+		{
+			s_sentRoll = roll;
+			CLIENT_COMMAND( pPlayer->edict(), "efw_vroll %.2f\n", roll );
+		}
+	}
+	if( s_log < 6 && ( roll > 0.5f || roll < -0.5f ) )
+	{
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: roll %.2f side=%.0f at %.0f %.0f\n",
+			roll, side * sign,
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+		EFW_LogLine( line );
+	}
+}
+
+/* V_CalcBob. cl.time stays near 1, so the client bob freezes after the
+   first frame. The same curve runs on the pump clock and adds to the
+   eye. cl_bob 0.01, cl_bobcycle 0.8, cl_bobup 0.5. Air keeps the last bob. */
+static void EFW_ViewBob( CBasePlayer *pPlayer, float dt )
+{
+	static float s_bobTime;
+	static float s_bob;
+	static int s_log;
+	float cycle;
+	float bob;
+	float speed;
+	float bobcycle;
+	float bobup;
+	float bobscale;
+	int onGround;
+	char line[128];
+
+	if( !pPlayer )
+		return;
+	onGround = ( pPlayer->pev->flags & FL_ONGROUND ) ? 1 : 0;
+	if( onGround )
+	{
+		if( dt < 0.001f )
+			dt = 0.1f;
+		if( dt > 0.25f )
+			dt = 0.25f;
+		bobcycle = CVAR_GET_FLOAT( "cl_bobcycle" );
+		bobup = CVAR_GET_FLOAT( "cl_bobup" );
+		bobscale = CVAR_GET_FLOAT( "cl_bob" );
+		if( bobcycle < 0.05f )
+			bobcycle = 0.8f;
+		if( bobup < 0.05f || bobup > 0.95f )
+			bobup = 0.5f;
+		if( bobscale < 0.0001f )
+			bobscale = 0.01f;
+		s_bobTime += dt;
+		cycle = s_bobTime - (float)( (int)( s_bobTime / bobcycle ) ) * bobcycle;
+		cycle /= bobcycle;
+		if( cycle < bobup )
+			cycle = 3.14159265f * cycle / bobup;
+		else
+			cycle = 3.14159265f + 3.14159265f * ( cycle - bobup ) / ( 1.0f - bobup );
+		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		bob = speed * bobscale;
+		bob = bob * 0.3f + bob * 0.7f * sinf( cycle );
+		if( bob > 4.0f )
+			bob = 4.0f;
+		if( bob < -7.0f )
+			bob = -7.0f;
+		s_bob = bob;
+	}
+	pPlayer->pev->view_ofs.z += s_bob;
+	EFW_ViewRoll( pPlayer );
+	if( onGround && s_log < 6 && sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ) > 100.0f )
+	{
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: bob %.2f viewz=%.1f spd=%.0f at %.0f %.0f\n",
+			s_bob, pPlayer->pev->view_ofs.z,
+			sqrtf( s_hvx * s_hvx + s_hvy * s_hvy ),
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+		EFW_LogLine( line );
+	}
+}
+
+/* PM_FlyMove along one displacement. Returns 1 when a descending segment
+   hits a walkable floor, -1 when the hull starts in a solid, else 0. */
+static int EFW_FlyDisplace( CBasePlayer *pPlayer, const Vector &wish, Vector *out )
+{
+	Vector pos;
+	Vector remain;
+	int bump;
+	int hull;
+
+	if( !pPlayer || !out )
+		return 0;
+	pos = pPlayer->pev->origin;
+	remain = wish;
+	hull = EFW_PlayerHull( pPlayer );
+	for( bump = 0; bump < 4; bump++ )
+	{
+		TraceResult tr = {};
+		Vector end;
+		float back;
+		float span;
+
+		span = remain.x * remain.x + remain.y * remain.y + remain.z * remain.z;
+		if( span < 0.0001f )
+			break;
+		end = pos + remain;
+		UTIL_TraceHull( pos, end, dont_ignore_monsters, hull, pPlayer->edict(), &tr );
+		if( tr.fStartSolid )
+		{
+			*out = pos;
+			return -1;
+		}
+		if( tr.flFraction > 0.0f )
+			pos = tr.vecEndPos;
+		if( tr.flFraction >= 1.0f )
+			break;
+		if( remain.z <= 0.05f && tr.vecPlaneNormal.z >= 0.7f )
+		{
+			*out = pos;
+			return 1;
+		}
+		remain = remain * ( 1.0f - tr.flFraction );
+		back = remain.x * tr.vecPlaneNormal.x
+			+ remain.y * tr.vecPlaneNormal.y
+			+ remain.z * tr.vecPlaneNormal.z;
+		if( back < 0.0f )
+		{
+			remain.x -= back * tr.vecPlaneNormal.x;
+			remain.y -= back * tr.vecPlaneNormal.y;
+			remain.z -= back * tr.vecPlaneNormal.z;
+		}
+		back = s_hvx * tr.vecPlaneNormal.x + s_hvy * tr.vecPlaneNormal.y;
+		if( back < 0.0f )
+		{
+			s_hvx -= back * tr.vecPlaneNormal.x;
+			s_hvy -= back * tr.vecPlaneNormal.y;
+		}
+		if( tr.vecPlaneNormal.z < 0.0f && s_vz > 0.0f )
+			s_vz = 0.0f;
+	}
+	*out = pos;
+	return 0;
+}
+
+static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
+{
+	float dt;
+	float frac;
+	int buttons;
+	int pressed;
+	Vector dest;
+	char line[160];
+	static int s_jumpN;
+
+	if( !pPlayer || !s_walkOn )
+		return;
+	if( EFW_GetHudInt( 6 ) )
+		return;
+	dt = g_efw.dt;
+	if( dt <= 0.0f )
+		dt = EFW_HostInterval();
+	if( dt > 0.2f )
+		dt = 0.2f;
+	EFW_DropPunch( dt );
+	buttons = EFW_LiveButtons( pPlayer );
+	pressed = buttons & ~s_oldAirButtons;
+	/* PM_Jump moves the hull and leaves the standing eye at 28. The
+	   camera follows origin, so adding the hop onto view_ofs put the
+	   eye a second storey above the pawn. */
+	if( !s_floorSet && !s_airborne )
+	{
+		s_floorSet = 1;
+		s_floorZ = pPlayer->pev->origin.z;
+	}
+
+	if( buttons & IN_DUCK )
+	{
+		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+		{
+			s_inDuck = 1;
+			s_duckTime = 0.0f;
+			s_duckStandZ = pPlayer->pev->origin.z;
+		}
+		if( s_inDuck )
+		{
+			s_duckTime += dt;
+			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air.
+			   On the ground the origin drops by 18 (duck mins.z − standing
+			   mins.z) and the eye becomes VEC_DUCK_VIEW. In the air the eye
+			   is 12 and the origin stays. */
+			if( s_duckTime >= 0.4f || s_airborne )
+			{
+				int inAirFinish;
+
+				s_inDuck = 0;
+				pPlayer->pev->flags |= FL_DUCKING;
+				inAirFinish = ( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) ) ? 1 : 0;
+				if( inAirFinish )
+				{
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck air viewz=12 z=%.1f\n",
+						pPlayer->pev->origin.z );
+					EFW_LogLine( line );
+				}
+				else
+				{
+					Vector dropped;
+					Vector saved;
+					int i;
+					int freed;
+
+					dropped = pPlayer->pev->origin;
+					dropped.z -= 18.0f;
+					saved = dropped;
+					freed = 0;
+					for( i = 0; i < 36; i++ )
+					{
+						TraceResult stuck;
+
+						UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
+							pPlayer->edict(), &stuck );
+						if( !stuck.fStartSolid && !stuck.fAllSolid )
+						{
+							freed = 1;
+							break;
+						}
+						dropped.z += 1.0f;
+					}
+					if( !freed )
+						dropped = saved;
+					pPlayer->pev->origin = dropped;
+					UTIL_SetOrigin( pPlayer->pev, dropped );
+					s_floorZ = dropped.z;
+					s_floorSet = 1;
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck drop z=%.1f -> %.1f\n",
+						s_duckStandZ, dropped.z );
+					EFW_LogLine( line );
+				}
+			}
+			else
+			{
+				frac = EFW_DuckSpline( s_duckTime );
+				pPlayer->pev->view_ofs.z = ( ( 12.0f - 18.0f ) * frac ) + ( 28.0f * ( 1.0f - frac ) );
+				snprintf( line, sizeof( line ),
+					"efw: duck viewz=%.1f t=%.2f z=%.1f\n",
+					pPlayer->pev->view_ofs.z, s_duckTime, pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+	}
+	else if( s_inDuck )
+	{
+		/* Released during the spline, before the origin drop. */
+		s_inDuck = 0;
+		s_duckTime = 0.0f;
+		pPlayer->pev->view_ofs.z = 28.0f;
+		snprintf( line, sizeof( line ),
+			"efw: unduck viewz=28 z=%.1f\n", pPlayer->pev->origin.z );
+		EFW_LogLine( line );
+	}
+	else if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		Vector up;
+		TraceResult stand;
+		float lift;
+
+		/* PM_UnDuck adds the 18 back only after a ground drop, and only
+		   when the standing hull fits. A low ceiling leaves the crouch. */
+		up = pPlayer->pev->origin;
+		lift = 0.0f;
+		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND )
+			&& pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
+			lift = 18.0f;
+		up.z += lift;
+		UTIL_TraceHull( up, up, dont_ignore_monsters, human_hull, pPlayer->edict(), &stand );
+		if( stand.fStartSolid || stand.fAllSolid )
+		{
+			static int s_blockLog;
+
+			pPlayer->pev->view_ofs.z = 12.0f;
+			if( s_blockLog < 4 )
+			{
+				s_blockLog++;
+				snprintf( line, sizeof( line ),
+					"efw: unduck blocked z=%.1f\n", pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+		else
+		{
+			s_inDuck = 0;
+			s_duckTime = 0.0f;
+			pPlayer->pev->flags &= ~FL_DUCKING;
+			pPlayer->pev->origin = up;
+			UTIL_SetOrigin( pPlayer->pev, up );
+			s_floorZ = up.z;
+			s_floorSet = 1;
+			pPlayer->pev->view_ofs.z = 28.0f;
+			snprintf( line, sizeof( line ),
+				"efw: unduck z=%.1f lift=%.0f\n", up.z, lift );
+			EFW_LogLine( line );
+		}
+	}
+
+	if( !s_airborne && ( pressed & IN_JUMP ) )
+	{
+		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
+
+		/* PM_Jump returns while onground == -1. A fall that has already
+		   left the takeoff height must not relaunch from that stored
+		   floor. The listen server can still apply the impulse and lift
+		   the origin before this pump; that hop keeps the stored floor. */
+		if( !onGround && pPlayer->pev->origin.z <= s_floorZ + 1.0f )
+		{
+			snprintf( line, sizeof( line ),
+				"efw: jump ignored z=%.1f floor=%.1f flags=%d\n",
+				pPlayer->pev->origin.z, s_floorZ, pPlayer->pev->flags );
+			EFW_LogLine( line );
+		}
+		else
+		{
+			if( onGround )
+				s_floorZ = pPlayer->pev->origin.z;
+			/* PM_Jump impulse sqrt(2 * 800 * 45). */
+			s_jumpVz0 = sqrtf( 2.0f * 800.0f * 45.0f );
+			s_vz = s_jumpVz0;
+			s_jumpT = 0.0f;
+			s_airborne = 1;
+			pPlayer->pev->flags &= ~FL_ONGROUND;
+			snprintf( line, sizeof( line ),
+				"efw: jump impulse vz=%.0f z=%.1f floor=%.1f hv=%.0f %.0f\n",
+				s_vz, pPlayer->pev->origin.z, s_floorZ, s_hvx, s_hvy );
+			EFW_LogLine( line );
+		}
+	}
+
+	/* PM_AddCorrectGravity still runs after the step that left the floor.
+	   The jump arc is that fall with a zero takeoff speed. Clearing
+	   FL_ONGROUND and leaving origin.z put the hull in the air over the drop. */
+	if( !s_airborne && !( pPlayer->pev->flags & FL_ONGROUND ) )
+	{
+		static int s_dropLog;
+
+		s_floorZ = pPlayer->pev->origin.z;
+		s_floorSet = 1;
+		s_jumpVz0 = 0.0f;
+		s_vz = 0.0f;
+		s_jumpT = 0.0f;
+		s_airborne = 1;
+		if( s_dropLog < 6 )
+		{
+			s_dropLog++;
+			snprintf( line, sizeof( line ),
+				"efw: drop z=%.1f at %.0f %.0f\n",
+				s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+			EFW_LogLine( line );
+		}
+	}
+
+	if( s_airborne )
+	{
+		float left;
+		int slices;
+
+		/* A GoldSrc usercmd is about 10ms. One 0.2s diagonal clears a
+		   deck that those short steps land on. */
+		left = dt;
+		slices = 0;
+		dest = pPlayer->pev->origin;
+		while( s_airborne && left > 0.0005f && slices < 25 )
+		{
+			float slice;
+			float z;
+			Vector top;
+			Vector wish;
+			int hit;
+
+			slice = left;
+			if( slice > 0.01f )
+				slice = 0.01f;
+			s_jumpT += slice;
+			s_vz = s_jumpVz0 - 800.0f * s_jumpT;
+			z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
+			top = pPlayer->pev->origin;
+			wish = Vector( s_hvx * slice, s_hvy * slice, z - top.z );
+			hit = EFW_FlyDisplace( pPlayer, wish, &dest );
+			if( hit < 0 && wish.z <= 0.0f )
+			{
+				dest = top;
+				s_airborne = 0;
+				s_vz = 0.0f;
+				pPlayer->pev->flags &= ~FL_ONGROUND;
+			}
+			else if( hit > 0 )
+			{
+				float fall;
+				float drop;
+
+				drop = s_floorZ - dest.z;
+				if( drop < 0.0f )
+					drop = 0.0f;
+				fall = sqrtf( s_jumpVz0 * s_jumpVz0 + 2.0f * 800.0f * drop );
+				s_airborne = 0;
+				s_vz = 0.0f;
+				pPlayer->pev->flags |= FL_ONGROUND;
+				/* PLAYER_FALL_PUNCH_THRESHHOLD is 350. A 45-unit hop
+				   lands near 268 and does not punch. The roll axis is
+				   not clamped; the SDK clamp is on punchangle[0]. */
+				if( fall >= 350.0f )
+				{
+					static int s_fallLog;
+
+					s_punchRoll = fall * 0.013f;
+					if( s_fallLog < 6 )
+					{
+						s_fallLog++;
+						snprintf( line, sizeof( line ),
+							"efw: fall vz=%.0f punch=%.2f z=%.1f from %.1f at %.0f %.0f\n",
+							fall, s_punchRoll, dest.z, s_floorZ, dest.x, dest.y );
+						EFW_LogLine( line );
+					}
+				}
+				else
+				{
+					snprintf( line, sizeof( line ),
+						"efw: jump land z=%.1f from %.1f vz=%.0f at %.0f %.0f\n",
+						dest.z, s_floorZ, fall, dest.x, dest.y );
+					EFW_LogLine( line );
+				}
+			}
+			pPlayer->pev->origin = dest;
+			pPlayer->pev->velocity.z = s_vz;
+			UTIL_SetOrigin( pPlayer->pev, dest );
+			left -= slice;
+			slices++;
+		}
+	}
+
+	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
+		pPlayer->pev->view_ofs.z = 28.0f;
+	else if( ( buttons & IN_DUCK ) && ( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+	{
+		/* After the ground drop the eye is VEC_DUCK_VIEW. Bob adds after this. */
+		if( pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
+			pPlayer->pev->view_ofs.z = 12.0f;
+	}
+	/* Sample the floor only while the hull is down. A falling origin
+	   used to become the next takeoff height. */
+	if( !s_airborne && !( buttons & IN_JUMP ) && ( pPlayer->pev->flags & FL_ONGROUND ) )
+	{
+		s_floorZ = pPlayer->pev->origin.z;
+		s_floorSet = 1;
+	}
+	if( s_airborne || ( s_floorSet && pPlayer->pev->origin.z > s_floorZ + 1.0f ) )
+	{
+		if( s_jumpN < 48 )
+		{
+			s_jumpN++;
+			snprintf( line, sizeof( line ),
+				"efw: jump z=%.1f vz=%.0f air=%d viewz=%.0f\n",
+				pPlayer->pev->origin.z, s_vz, s_airborne, pPlayer->pev->view_ofs.z );
+			EFW_LogLine( line );
+		}
+	}
+
+	EFW_ViewBob( pPlayer, dt );
+	s_oldAirButtons = buttons;
+}
+
+/* PM_PlayStepSound in this DLL (0x10084940). Concrete, the materials.txt
+   default, is Footsteps/Guard_Footstep_Generic_1..4 in irand order.
+   Dirt is Footsteps/Player_Footstep_Dirt_5,2,3,4. Metal, vent, grate,
+   tile, slosh and ladder keep the stock player/pl_* set. irand is
+   RandomLong(0,1) plus the toggled foot * 2. */
+static const char *EFW_StepSample( int step, int irand )
+{
+	static const char *kMetal[] = {
+		"player/pl_metal1.wav", "player/pl_metal3.wav",
+		"player/pl_metal2.wav", "player/pl_metal4.wav"
+	};
+	static const char *kDirt[] = {
+		"Footsteps/Player_Footstep_Dirt_5.wav",
+		"Footsteps/Player_Footstep_Dirt_2.wav",
+		"Footsteps/Player_Footstep_Dirt_3.wav",
+		"Footsteps/Player_Footstep_Dirt_4.wav"
+	};
+	static const char *kDuct[] = {
+		"player/pl_duct1.wav", "player/pl_duct3.wav",
+		"player/pl_duct2.wav", "player/pl_duct4.wav"
+	};
+	static const char *kGrate[] = {
+		"player/pl_grate1.wav", "player/pl_grate3.wav",
+		"player/pl_grate2.wav", "player/pl_grate4.wav"
+	};
+	static const char *kTile[] = {
+		"player/pl_tile1.wav", "player/pl_tile3.wav",
+		"player/pl_tile2.wav", "player/pl_tile4.wav",
+		"player/pl_tile5.wav"
+	};
+	static const char *kSlosh[] = {
+		"player/pl_slosh1.wav", "player/pl_slosh3.wav",
+		"player/pl_slosh2.wav", "player/pl_slosh4.wav"
+	};
+	static const char *kWade[] = {
+		"player/pl_wade1.wav", "player/pl_wade2.wav",
+		"player/pl_wade3.wav", "player/pl_wade4.wav"
+	};
+	static const char *kLadder[] = {
+		"player/pl_ladder1.wav", "player/pl_ladder3.wav",
+		"player/pl_ladder2.wav", "player/pl_ladder4.wav"
+	};
+	static const char *kGuard[] = {
+		"Footsteps/Guard_Footstep_Generic_1.wav",
+		"Footsteps/Guard_Footstep_Generic_2.wav",
+		"Footsteps/Guard_Footstep_Generic_3.wav",
+		"Footsteps/Guard_Footstep_Generic_4.wav"
+	};
+	const char **tab = kGuard;
+	int n = 4;
+
+	switch( step )
+	{
+	case 1: tab = kMetal; break;
+	case 2: tab = kDirt; break;
+	case 3: tab = kDuct; break;
+	case 4: tab = kGrate; break;
+	case 5: tab = kTile; n = 5; break;
+	case 6: tab = kSlosh; break;
+	case 7: tab = kWade; break;
+	case 8: tab = kLadder; break;
+	default: break;
+	}
+	if( irand < 0 )
+		irand = 0;
+	if( irand >= n )
+		irand = n - 1;
+	return tab[irand];
+}
+
+static int EFW_TexCmp( const void *a, const void *b )
+{
+	const char *na = (const char *)a;
+	const char *nb = (const char *)b;
+	int i;
+	/* Entries are 13 bytes: type at [0], name at [1]. */
+	na++;
+	nb++;
+	for( i = 0; i < 12; i++ )
+	{
+		unsigned char ca = (unsigned char)na[i];
+		unsigned char cb = (unsigned char)nb[i];
+		if( ca >= 'a' && ca <= 'z' )
+			ca = (unsigned char)( ca - 32 );
+		if( cb >= 'a' && cb <= 'z' )
+			cb = (unsigned char)( cb - 32 );
+		if( ca != cb )
+			return (int)ca - (int)cb;
+		if( !ca )
+			return 0;
+	}
+	return 0;
+}
+
+static char EFW_TextureType( const char *texName )
+{
+	static char s_tex[512 * 13];
+	static int s_n;
+	static int s_loaded;
+	char query[13];
+	int i;
+
+	if( !s_loaded )
+	{
+		int length = 0;
+		char *buf;
+		int pos = 0;
+
+		s_loaded = 1;
+		s_n = 0;
+		buf = (char *)LOAD_FILE_FOR_ME( (char *)"sound/materials.txt", &length );
+		if( buf && length > 0 )
+		{
+			while( pos < length && s_n < 512 )
+			{
+				int line = pos;
+				char type;
+				int nameAt;
+				int copied;
+
+				while( pos < length && buf[pos] != '\n' )
+					pos++;
+				if( pos < length && buf[pos] == '\n' )
+					pos++;
+				while( line < pos && ( buf[line] == ' ' || buf[line] == '\t' || buf[line] == '\r' ) )
+					line++;
+				if( line >= pos || buf[line] == '/' || buf[line] == '\n' || buf[line] == '\r' )
+					continue;
+				type = buf[line];
+				if( type >= 'a' && type <= 'z' )
+					type = (char)( type - 32 );
+				if( type < 'A' || type > 'Z' )
+					continue;
+				line++;
+				while( line < pos && ( buf[line] == ' ' || buf[line] == '\t' ) )
+					line++;
+				if( line >= pos || buf[line] == '\n' || buf[line] == '\r' )
+					continue;
+				s_tex[s_n * 13] = type;
+				nameAt = s_n * 13 + 1;
+				copied = 0;
+				while( copied < 12 && line < pos && buf[line] != ' ' && buf[line] != '\t'
+					&& buf[line] != '\r' && buf[line] != '\n' )
+				{
+					s_tex[nameAt + copied] = buf[line];
+					copied++;
+					line++;
+				}
+				if( copied < 12 )
+					s_tex[nameAt + copied] = '\0';
+				s_n++;
+			}
+			FREE_FILE( buf );
+			if( s_n > 1 )
+				qsort( s_tex, (size_t)s_n, 13, EFW_TexCmp );
+		}
+		{
+			char line[80];
+			snprintf( line, sizeof( line ), "efw: materials %d\n", s_n );
+			EFW_LogLine( line );
+		}
+	}
+	if( !texName || !texName[0] || s_n < 1 )
+		return 'C';
+	if( texName[0] == '-' || texName[0] == '+' )
+		texName += 2;
+	if( texName[0] == '{' || texName[0] == '!' || texName[0] == '~' || texName[0] == ' ' )
+		texName++;
+	for( i = 0; i < 12; i++ )
+	{
+		query[i] = texName[i];
+		if( !texName[i] )
+			break;
+	}
+	query[i < 12 ? i : 12] = '\0';
+	{
+		char probe[13];
+		int left = 0;
+		int right = s_n - 1;
+
+		memset( probe, 0, sizeof( probe ) );
+		probe[0] = 'C';
+		for( i = 0; query[i] && i < 12; i++ )
+			probe[1 + i] = query[i];
+		while( left <= right )
+		{
+			int mid = ( left + right ) / 2;
+			int cmp = EFW_TexCmp( probe, s_tex + mid * 13 );
+			if( cmp == 0 )
+				return s_tex[mid * 13];
+			if( cmp > 0 )
+				left = mid + 1;
+			else
+				right = mid - 1;
+		}
+	}
+	return 'C';
+}
+
+static void EFW_PrecacheSteps( void )
+{
+	static const char *kWav[] = {
+		"Footsteps/Guard_Footstep_Generic_1.wav",
+		"Footsteps/Guard_Footstep_Generic_2.wav",
+		"Footsteps/Guard_Footstep_Generic_3.wav",
+		"Footsteps/Guard_Footstep_Generic_4.wav",
+		"Footsteps/Player_Footstep_Dirt_2.wav",
+		"Footsteps/Player_Footstep_Dirt_3.wav",
+		"Footsteps/Player_Footstep_Dirt_4.wav",
+		"Footsteps/Player_Footstep_Dirt_5.wav",
+		"player/pl_metal1.wav", "player/pl_metal2.wav",
+		"player/pl_metal3.wav", "player/pl_metal4.wav",
+		"player/pl_duct1.wav", "player/pl_duct2.wav",
+		"player/pl_duct3.wav", "player/pl_duct4.wav",
+		"player/pl_grate1.wav", "player/pl_grate2.wav",
+		"player/pl_grate3.wav", "player/pl_grate4.wav",
+		"player/pl_tile1.wav", "player/pl_tile2.wav",
+		"player/pl_tile3.wav", "player/pl_tile4.wav",
+		"player/pl_tile5.wav",
+		"player/pl_slosh1.wav", "player/pl_slosh2.wav",
+		"player/pl_slosh3.wav", "player/pl_slosh4.wav",
+		"player/pl_wade1.wav", "player/pl_wade2.wav",
+		"player/pl_wade3.wav", "player/pl_wade4.wav",
+		"player/pl_ladder1.wav", "player/pl_ladder2.wav",
+		"player/pl_ladder3.wav", "player/pl_ladder4.wav"
+	};
+	unsigned i;
+	for( i = 0; i < sizeof( kWav ) / sizeof( kWav[0] ); i++ )
+		PRECACHE_SOUND( (char *)kWav[i] );
+}
+
+/* PM_UpdateStepSound. The pump is the cmd.msec clock. A timer that
+   reaches 0 this pump still plays, matching ReduceTimers before the
+   step check. */
+static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
+{
+	int msec;
+	float speed;
+	float velwalk;
+	float velrun;
+	float flduck;
+	int ducked;
+	int step;
+	float fvol;
+	int irand;
+	const char *sample;
+	const char *texName = NULL;
+	char texType;
+	Vector start;
+	Vector end;
+	static int s_skipWade;
+	static int s_log;
+
+	if( !pPlayer )
+		return;
+	msec = (int)( EFW_HostInterval() * 1000.0f );
+	if( msec < 1 )
+		msec = 1;
+	if( pPlayer->m_flTimeStepSound > 0.0f )
+	{
+		pPlayer->m_flTimeStepSound -= (float)msec;
+		if( pPlayer->m_flTimeStepSound < 0.0f )
+			pPlayer->m_flTimeStepSound = 0.0f;
+	}
+	if( pPlayer->m_flTimeStepSound > 0.0f )
+		return;
+	if( pPlayer->pev->flags & FL_FROZEN )
+		return;
+	speed = pPlayer->pev->velocity.Length();
+	ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
+	if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
+	{
+		velwalk = 60.0f;
+		velrun = 80.0f;
+		flduck = 100.0f;
+	}
+	else
+	{
+		velwalk = 120.0f;
+		velrun = 210.0f;
+		flduck = 0.0f;
+	}
+	if( !( pPlayer->pev->flags & FL_ONGROUND ) && pPlayer->pev->movetype != MOVETYPE_FLY )
+		return;
+	if( speed <= 0.0f )
+		return;
+	if( speed < velwalk && pPlayer->m_flTimeStepSound != 0.0f )
+		return;
+	{
+		int walking = speed < velrun;
+		float height;
+		Vector knee;
+		Vector feet;
+
+		height = pPlayer->pev->maxs.z - pPlayer->pev->mins.z;
+		knee = pPlayer->pev->origin;
+		feet = pPlayer->pev->origin;
+		knee.z -= 0.3f * height;
+		feet.z -= 0.5f * height;
+		if( pPlayer->pev->movetype == MOVETYPE_FLY )
+		{
+			step = 8;
+			fvol = 0.35f;
+			pPlayer->m_flTimeStepSound = 350.0f;
+		}
+		else if( UTIL_PointContents( knee ) == CONTENTS_WATER )
+		{
+			step = 7;
+			fvol = 0.65f;
+			pPlayer->m_flTimeStepSound = 600.0f;
+		}
+		else if( UTIL_PointContents( feet ) == CONTENTS_WATER )
+		{
+			step = 6;
+			fvol = walking ? 0.2f : 0.5f;
+			pPlayer->m_flTimeStepSound = walking ? 400.0f : 300.0f;
+		}
+		else
+		{
+			start = pPlayer->pev->origin;
+			end = start;
+			end.z -= 64.0f;
+			{
+				edict_t *world = INDEXENT( 0 );
+				texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
+			}
+			texType = EFW_TextureType( texName );
+			switch( texType )
+			{
+			case 'M': step = 1; break;
+			case 'D': step = 2; break;
+			case 'V': step = 3; break;
+			case 'G': step = 4; break;
+			case 'T': step = 5; break;
+			case 'S': step = 6; break;
+			default: step = 0; break;
+			}
+			if( texType == 'D' )
+				fvol = walking ? 0.25f : 0.55f;
+			else if( texType == 'V' )
+				fvol = walking ? 0.4f : 0.7f;
+			else
+				fvol = walking ? 0.2f : 0.5f;
+			pPlayer->m_flTimeStepSound = walking ? 400.0f : 300.0f;
+		}
+	}
+	pPlayer->m_flTimeStepSound += flduck;
+	if( ducked )
+		fvol *= 0.35f;
+	pPlayer->m_iStepLeft = !pPlayer->m_iStepLeft;
+	irand = RANDOM_LONG( 0, 1 ) + ( pPlayer->m_iStepLeft ? 2 : 0 );
+	if( step == 5 && !RANDOM_LONG( 0, 4 ) )
+		irand = 4;
+	if( step == 7 )
+	{
+		if( s_skipWade == 0 )
+		{
+			s_skipWade++;
+			return;
+		}
+		if( s_skipWade++ == 3 )
+			s_skipWade = 0;
+	}
+	sample = EFW_StepSample( step, irand );
+	EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
+	if( s_log < 8 )
+	{
+		char line[160];
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: step %s vol=%.2f spd=%.0f tex=%s\n",
+			sample, fvol, speed, texName ? texName : "-" );
 		EFW_LogLine( line );
 	}
 }
@@ -2297,9 +4406,9 @@ static void EFW_ForceWorldPresent( CBasePlayer *pPlayer )
 	CVAR_SET_FLOAT( "r_norefresh", 0.0f );
 	CVAR_SET_FLOAT( "r_drawworld", 1.0f );
 	CVAR_SET_FLOAT( "r_drawentities", 1.0f );
-	CVAR_SET_FLOAT( "r_fullbright", 1.0f );
+	CVAR_SET_FLOAT( "r_fullbright", 0.0f );
 	CVAR_SET_FLOAT( "r_novis", 1.0f );
-	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 1\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
+	SERVER_COMMAND( "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\nr_fullbright 0\nr_novis 1\ngl_clear 1\nui_renderworld 1\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "r_norefresh 0\nr_drawworld 1\nr_drawentities 1\n" );
 	snprintf( line, sizeof( line ),
 		"efw: world present live=%d origin=%.0f %.0f %.0f\n",
@@ -2408,6 +4517,8 @@ void EFW_StartFrame( void )
 			if( s_walkOn )
 			{
 				EFW_ApplyLatchedMove( pPlayer );
+				EFW_ApplyUsercmdAir( pPlayer );
+				EFW_UpdateStepSound( pPlayer );
 				EFW_ForceWorldPresent( pPlayer );
 			}
 		}
@@ -2423,6 +4534,15 @@ void EFW_StartFrame( void )
 				continue;
 			if( ( e->v.flags & FL_MONSTER ) && e->v.modelindex > 0 )
 				continue;
+			/* Doors and buttons move on their own think. Zeroing nextthink
+			   every frame left the barracks door shut. */
+			if( e->v.movetype == MOVETYPE_PUSH )
+				continue;
+			{
+				const char *cn = e->v.classname ? STRING( e->v.classname ) : "";
+				if( !strncmp( cn, "func_", 5 ) || !strncmp( cn, "trigger_", 8 ) )
+					continue;
+			}
 			e->v.nextthink = 0;
 			if( e->v.movetype == MOVETYPE_STEP || e->v.movetype == MOVETYPE_FLY
 				|| e->v.movetype == MOVETYPE_TOSS || e->v.movetype == MOVETYPE_WALK )
@@ -2442,6 +4562,9 @@ void EFW_StartFrame( void )
 			EFW_LogLine( line );
 		}
 	}
+	/* After the pulse. Linking inside the think re-entered it until the
+	   pump faulted and the hull stopped. */
+	EFW_FlushNpcOrigins();
 }
 
 int EFW_PrecacheOnce( const char *szClassname )
@@ -2605,6 +4728,41 @@ void EFW_OnServerActivate( void )
 	s_presentOn = 0;
 	s_moveFwd = 0;
 	s_moveSide = 0;
+	s_speedKey = 0;
+	s_useHeld = 0;
+	EFW_ApplyWorldSky();
+	{
+		int si, sn, smi0, ssc0, sshown;
+		sn = smi0 = ssc0 = sshown = 0;
+		for( si = 1; si < EFW_MaxEnts(); si++ )
+		{
+			edict_t *sp = INDEXENT( si );
+			const char *scn;
+			const char *smodel;
+			if( !sp || sp->free )
+				continue;
+			scn = sp->v.classname ? STRING( sp->v.classname ) : "";
+			if( strcmp( scn, "env_sprite" ) )
+				continue;
+			sn++;
+			if( sp->v.modelindex <= 0 )
+				smi0++;
+			if( sp->v.scale <= 0.01f )
+				ssc0++;
+			if( sshown >= 3 )
+				continue;
+			sshown++;
+			smodel = sp->v.model ? STRING( sp->v.model ) : "";
+			snprintf( line, sizeof( line ),
+				"efw: env_sprite i=%d mi=%d mode=%d amt=%.0f scale=%.2f org=%.0f %.0f %.0f %s\n",
+				si, sp->v.modelindex, sp->v.rendermode, sp->v.renderamt, sp->v.scale,
+				sp->v.origin[0], sp->v.origin[1], sp->v.origin[2],
+				smodel ? smodel : "" );
+			EFW_LogLine( line );
+		}
+		snprintf( line, sizeof( line ), "efw: env_sprite n=%d mi0=%d scale0=%d\n", sn, smi0, ssc0 );
+		EFW_LogLine( line );
+	}
 	snprintf( line, sizeof( line ),
 		"efw: ServerActivate ents=%d max=%d dropped=%d passes=%d seen=%d markers=%d refugees=%d map=%s level=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities, s_dropped, s_worldPasses,
@@ -2634,6 +4792,8 @@ void EFW_OnServerDeactivate( void )
 	s_presentOn = 0;
 	s_moveFwd = 0;
 	s_moveSide = 0;
+	s_speedKey = 0;
+	s_useHeld = 0;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
@@ -2725,6 +4885,7 @@ void EFW_Precache( void )
 	PRECACHE_MODEL( "models/w_Pliers.mdl" );
 	PRECACHE_MODEL( "models/v_Pliers.mdl" );
 	PRECACHE_MODEL( "models/p_Pliers.mdl" );
+	EFW_PrecacheSteps();
 	EFW_InitPA();
 }
 
@@ -2733,9 +4894,77 @@ void EFW_PlayerSpawn( CBasePlayer *pPlayer )
 	EFW_LinkUserMessages();
 	EFW_Precache();
 	EFW_InitFromSpawn( pPlayer );
+	/* FUN_1007ed20: MapLevel()==1 skips this. Every other map calls
+	   SetClientMaxspeed(edict, 180). Level 2 keeps the engine cap. */
+	if( pPlayer && EFW_MapLevel() != 1 )
+	{
+		pPlayer->pev->maxspeed = 180.0f;
+		g_engfuncs.pfnSetClientMaxspeed( pPlayer->edict(), 180.0f );
+		EFW_DebugPrint( ">>> FUN_1007ed20 maxspeed 180 level=%d", EFW_MapLevel() );
+	}
 	CLIENT_COMMAND( pPlayer->edict(), "bind i efw_diary\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "bind [ efw_diary_prev\n" );
 	CLIENT_COMMAND( pPlayer->edict(), "bind ] efw_diary_next\n" );
+}
+
+static int EFW_UseNearbyDoor( CBasePlayer *pPlayer )
+{
+	static const char *kClasses[] = { "func_door_rotating", "func_door", "func_button" };
+	CBaseEntity *pBest = NULL;
+	Vector bestMid;
+	float bestDot = 0.7f; /* HL PlayerUse VIEW_FIELD_NARROW */
+	Vector eye;
+	Vector fwd;
+	int c;
+	if( !pPlayer )
+		return 0;
+	eye = pPlayer->EyePosition();
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	fwd = gpGlobals->v_forward;
+	for( c = 0; c < (int)( sizeof( kClasses ) / sizeof( kClasses[0] ) ); c++ )
+	{
+		CBaseEntity *pScan = NULL;
+		while( ( pScan = UTIL_FindEntityByClassname( pScan, kClasses[c] ) ) != NULL )
+		{
+			Vector mid = ( pScan->pev->absmin + pScan->pev->absmax ) * 0.5f;
+			Vector dir = mid - eye;
+			float d = dir.Length();
+			float dot;
+			if( d > 96.0f || d < 1.0f )
+				continue;
+			dir = dir * ( 1.0f / d );
+			dot = DotProduct( dir, fwd );
+			if( dot > bestDot )
+			{
+				bestDot = dot;
+				pBest = pScan;
+				bestMid = mid;
+			}
+		}
+	}
+	if( !pBest )
+		return 0;
+	EFW_DebugPrint( ">>> use door %s %s dot=%.2f",
+		STRING( pBest->pev->classname ), STRING( pBest->pev->targetname ), bestDot );
+	{
+		/* Step back so the hull is not inside the leaf. A blocked door
+		   reverses and looks like Use did nothing. */
+		Vector away = pPlayer->pev->origin - bestMid;
+		TraceResult tr;
+		away.z = 0.0f;
+		if( away.Length() < 1.0f )
+			away = Vector( 0, -1, 0 );
+		away = away.Normalize() * 48.0f;
+		UTIL_TraceHull( pPlayer->pev->origin, pPlayer->pev->origin + away,
+			dont_ignore_monsters, human_hull, pPlayer->edict(), &tr );
+		if( !tr.fStartSolid )
+		{
+			pPlayer->pev->origin = tr.vecEndPos;
+			UTIL_SetOrigin( pPlayer->pev, tr.vecEndPos );
+		}
+	}
+	pBest->Use( pPlayer, pPlayer, USE_TOGGLE, 1 );
+	return 1;
 }
 
 void EFW_PlayerPreThink( CBasePlayer *pPlayer )
@@ -2746,9 +4975,27 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	s_preN++;
 	if( s_preN <= 8 || ( s_preN % 60 ) == 1 )
 	{
-		char line[64];
-		snprintf( line, sizeof( line ), "efw: PreThink n=%d live=%d\n", s_preN, s_liveTicks );
+		char line[128];
+		snprintf( line, sizeof( line ),
+			"efw: PreThink n=%d live=%d btn=%d vel=%.0f origin=%.0f %.0f %.0f yaw=%.0f pitch=%.0f\n",
+			s_preN, s_liveTicks, pPlayer->pev->button, pPlayer->pev->velocity.Length(),
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y, pPlayer->pev->origin.z,
+			pPlayer->pev->v_angle.y, pPlayer->pev->v_angle.x );
 		EFW_LogLine( line );
+	}
+	if( ( pPlayer->pev->button & ( IN_JUMP | IN_DUCK ) ) || fabs( pPlayer->pev->velocity.z ) > 80.0f )
+	{
+		static int s_airN;
+		char line[128];
+		if( s_airN < 48 )
+		{
+			s_airN++;
+			snprintf( line, sizeof( line ),
+				"efw: air n=%d btn=%d velz=%.0f z=%.1f viewz=%.0f flags=%d\n",
+				s_airN, pPlayer->pev->button, pPlayer->pev->velocity.z,
+				pPlayer->pev->origin.z, pPlayer->pev->view_ofs.z, pPlayer->pev->flags );
+			EFW_LogLine( line );
+		}
 	}
 	if( g_efw.player != pPlayer )
 		EFW_SetPlayer( pPlayer );
@@ -2759,6 +5006,19 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	/* Skip HUD/scan/look-use until StartFrame has proven it can return. */
 	if( s_liveTicks < 8 )
 		return;
+	/* DAT_10114740 starts at 1. The first player think on level 1
+	   (FUN_100c5b80 returns 0) sends menu 0x49 and clears the byte.
+	   Level 2 and 3 leave it set. The pawn has to be live first so
+	   the client has hooked EFW_Menu. */
+	{
+		static int s_introFlag = 1;
+		if( s_introFlag && EFW_MapLevel() == 0 )
+		{
+			s_introFlag = 0;
+			EFW_DebugPrint( ">>> FUN_1007db60 intro=0x49" );
+			EFW_FailOrNarrate( pPlayer, 0x49 );
+		}
+	}
 	if( EFW_GetHudInt( 6 ) )
 		pPlayer->pev->movetype = MOVETYPE_NONE;
 	if( s_inUseLatch )
@@ -2771,6 +5031,8 @@ void EFW_PlayerPreThink( CBasePlayer *pPlayer )
 	{
 		int hit = EFW_LookUse( pPlayer );
 		EFW_DebugPrint( ">>> IN_USE look-use hit=%d", hit );
+		if( !hit )
+			hit = EFW_UseNearbyDoor( pPlayer );
 		if( hit )
 			pPlayer->m_afButtonPressed &= ~IN_USE;
 	}

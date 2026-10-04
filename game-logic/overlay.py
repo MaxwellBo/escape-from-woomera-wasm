@@ -89,6 +89,43 @@ def main() -> None:
     for src_name, dest in copies.items():
         shutil.copy2(ROOT / src_name, dest)
 
+    # SetPaintOffset calls back into pushMakeCurrent. The paint stack grows
+    # until the frame aborts, and the canvas stays on the first view.
+    once(
+        sdk / "freevgui/platform/xash3d-fwgs/surface.cpp",
+        "void XashSurface::pushMakeCurrent( Panel *panel, bool useInsets )\n"
+        "{\n"
+        "	if( paintStackPos >= MAX_PAINT_STACK )\n"
+        "	{\n"
+        "		vgui_dprintf( \"vgui: paint state stack overflow, broken panel tree?\\n\" );\n"
+        "		return;\n"
+        "	}\n",
+        "void XashSurface::pushMakeCurrent( Panel *panel, bool useInsets )\n"
+        "{\n"
+        "	static int s_reenter;\n"
+        "	if( s_reenter )\n"
+        "		return;\n"
+        "	s_reenter = 1;\n"
+        "	if( paintStackPos >= MAX_PAINT_STACK )\n"
+        "	{\n"
+        "		vgui_dprintf( \"vgui: paint state stack overflow, broken panel tree?\\n\" );\n"
+        "		s_reenter = 0;\n"
+        "		return;\n"
+        "	}\n",
+    )
+    once(
+        sdk / "freevgui/platform/xash3d-fwgs/surface.cpp",
+        "	memcpy( ps->clip, clip, sizeof( ps->clip ));\n"
+        "\n"
+        "	makeCurrent( ps );\n"
+        "}\n",
+        "	memcpy( ps->clip, clip, sizeof( ps->clip ));\n"
+        "\n"
+        "	makeCurrent( ps );\n"
+        "	s_reenter = 0;\n"
+        "}\n",
+    )
+
     cmake_dlls = dlls / "CMakeLists.txt"
     once(
         cmake_dlls,
@@ -163,6 +200,16 @@ def main() -> None:
         "\n"
         f"	EFW_OnServerActivate(); {MARKER}\n"
         "	//ALERT( at_console, \"ServerActivate()\\n\" );\n",
+    )
+    once(
+        client_cpp,
+        "void CmdStart( const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed )\n"
+        "{\n"
+        "	entvars_t *pev = (entvars_t *)&player->v;\n",
+        "void CmdStart( const edict_t *player, const struct usercmd_s *cmd, unsigned int random_seed )\n"
+        "{\n"
+        f"	EFW_NoteUsercmd( cmd ); {MARKER}\n"
+        "	entvars_t *pev = (entvars_t *)&player->v;\n",
     )
     once(
         client_cpp,
@@ -348,6 +395,21 @@ def main() -> None:
         f"	EFW_EndWorldPrecache(); {MARKER}\n"
         "}\n",
     )
+    once(
+        world_cpp,
+        "	if( FStrEq( pkvd->szKeyName, \"skyname\" ) )\n"
+        "	{\n"
+        "		// Sent over net now.\n"
+        "		CVAR_SET_STRING( \"sv_skyname\", pkvd->szValue );\n"
+        "		pkvd->fHandled = TRUE;\n"
+        "	}\n",
+        "	if( FStrEq( pkvd->szKeyName, \"skyname\" ) )\n"
+        "	{\n"
+        "		// Sent over net now.\n"
+        f"		EFW_ApplyWorldSky(); {MARKER}\n"
+        "		pkvd->fHandled = TRUE;\n"
+        "	}\n",
+    )
 
     weapons_cpp = dlls / "weapons.cpp"
     once(
@@ -501,7 +563,43 @@ def main() -> None:
         "}\n",
     )
 
+    view_cpp = cldll / "view.cpp"
+    once(
+        view_cpp,
+        "\tif( gEngfuncs.IsSpectateOnly() )\n"
+        "\t{\n"
+        "\t\tent = gEngfuncs.GetEntityByIndex( g_iUser2 );\n"
+        "\t}\n",
+        "\t{\n"
+        "\t\textern void EFW_DriftPitch( struct ref_params_s *pparams );\n"
+        "\t\tEFW_DriftPitch( pparams ); /* EFW_OVERLAY */\n"
+        "\t}\n"
+        "\tif( gEngfuncs.IsSpectateOnly() )\n"
+        "\t{\n"
+        "\t\tent = gEngfuncs.GetEntityByIndex( g_iUser2 );\n"
+        "\t}\n",
+    )
+
     input_cpp = cldll / "input.cpp"
+    once(
+        input_cpp,
+        "	else\n"
+        "	{\n"
+        "		VectorCopy( oldangles, cmd->viewangles );\n"
+        "	}\n"
+        "\n"
+        "}\n",
+        "	else\n"
+        "	{\n"
+        "		VectorCopy( oldangles, cmd->viewangles );\n"
+        "	}\n"
+        "	{\n"
+        "		extern void EFW_ClientMove( float frametime, struct usercmd_s *cmd, int active );\n"
+        "		EFW_ClientMove( frametime, cmd, active ); /* EFW_OVERLAY */\n"
+        "	}\n"
+        "\n"
+        "}\n",
+    )
     once(
         input_cpp,
         "int DLLEXPORT HUD_Key_Event( int down, int keynum, const char *pszCurrentBinding )\n"

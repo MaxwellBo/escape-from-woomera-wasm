@@ -25,7 +25,7 @@
           <div class="viewport-frame">
             <div class="canvas-wrap">
             <canvas id="canvas" width="960" height="720" tabindex="0" aria-label="Game view"></canvas>
-            <div id="efw-hint" class="efw-hint">WASD move · Q/Z turn · E use · click the view for mouse</div>
+            <div id="efw-hint" class="efw-hint" hidden>WASD move · Space jump · Ctrl duck · Q/Z turn · E use · click the view for mouse</div>
             <div id="efw-hope" class="efw-hope" hidden>
               <span id="efw-hope-label">HOPE  80</span>
               <div id="efw-hope-ticks" class="efw-hope-ticks" aria-hidden="true"></div>
@@ -142,6 +142,7 @@
               <code>dt/12</code>, conversations from <code>Conversations/*.txt</code>
               hide past 200 units / 20s, diary, and map markers.
               Click the game view, then <strong>WASD</strong> to walk,
+              <strong>Space</strong> to jump, <strong>Ctrl</strong> to duck,
               <strong>Q/Z</strong> or arrows to turn, <strong>E</strong> or Talk
               to speak, <strong>Use</strong> on workbenches and bins,
               <strong>Give</strong> to hand over an item, number keys or 1–4 to
@@ -203,7 +204,7 @@
           <ol class="how">
             <li>Wait for steps 1–2 (mod zip + vendored Uplink <code>valve/</code> data). The engine then boots on its own.</li>
             <li>If boot did not start, click <strong>Boot Woomera in WASM</strong>. It runs with <code>-game woomera</code> and loads <code>efw_prototype_level1</code>.</li>
-            <li>Click the game view once to capture the mouse (pointer lock) and send keyboard to the engine. Esc releases the mouse. A keyboard and mouse are required, as with the original. Press <strong>E</strong> or click a person to talk, <strong>I</strong> for the diary, <strong>[</strong>/<strong>]</strong> to turn pages.</li>
+            <li>Click the game view once to capture the mouse (pointer lock) and send keyboard to the engine. Esc releases the mouse. A keyboard and mouse are required, as with the original. <strong>WASD</strong> walks, <strong>Space</strong> jumps, <strong>Ctrl</strong> ducks. Press <strong>E</strong> or click a person to talk, <strong>I</strong> for the diary, <strong>[</strong>/<strong>]</strong> to turn pages.</li>
             <li>If the screen stays black, open the engine log below the game and the browser console.</li>
           </ol>
           <div class="row">

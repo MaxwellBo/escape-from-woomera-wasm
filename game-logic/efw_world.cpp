@@ -11,6 +11,29 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+
+void EFW_ApplyWorldSky( void )
+{
+	const char *sky;
+	int level;
+
+	/* FUN_100b6140 consumes worldspawn skyname. The map string
+	   (dashdesert256) is not installed. Level 2 is evening256; every
+	   other map, including level 1, is day256. The dusk set has no
+	   down face; staging copies the up face so the skybox loads. */
+	level = EFW_MapLevel();
+	sky = ( level == 1 ) ? "evening256" : "day256";
+	CVAR_SET_STRING( "sv_skyname", sky );
+	{
+		static int s_sky;
+		if( s_sky < 3 )
+		{
+			s_sky++;
+			EFW_DebugPrint( ">>> FUN_100b6140 %s", sky );
+		}
+	}
+}
 
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value )
 {
@@ -326,6 +349,168 @@ static int EFW_PosInBox( const Vector &pos, CBaseEntity *pEnt )
 		&& pos.z >= mins.z - 16.0f && pos.z <= maxs.z + 48.0f;
 }
 
+/* trigger_multiple stores the next fire on pev->nextthink as
+   sv.time + wait. ActivateMultiTrigger returns while nextthink is still
+   ahead of that clock. The listen server leaves sv.time put, so a brush
+   that has fired once never fires again. The map wait (the kitchen
+   brushes are 1 second) elapses on the host clock, then nextthink is
+   pulled back to sv.time and MultiTouch can run. */
+void EFW_AdvanceTriggerWaits( void )
+{
+	static struct
+	{
+		edict_t *ed;
+		float at;
+	} arm[16];
+	CBaseEntity *pScan;
+	float now;
+	int i;
+	static int s_log;
+
+	now = EFW_HostClock();
+	pScan = NULL;
+	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
+	{
+		edict_t *ed;
+		float wait;
+		int slot;
+		int freeSlot;
+
+		ed = pScan->edict();
+		if( !ed )
+			continue;
+		if( pScan->pev->nextthink <= gpGlobals->time )
+		{
+			for( i = 0; i < 16; i++ )
+			{
+				if( arm[i].ed == ed )
+					arm[i].ed = NULL;
+			}
+			continue;
+		}
+		wait = ( (CBaseToggle *)pScan )->m_flWait;
+		if( wait <= 0.0f )
+			continue;
+		slot = -1;
+		freeSlot = -1;
+		for( i = 0; i < 16; i++ )
+		{
+			if( arm[i].ed == ed )
+			{
+				slot = i;
+				break;
+			}
+			if( freeSlot < 0 && !arm[i].ed )
+				freeSlot = i;
+		}
+		if( slot < 0 )
+		{
+			if( freeSlot < 0 )
+				continue;
+			arm[freeSlot].ed = ed;
+			arm[freeSlot].at = now;
+			continue;
+		}
+		if( ( now - arm[slot].at ) >= wait )
+		{
+			pScan->pev->nextthink = gpGlobals->time;
+			arm[slot].ed = NULL;
+			if( s_log < 8 )
+			{
+				s_log++;
+				EFW_DebugPrint( ">>> trigger wait %.2f %s", wait,
+					STRING( pScan->pev->target ) );
+			}
+		}
+	}
+}
+
+/* SV_Physics_Pusher moves a door by velocity over pev->ltime and calls
+   LinearMoveDone / AngularMoveDone when ltime reaches nextthink. This
+   listen server leaves ltime put, so Use arms the swing and the brush
+   stays shut. The host pump is that frametime. */
+void EFW_AdvancePushers( void )
+{
+	int i;
+	int maxEnts;
+	float dt;
+	static int s_step;
+	static int s_arrive;
+
+	dt = EFW_HostInterval();
+	if( dt < 0.001f || !gpGlobals )
+		return;
+	maxEnts = gpGlobals->maxEntities;
+	if( maxEnts > 1200 )
+		maxEnts = 1200;
+	for( i = 1; i < maxEnts; i++ )
+	{
+		edict_t *e = INDEXENT( i );
+		CBaseEntity *pEnt;
+		Vector vel;
+		Vector avel;
+		float old;
+		float think;
+		float movetime;
+		int moving;
+		const char *cn;
+		const char *tn;
+
+		if( !e || e->free || !e->pvPrivateData )
+			continue;
+		if( e->v.movetype != MOVETYPE_PUSH )
+			continue;
+		vel = e->v.velocity;
+		avel = e->v.avelocity;
+		moving = ( vel.Length() > 0.01f ) || ( avel.Length() > 0.01f );
+		old = e->v.ltime;
+		think = e->v.nextthink;
+		if( think <= 0.0f && !moving )
+			continue;
+		movetime = dt;
+		if( think > old && think < old + movetime )
+			movetime = think - old;
+		if( movetime < 0.0f )
+			movetime = 0.0f;
+		if( movetime > 0.0f && moving )
+		{
+			Vector org = e->v.origin + vel * movetime;
+			e->v.angles = e->v.angles + avel * movetime;
+			UTIL_SetOrigin( &e->v, org );
+			if( s_step < 6 )
+			{
+				s_step++;
+				cn = e->v.classname ? STRING( e->v.classname ) : "?";
+				tn = e->v.targetname ? STRING( e->v.targetname ) : "";
+				EFW_DebugPrint( ">>> push step %s %s ang=%.0f %.0f %.0f org=%.0f %.0f %.0f",
+					cn, ( tn && tn[0] ) ? tn : "-",
+					e->v.angles.x, e->v.angles.y, e->v.angles.z,
+					e->v.origin.x, e->v.origin.y, e->v.origin.z );
+			}
+		}
+		e->v.ltime = old + movetime;
+		if( think > old && think <= e->v.ltime + 0.001f )
+		{
+			e->v.nextthink = 0.0f;
+			pEnt = CBaseEntity::Instance( e );
+			if( pEnt )
+				pEnt->Think();
+			/* Move-done snaps angles, then the brush has to relink. */
+			UTIL_SetOrigin( &e->v, e->v.origin );
+			if( s_arrive < 8 )
+			{
+				s_arrive++;
+				cn = e->v.classname ? STRING( e->v.classname ) : "?";
+				tn = e->v.targetname ? STRING( e->v.targetname ) : "";
+				EFW_DebugPrint( ">>> push arrive %s %s ang=%.0f %.0f %.0f org=%.0f %.0f %.0f",
+					cn, ( tn && tn[0] ) ? tn : "-",
+					e->v.angles.x, e->v.angles.y, e->v.angles.z,
+					e->v.origin.x, e->v.origin.y, e->v.origin.z );
+			}
+		}
+	}
+}
+
 /* GoldSrc trigger Touch is AABB. Noclip / deferred studios never fire
    pfnTouch, so FUN_100c7da0 GateFSM never ran while walking the barracks. */
 void EFW_PulseWorld( CBasePlayer *pPlayer )
@@ -345,6 +530,8 @@ void EFW_PulseWorld( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
+	EFW_AdvancePushers();
+	EFW_AdvanceTriggerWaits();
 	pos = pPlayer->pev->origin;
 	pScan = NULL;
 	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
@@ -397,7 +584,7 @@ struct EfwCue
 struct EfwPA
 {
 	EfwCue slot[5];
-	float gap;       /* +0x50 init 120, unused by think */
+	float gap;       /* +0x50 init 120; FUN_100c7740 fmod modulus */
 	float timer;     /* +0x54 init 5 */
 	float lastTime;  /* +0x58 */
 	int index;       /* +0x5c */
@@ -410,29 +597,43 @@ static EfwPA g_pa;
 void EFW_PlayCue( const char *sample )
 {
 	CBaseEntity *pSrc;
-	edict_t *ed;
 	int pitch;
 
+	/* FUN_100c75e0: a null sample prints and does not emit. */
 	if( !sample || !sample[0] )
 	{
-		EFW_DebugPrint( "efw: play (null)" );
+		EFW_DebugPrint( "trying to play sound that isn't loaded!!" );
 		return;
 	}
 	pSrc = UTIL_FindEntityByTargetname( NULL, sample );
 	if( pSrc )
-		ed = pSrc->edict();
-	else if( EFW_Player() )
-		ed = EFW_Player()->edict();
-	else
-		return;
-	pitch = 100 - RANDOM_LONG( 0, 19 );
-	EMIT_SOUND_DYN( ed, CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
-	EFW_DebugPrint( "efw: play %s", sample );
-	if( EFW_Player() )
 	{
-		char line[96];
-		snprintf( line, sizeof( line ), "efw: play %s", sample );
-		EFW_Print( EFW_Player(), line );
+		/* Named speaker: CHAN_ITEM, volume 1, attenuation 1.25,
+		   pitch 100 minus rand()%20. */
+		pitch = 100 - RANDOM_LONG( 0, 19 );
+		EMIT_SOUND_DYN( pSrc->edict(), CHAN_ITEM, sample, 1.0f, 1.25f, 0, pitch );
+		EFW_DebugPrint( "play on loudspeaker x" );
+		EFW_DebugPrint( ">>> FUN_100c75e0 speaker %s pitch=%d", sample, pitch );
+		return;
+	}
+	/* No entity with that targetname. FUN_10094bb0 plays on the player
+	   edict: suitvolume, CHAN_STATIC, attenuation 0.8. Volume at or
+	   below 0.05 stays silent. Half the calls leave pitch at 100; the
+	   rest use 98..104. */
+	if( !EFW_Player() )
+		return;
+	{
+		float vol = CVAR_GET_FLOAT( "suitvolume" );
+		pitch = 100;
+		if( RANDOM_LONG( 0, 1 ) )
+			pitch = 98 + RANDOM_LONG( 0, 6 );
+		if( vol > 0.05f )
+		{
+			EMIT_SOUND_DYN( EFW_Player()->edict(), CHAN_STATIC, sample, vol, 0.8f, 0, pitch );
+			EFW_DebugPrint( ">>> FUN_100c75e0 suit %s vol=%.2f pitch=%d", sample, vol, pitch );
+		}
+		else
+			EFW_DebugPrint( ">>> FUN_100c75e0 suit skip %s vol=%.2f", sample, vol );
 	}
 }
 
@@ -475,25 +676,25 @@ void EFW_ThinkPA( void )
 {
 	float now;
 	float elapsed;
+	float phase;
 	const char *sample;
 	if( !g_pa.inited )
 		EFW_InitPA();
 	if( EFW_MapLevel() != 0 )
 		return;
 	now = gpGlobals->time;
-	elapsed = now - g_pa.lastTime;
-	if( elapsed <= 0.0f )
+	/* FUN_100c7740: fmod(time, gap) compared with 0.5, then timer > 5.
+	   gap is 120, so a cue is allowed for half a second every two minutes.
+	   The timer adds this same sv.time delta after the test. A stuck clock
+	   adds nothing, and the old 0.05s fallback no longer fires the cue. */
+	phase = now;
+	if( g_pa.gap > 0.0f )
 	{
-		elapsed = gpGlobals->frametime;
-		if( elapsed <= 0.0f )
-			elapsed = 0.05f;
+		phase = fmodf( now, g_pa.gap );
+		if( phase < 0.0f )
+			phase += g_pa.gap;
 	}
-	if( elapsed > 0.2f )
-		elapsed = 0.2f;
-	g_pa.timer += elapsed;
-	g_pa.lastTime = now;
-	/* FUN_100c7740: play when timer>5; rarLock uses slot 0 else slot[index+1]. */
-	if( g_pa.timer > 5.0f )
+	if( phase <= 0.5f && g_pa.timer > 5.0f )
 	{
 		if( g_pa.rarLock == 1 )
 			sample = g_pa.slot[0].sample;
@@ -501,7 +702,8 @@ void EFW_ThinkPA( void )
 			sample = g_pa.slot[g_pa.index + 1].sample;
 		EFW_PlayCue( sample );
 		EFW_DebugPrint( ">>> FUN_100c75e0 %s", sample ? sample : "?" );
-		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d", g_pa.rarLock, g_pa.index );
+		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d phase=%.2f",
+			g_pa.rarLock, g_pa.index, phase );
 		EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
 			sample ? sample : "?", g_pa.rarLock, g_pa.index );
 		g_pa.timer = 0.0f;
@@ -509,6 +711,19 @@ void EFW_ThinkPA( void )
 		if( g_pa.index > 3 )
 			g_pa.index = 0;
 	}
+	else if( g_pa.timer > 5.0f )
+	{
+		static int s_hold;
+		if( s_hold < 4 )
+		{
+			s_hold++;
+			EFW_DebugPrint( ">>> FUN_100c7740 hold phase=%.2f timer=%.1f t=%.2f",
+				phase, g_pa.timer, now );
+		}
+	}
+	elapsed = now - g_pa.lastTime;
+	g_pa.lastTime = now;
+	g_pa.timer += elapsed;
 }
 
 void EFW_PALockRAR( void )
