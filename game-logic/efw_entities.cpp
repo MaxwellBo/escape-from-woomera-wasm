@@ -2336,6 +2336,23 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 			}
 			pev->movetype = MOVETYPE_NONE;
 			pev->velocity = Vector( 0, 0, 0 );
+			/* FUN_1000d1d0 calls vtable+0x134, MonsterInit. StartMonster
+			   then sets ACT_IDLE, and that fills m_flFrameRate from
+			   look_idle. Without it StudioFrameAdvance adds nothing and
+			   the uniform stays on frame 0. */
+			if( pMon->m_Activity == ACT_RESET )
+			{
+				pMon->SetActivity( ACT_IDLE );
+				{
+					static int s_idle;
+					if( s_idle < 3 )
+					{
+						s_idle++;
+						EFW_DebugPrint( "officer idle %s seq=%d rate=%.0f",
+							tn, pev->sequence, pMon->m_flFrameRate );
+					}
+				}
+			}
 			EFW_AdvanceNpcAnim( pMon, tn );
 			return;
 		}
