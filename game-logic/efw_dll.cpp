@@ -2671,11 +2671,14 @@ static float s_hvy;
    field here, so the same roll is added in EFW_ViewRoll. */
 static float s_punchRoll;
 
-/* V_DropPunchAngle. Length falls by (10 + len/2) per second. */
+/* V_DropPunchAngle. Length falls by (10 + len/2) per second, and the
+   original spends the whole frame. A late pump is that frame. Capping
+   the gap at a quarter second left the landing roll up after a stall. */
 static void EFW_DropPunch( float dt )
 {
 	float len;
 	float sign;
+	float from;
 
 	len = s_punchRoll;
 	if( len < 0.0f )
@@ -2687,13 +2690,23 @@ static void EFW_DropPunch( float dt )
 	}
 	if( dt < 0.001f )
 		dt = 0.1f;
-	if( dt > 0.25f )
-		dt = 0.25f;
+	from = len;
 	sign = ( s_punchRoll < 0.0f ) ? -1.0f : 1.0f;
 	len -= ( 10.0f + len * 0.5f ) * dt;
 	if( len < 0.0f )
 		len = 0.0f;
 	s_punchRoll = sign * len;
+	if( dt > 0.25f )
+	{
+		static int s_punchLog;
+
+		if( s_punchLog < 6 )
+		{
+			s_punchLog++;
+			EFW_DebugPrint( "drop punch dt=%.3f from=%.2f to=%.2f",
+				dt, from, len );
+		}
+	}
 }
 
 /* PM_AirAccelerate caps the added speed at 30. Ground speed already on
