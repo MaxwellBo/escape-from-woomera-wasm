@@ -3712,18 +3712,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			skipDuck = slice;
 			break;
 		}
-		/* Downhill the horizontal slice is clear and the floor falls
-		   away. A lip onto a 45-degree ramp can drop more than one
-		   slice of travel, up to STEPSIZE. Snap that far. A deeper
-		   ledge still misses and leaves the hull in the air. */
+		/* PM_WalkMove keeps a clear step at this height.
+		   PM_CatagorizePosition then traces 2 units down. Wish 180
+		   on a 45-degree ramp drops about 1.8 in the command, so
+		   that trace still meets the boards. A deeper curb falls. */
 		{
-			float hx = dest.x - pPlayer->pev->origin.x;
-			float hy = dest.y - pPlayer->pev->origin.y;
-			float horiz = sqrtf( hx * hx + hy * hy );
-			float drop = horiz + 2.0f;
+			float drop = 2.0f;
 			int leftFloor;
-			if( drop < 18.0f )
-				drop = 18.0f;
 			TraceResult floor;
 			Vector bot;
 
@@ -4185,16 +4180,13 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
 			break;
 		{
-			float hx = dest.x - pPlayer->pev->origin.x;
-			float hy = dest.y - pPlayer->pev->origin.y;
-			float horiz = sqrtf( hx * hx + hy * hy );
-			float drop = horiz + 2.0f;
+			float drop = 2.0f;
 			TraceResult floor;
 			Vector bot;
 			int leftFloor;
 
-			if( drop < 18.0f )
-				drop = 18.0f;
+			/* Same 2-unit categorize as the ground walk. A landing
+			   that then walks a curb must fall, not glue to it. */
 			leftFloor = 0;
 			bot = dest;
 			bot.z -= drop;
