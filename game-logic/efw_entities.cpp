@@ -925,6 +925,21 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	return 0;
 }
 
+/* SV_StepDirection undoes a step when angles.y - ideal_yaw is still
+   between 45 and 315. The facing has not caught up, so the origin
+   stays and the chase is not tried. */
+static int EFW_YawHoldsStep( entvars_t *pev )
+{
+	float delta;
+
+	if( !pev )
+		return 0;
+	delta = pev->angles.y - pev->ideal_yaw;
+	if( delta > 45.0f && delta < 315.0f )
+		return 1;
+	return 0;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
 {
 	Vector delta;
@@ -1153,6 +1168,28 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					stepLand.x, stepLand.y, stepLand.z );
 			}
 			stepLen = 0.0f;
+		}
+		/* SV_StepDirection keeps the origin when the body has not turned
+		   to within that band of ideal_yaw. A blocked step still chases. */
+		if( stepLen >= 0.5f && EFW_YawHoldsStep( pev ) )
+		{
+			static int s_yawHold;
+			static int s_elikaHold;
+			const char *tn = STRING( pev->targetname );
+			int elika = ( tn && !strcmp( tn, "Elika" ) ) ? 1 : 0;
+
+			if( ( elika && s_elikaHold < 6 ) || ( !elika && s_yawHold < 4 ) )
+			{
+				if( elika )
+					s_elikaHold++;
+				else
+					s_yawHold++;
+				EFW_DebugPrint( "yaw hold %s ang=%.0f ideal=%.0f at %.0f %.0f",
+					( tn && tn[0] ) ? tn : "?",
+					pev->angles.y, pev->ideal_yaw, start.x, start.y );
+			}
+			total -= step;
+			continue;
 		}
 		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
 		   instead of stopping on the wall. */

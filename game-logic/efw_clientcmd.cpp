@@ -990,6 +990,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 				pos.y = (float)atof( CMD_ARGV( arg0 + 3 ) );
 				pos.z = (float)atof( CMD_ARGV( arg0 + 4 ) );
 				UTIL_SetOrigin( pEnt->pev, pos );
+				if( CMD_ARGC() > arg0 + 5 )
+				{
+					pEnt->pev->angles.y = (float)atof( CMD_ARGV( arg0 + 5 ) );
+					pEnt->pev->ideal_yaw = pEnt->pev->angles.y;
+				}
 				EFW_DebugPrint( ">>> efw_setpos %s %.0f %.0f %.0f", who, pos.x, pos.y, pos.z );
 				return 1;
 			}
