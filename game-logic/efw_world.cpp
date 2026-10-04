@@ -672,58 +672,108 @@ void EFW_InitPA( void )
 	EFW_DebugPrint( ">>> FUN_100c7670 Ann_RAR_124 Ann_HAM_103 Ann_TRE_046 Ann_PHA_216 callToPrayer" );
 }
 
+static void EFW_PAHold( float phase, float t )
+{
+	static int s_hold;
+	if( g_pa.timer <= 5.0f || s_hold >= 4 )
+		return;
+	s_hold++;
+	EFW_DebugPrint( ">>> FUN_100c7740 hold phase=%.2f timer=%.1f t=%.2f",
+		phase, g_pa.timer, t );
+}
+
+static void EFW_PAFire( float phase )
+{
+	const char *sample;
+	if( g_pa.rarLock == 1 )
+		sample = g_pa.slot[0].sample;
+	else
+		sample = g_pa.slot[g_pa.index + 1].sample;
+	EFW_PlayCue( sample );
+	EFW_DebugPrint( ">>> FUN_100c75e0 %s", sample ? sample : "?" );
+	EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d phase=%.2f",
+		g_pa.rarLock, g_pa.index, phase );
+	EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
+		sample ? sample : "?", g_pa.rarLock, g_pa.index );
+	g_pa.timer = 0.0f;
+	g_pa.index++;
+	if( g_pa.index > 3 )
+		g_pa.index = 0;
+}
+
+static float EFW_PAPhase( float t )
+{
+	float phase;
+	phase = t;
+	if( g_pa.gap > 0.0f )
+	{
+		phase = fmodf( t, g_pa.gap );
+		if( phase < 0.0f )
+			phase += g_pa.gap;
+	}
+	return phase;
+}
+
 void EFW_ThinkPA( void )
 {
 	float now;
-	float elapsed;
-	float phase;
-	const char *sample;
+	float cursor;
+	int steps;
 	if( !g_pa.inited )
 		EFW_InitPA();
 	if( EFW_MapLevel() != 0 )
 		return;
-	now = gpGlobals->time;
-	/* FUN_100c7740: fmod(time, gap) compared with 0.5, then timer > 5.
-	   gap is 120, so a cue is allowed for half a second every two minutes.
-	   The timer adds this same sv.time delta after the test. A stuck clock
-	   adds nothing, and the old 0.05s fallback no longer fires the cue. */
-	phase = now;
-	if( g_pa.gap > 0.0f )
+	/* FUN_100c7740 samples sv.time. It plays while fmod(time, 120) is at
+	   most 0.5 and the timer is already past 5, then adds that frame.
+	   gpGlobals->time stays near 1, so the phase sits outside the window
+	   and the timer never moves. The host clock is the sum of the frames
+	   Win32 would have run. A late pump covers that gap in 0.1s slices. */
+	now = EFW_HostClock();
+	if( now < g_pa.lastTime )
+		g_pa.lastTime = now;
+	cursor = g_pa.lastTime;
+	steps = 0;
+	while( cursor + 0.0001f < now && steps < 80 )
 	{
-		phase = fmodf( now, g_pa.gap );
-		if( phase < 0.0f )
-			phase += g_pa.gap;
-	}
-	if( phase <= 0.5f && g_pa.timer > 5.0f )
-	{
-		if( g_pa.rarLock == 1 )
-			sample = g_pa.slot[0].sample;
-		else
-			sample = g_pa.slot[g_pa.index + 1].sample;
-		EFW_PlayCue( sample );
-		EFW_DebugPrint( ">>> FUN_100c75e0 %s", sample ? sample : "?" );
-		EFW_DebugPrint( ">>> FUN_100c7740 lock=%d idx=%d phase=%.2f",
-			g_pa.rarLock, g_pa.index, phase );
-		EFW_DebugPrint( ">>> PA %s lock=%d idx=%d",
-			sample ? sample : "?", g_pa.rarLock, g_pa.index );
-		g_pa.timer = 0.0f;
-		g_pa.index++;
-		if( g_pa.index > 3 )
-			g_pa.index = 0;
-	}
-	else if( g_pa.timer > 5.0f )
-	{
-		static int s_hold;
-		if( s_hold < 4 )
+		float phase;
+		float next;
+		float slice;
+
+		steps++;
+		phase = EFW_PAPhase( cursor );
+		/* Samples outside the half-second window do not play. Step the
+		   timer to the next window, or to now, in one slice. */
+		if( g_pa.gap > 0.0f && phase > 0.5f )
 		{
-			s_hold++;
-			EFW_DebugPrint( ">>> FUN_100c7740 hold phase=%.2f timer=%.1f t=%.2f",
-				phase, g_pa.timer, now );
+			float until = cursor + ( g_pa.gap - phase );
+			if( until > now )
+				until = now;
+			if( until > cursor + 0.1f )
+			{
+				EFW_PAHold( phase, cursor );
+				g_pa.timer += until - cursor;
+				cursor = until;
+				continue;
+			}
 		}
+		next = cursor + 0.1f;
+		if( next > now )
+			next = now;
+		slice = next - cursor;
+		phase = EFW_PAPhase( next );
+		if( phase <= 0.5f && g_pa.timer > 5.0f )
+			EFW_PAFire( phase );
+		else
+			EFW_PAHold( phase, next );
+		g_pa.timer += slice;
+		cursor = next;
 	}
-	elapsed = now - g_pa.lastTime;
-	g_pa.lastTime = now;
-	g_pa.timer += elapsed;
+	if( cursor + 0.0001f < now )
+	{
+		g_pa.timer += now - cursor;
+		cursor = now;
+	}
+	g_pa.lastTime = cursor;
 }
 
 void EFW_PALockRAR( void )
