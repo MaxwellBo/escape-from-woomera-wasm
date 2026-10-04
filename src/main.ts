@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll367`;
+    return `${url}?v=efw-dll368`;
   return url;
 }
 
@@ -2441,6 +2441,10 @@ function syncJump(on: boolean) {
   runGameCmd(`efw_pjump ${on ? 1 : 0}`);
 }
 function syncDuck(on: boolean) {
+  /* The pump reads the server latch. A paused listen server clears the
+     usercmd bit before PM_UnDuck; CmdStart puts that bit back from
+     efw_cduck. The direct client command still fills CL_CreateMove. */
+  runGameCmd(`efw_cduck ${on ? 1 : 0}`);
   runGameCmd(`efw_pduck ${on ? 1 : 0}`);
 }
 function syncSpeed(on: boolean) {

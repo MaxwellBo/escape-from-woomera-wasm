@@ -2228,12 +2228,17 @@ static int EFW_CmdFresh( void )
 	return age <= 0.45f;
 }
 
+/* Defined with the crouch state. A finished crouch puts IN_DUCK back on
+   the usercmd before PM reads the bit the pause cleared. */
+static void EFW_KeepDuckButton( usercmd_s *cmd );
+
 void EFW_NoteUsercmd( const usercmd_s *cmd )
 {
 	static int s_log;
 
 	if( !cmd )
 		return;
+	EFW_KeepDuckButton( (usercmd_s *)cmd );
 	s_cmdClock = s_hostClock;
 	s_cmdButtons = cmd->buttons;
 	s_cmdFwd = 0;
@@ -2979,6 +2984,38 @@ static float EFW_DuckSpline( float time )
 	return 3.0f * valueSquared - 2.0f * valueSquared * value;
 }
 
+/* The engine hull follows FL_DUCKING on the next PM. Until that runs,
+   traces that read pev->mins still use the standing box. */
+static void EFW_SetPlayerHull( CBasePlayer *pPlayer, int ducked )
+{
+	if( !pPlayer )
+		return;
+	if( ducked )
+		UTIL_SetSize( pPlayer->pev, VEC_DUCK_HULL_MIN, VEC_DUCK_HULL_MAX );
+	else
+		UTIL_SetSize( pPlayer->pev, VEC_HULL_MIN, VEC_HULL_MAX );
+}
+
+/* A paused listen server zeros usercmd buttons, then PM_UnDuck still
+   runs. That adds the 18 back and clears FL_DUCKING. CmdStart is before
+   that read. The bit goes back on only after this port has finished the
+   crouch, so PM does not start its own timer and drop another 18. */
+static void EFW_KeepDuckButton( usercmd_s *cmd )
+{
+	static int s_keep;
+
+	if( !cmd || !s_duckHeld || !s_crouchDone )
+		return;
+	if( cmd->buttons & IN_DUCK )
+		return;
+	cmd->buttons |= IN_DUCK;
+	if( s_keep < 4 )
+	{
+		s_keep++;
+		EFW_LogLine( "efw: duck keep\n" );
+	}
+}
+
 /* Head hull, origin 18 lower, eye at 12. tag is the log word. */
 static int EFW_PlaceDuckHull( CBasePlayer *pPlayer, const char *tag )
 {
@@ -3008,11 +3045,15 @@ static int EFW_PlaceDuckHull( CBasePlayer *pPlayer, const char *tag )
 	if( !freed )
 		dropped = saved;
 	pPlayer->pev->origin = dropped;
-	UTIL_SetOrigin( pPlayer->pev, dropped );
 	s_floorZ = dropped.z;
 	s_floorSet = 1;
 	pPlayer->pev->flags |= FL_DUCKING;
 	pPlayer->pev->view_ofs.z = 12.0f;
+	/* PM's own duck timer would drop this origin a second time. */
+	pPlayer->pev->bInDuck = 0;
+	pPlayer->pev->flDuckTime = 0;
+	EFW_SetPlayerHull( pPlayer, 1 );
+	UTIL_SetOrigin( pPlayer->pev, dropped );
 	snprintf( line, sizeof( line ),
 		"efw: %s z=%.1f -> %.1f at %.0f %.0f\n",
 		tag, s_duckStandZ, dropped.z, dropped.x, dropped.y );
@@ -3044,6 +3085,9 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 				&& pPlayer->pev->origin.z > s_duckStandZ - 9.0f )
 				return EFW_PlaceDuckHull( pPlayer, "duck hold" );
 			pPlayer->pev->view_ofs.z = 12.0f;
+			pPlayer->pev->bInDuck = 0;
+			pPlayer->pev->flDuckTime = 0;
+			EFW_SetPlayerHull( pPlayer, 1 );
 			return 0;
 		}
 		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
@@ -3074,6 +3118,9 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 				if( inAirFinish )
 				{
 					pPlayer->pev->view_ofs.z = 12.0f;
+					pPlayer->pev->bInDuck = 0;
+					pPlayer->pev->flDuckTime = 0;
+					EFW_SetPlayerHull( pPlayer, 1 );
 					snprintf( line, sizeof( line ),
 						"efw: duck air viewz=12 z=%.1f\n",
 						pPlayer->pev->origin.z );
@@ -3151,8 +3198,11 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 			s_crouchDone = 0;
 			s_duckTime = 0.0f;
 			pPlayer->pev->flags &= ~FL_DUCKING;
+			pPlayer->pev->bInDuck = 0;
+			pPlayer->pev->flDuckTime = 0;
 			pPlayer->pev->origin = up;
 			UTIL_SetOrigin( pPlayer->pev, up );
+			EFW_SetPlayerHull( pPlayer, 0 );
 			s_floorZ = up.z;
 			s_floorSet = 1;
 			pPlayer->pev->view_ofs.z = 28.0f;
