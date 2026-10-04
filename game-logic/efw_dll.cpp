@@ -9,6 +9,7 @@
 #include "player.h"
 #include "weapons.h"
 #include "client.h"
+#include "gamerules.h"
 #include "efw_dll.h"
 #include "efw_persist.h"
 #include "usercmd.h"
@@ -3999,6 +4000,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				{
 					static int s_fallLog;
 					float fvol;
+					float damage;
+					float healthBefore;
 					Vector wetAt;
 
 					s_punchRoll = fall * 0.013f;
@@ -4008,6 +4011,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 					pPlayer->m_flTimeStepSound = 0.0f;
 					wetAt = dest;
 					wetAt.z += 8.0f;
+					damage = 0.0f;
+					healthBefore = pPlayer->pev->health;
 					if( UTIL_PointContents( wetAt ) == CONTENTS_WATER )
 						fvol = 0.5f;
 					else if( fall > 580.0f )
@@ -4015,6 +4020,23 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 						fvol = 1.0f;
 						EMIT_SOUND_DYN( pPlayer->edict(), CHAN_VOICE,
 							"player/pl_fallpain3.wav", 1.0f, ATTN_NORM, 0, PITCH_NORM );
+						/* CBasePlayer::PostThink. PreThink stores the fall
+						   only while the hull is off the ground. This pump
+						   lands and clears the velocity first, so that
+						   check never sees the impact. */
+						if( g_pGameRules && healthBefore > 0.0f )
+						{
+							pPlayer->m_flFallVelocity = fall;
+							damage = g_pGameRules->FlPlayerFallDamage( pPlayer );
+							if( damage > healthBefore )
+								EMIT_SOUND_DYN( pPlayer->edict(), CHAN_ITEM,
+									"common/bodysplat.wav", 1.0f, ATTN_NORM, 0, PITCH_NORM );
+							if( damage > 0.0f )
+							{
+								pPlayer->TakeDamage( VARS( eoNullEntity ), VARS( eoNullEntity ), damage, DMG_FALL );
+								pPlayer->pev->punchangle.x = 0;
+							}
+						}
 					}
 					else
 						fvol = 0.85f;
@@ -4023,8 +4045,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 					{
 						s_fallLog++;
 						snprintf( line, sizeof( line ),
-							"efw: fall vz=%.0f punch=%.2f z=%.1f from %.1f at %.0f %.0f\n",
-							fall, s_punchRoll, dest.z, s_floorZ, dest.x, dest.y );
+							"efw: fall vz=%.0f punch=%.2f z=%.1f from %.1f at %.0f %.0f dmg=%.0f hp=%.0f\n",
+							fall, s_punchRoll, dest.z, s_floorZ, dest.x, dest.y,
+							damage, pPlayer->pev->health );
 						EFW_LogLine( line );
 					}
 				}
@@ -4035,6 +4058,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 						dest.z, s_floorZ, fall, dest.x, dest.y );
 					EFW_LogLine( line );
 				}
+				/* A later PostThink must not apply this impact again. */
+				pPlayer->m_flFallVelocity = 0.0f;
 			}
 			pPlayer->pev->origin = dest;
 			pPlayer->pev->velocity.z = s_vz;
@@ -4349,7 +4374,8 @@ static void EFW_PrecacheSteps( void )
 		"player/pl_wade3.wav", "player/pl_wade4.wav",
 		"player/pl_ladder1.wav", "player/pl_ladder2.wav",
 		"player/pl_ladder3.wav", "player/pl_ladder4.wav",
-		"player/pl_fallpain3.wav"
+		"player/pl_fallpain3.wav",
+		"common/bodysplat.wav"
 	};
 	unsigned i;
 	for( i = 0; i < sizeof( kWav ) / sizeof( kWav[0] ); i++ )
