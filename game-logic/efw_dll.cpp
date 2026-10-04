@@ -401,8 +401,10 @@ void EFW_ThinkHope( void )
 	}
 	else
 		return;
-	if( elapsed > 0.25f )
-		elapsed = 0.25f;
+	/* A late pump is one host frame that covers the gap. 2s drops a
+	   stall. The 0.25s movement step stays in EFW_HostPump. */
+	if( elapsed > 2.0f )
+		elapsed = 2.0f;
 	hope = EFW_GetHudFloat( 1 );
 	hope -= elapsed * ( 1.0f / 12.0f );
 	if( hope < 0.0f )
@@ -1967,13 +1969,20 @@ static void EFW_HostPump( void )
 	n++;
 	{
 		float wall = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.12f;
+		float step;
 		if( wall < 0.0f )
 			wall = 0.0f;
-		if( wall > 0.25f )
-			wall = 0.25f;
+		/* FUN_100c6ad0 multiplies this frame's delta by 1/12. Win32
+		   frames sum to real time, so a pump that landed late still
+		   counts the gap. 2s is the stall clamp. */
+		if( wall > 2.0f )
+			wall = 2.0f;
 		s_hopeWall += wall;
-		s_hostInterval = wall;
-		s_hostClock += wall;
+		step = wall;
+		if( step > 0.25f )
+			step = 0.25f;
+		s_hostInterval = step;
+		s_hostClock += step;
 	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();

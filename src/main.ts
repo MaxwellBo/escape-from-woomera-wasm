@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll349`;
+    return `${url}?v=efw-dll350`;
   return url;
 }
 
@@ -1276,7 +1276,7 @@ function startHostPumps() {
   let lastPumpMs = 0;
   pumpTimer = setInterval(() => {
     const now = performance.now();
-    const dt = lastPumpMs ? Math.min(0.25, (now - lastPumpMs) / 1000) : 0.12;
+    const dt = lastPumpMs ? Math.min(2.0, (now - lastPumpMs) / 1000) : 0.12;
     lastPumpMs = now;
     runEngineCmd(`efw_pump ${dt.toFixed(3)}`);
     /* FUN_10045f20 keeps moving for half a second after the buttons exist.
