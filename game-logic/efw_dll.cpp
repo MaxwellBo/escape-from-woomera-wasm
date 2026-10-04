@@ -3891,7 +3891,10 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 			slices++;
 			if( leftFloor )
 			{
+				/* This command left the floor. The leftover is the next
+				   fall, same as the walk that first reached a lip. */
 				pPlayer->pev->flags &= ~FL_ONGROUND;
+				s_airBudget = left;
 				break;
 			}
 		}
@@ -4109,33 +4112,40 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		}
 	}
 
-	/* PM_AddCorrectGravity still runs after the step that left the floor.
-	   The jump arc is that fall with a zero takeoff speed. Clearing
-	   FL_ONGROUND and leaving origin.z put the hull in the air over the drop. */
-	if( !s_airborne && !( pPlayer->pev->flags & FL_ONGROUND ) )
+	/* A landing can walk off a second lip before this pump ends.
+	   Each pass is the fall for the lip the previous walk just left. */
 	{
-		static int s_dropLog;
+		int pass;
 
-		s_floorZ = pPlayer->pev->origin.z;
-		s_floorSet = 1;
-		s_jumpVz0 = 0.0f;
-		s_vz = 0.0f;
-		s_jumpT = 0.0f;
-		s_airborne = 1;
-		if( s_dropLog < 6 )
+		for( pass = 0; pass < 8; pass++ )
 		{
-			s_dropLog++;
-			snprintf( line, sizeof( line ),
-				"efw: drop z=%.1f at %.0f %.0f remain=%.3f\n",
-				s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y, s_airBudget );
-			EFW_LogLine( line );
-		}
-	}
-
-	if( s_airborne )
-	{
 		float left;
 		int slices;
+
+		/* PM_AddCorrectGravity still runs after the step that left the floor.
+		   The jump arc is that fall with a zero takeoff speed. Clearing
+		   FL_ONGROUND and leaving origin.z put the hull in the air over the drop. */
+		if( !s_airborne && !( pPlayer->pev->flags & FL_ONGROUND ) )
+		{
+			static int s_dropLog;
+
+			s_floorZ = pPlayer->pev->origin.z;
+			s_floorSet = 1;
+			s_jumpVz0 = 0.0f;
+			s_vz = 0.0f;
+			s_jumpT = 0.0f;
+			s_airborne = 1;
+			if( s_dropLog < 8 )
+			{
+				s_dropLog++;
+				snprintf( line, sizeof( line ),
+					"efw: drop z=%.1f at %.0f %.0f remain=%.3f\n",
+					s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y, s_airBudget );
+				EFW_LogLine( line );
+			}
+		}
+		if( !s_airborne || s_airBudget <= 0.0005f )
+			break;
 
 		/* A GoldSrc usercmd is about 10ms. One 0.2s diagonal clears a
 		   deck that those short steps land on. The ground walk already
@@ -4278,10 +4288,16 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			left -= slice;
 			slices++;
 		}
+		s_airBudget = left;
 		/* The landing slice already left the budget. What remains is
-		   the walk along the floor. */
+		   the walk along the floor. A second lip stores a new budget
+		   and the next pass falls. */
 		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND ) && left > 0.0005f )
 			EFW_WalkAfterLand( pPlayer, left );
+		if( !s_airborne && !( pPlayer->pev->flags & FL_ONGROUND ) && s_airBudget > 0.0005f )
+			continue;
+		break;
+		}
 	}
 
 	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
