@@ -2672,6 +2672,7 @@ static int s_airborne;
 static float s_vz;
 static int s_oldAirButtons;
 static int s_inDuck;
+static int s_crouchDone; /* Finished crouch; the key is still down */
 static float s_duckTime;
 static float s_duckStandZ;
 static int s_floorSet;
@@ -2974,6 +2975,47 @@ static float EFW_DuckSpline( float time )
 	return 3.0f * valueSquared - 2.0f * valueSquared * value;
 }
 
+/* Head hull, origin 18 lower, eye at 12. tag is the log word. */
+static int EFW_PlaceDuckHull( CBasePlayer *pPlayer, const char *tag )
+{
+	Vector dropped;
+	Vector saved;
+	int i;
+	int freed;
+	char line[160];
+
+	dropped = pPlayer->pev->origin;
+	dropped.z -= 18.0f;
+	saved = dropped;
+	freed = 0;
+	for( i = 0; i < 36; i++ )
+	{
+		TraceResult stuck;
+
+		UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
+			pPlayer->edict(), &stuck );
+		if( !stuck.fStartSolid && !stuck.fAllSolid )
+		{
+			freed = 1;
+			break;
+		}
+		dropped.z += 1.0f;
+	}
+	if( !freed )
+		dropped = saved;
+	pPlayer->pev->origin = dropped;
+	UTIL_SetOrigin( pPlayer->pev, dropped );
+	s_floorZ = dropped.z;
+	s_floorSet = 1;
+	pPlayer->pev->flags |= FL_DUCKING;
+	pPlayer->pev->view_ofs.z = 12.0f;
+	snprintf( line, sizeof( line ),
+		"efw: %s z=%.1f -> %.1f at %.0f %.0f\n",
+		tag, s_duckStandZ, dropped.z, dropped.x, dropped.y );
+	EFW_LogLine( line );
+	return 1;
+}
+
 /* One command of PM_ReduceTimers + PM_Duck. TIME_TO_DUCK is 0.4s.
    In the air the crouch finishes on that command and the origin stays.
    On the ground the origin drops 18 when the timer matures, and only
@@ -2988,9 +3030,22 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 		return 0;
 	if( buttons & IN_DUCK )
 	{
+		/* PM_UnDuck runs when a cmd arrives without the key and clears
+		   the flag. The key is still down, so the hull goes back down
+		   before this command walks. */
+		if( s_crouchDone && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+		{
+			pPlayer->pev->flags |= FL_DUCKING;
+			if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND )
+				&& pPlayer->pev->origin.z > s_duckStandZ - 9.0f )
+				return EFW_PlaceDuckHull( pPlayer, "duck hold" );
+			pPlayer->pev->view_ofs.z = 12.0f;
+			return 0;
+		}
 		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
 		{
 			s_inDuck = 1;
+			s_crouchDone = 0;
 			s_duckTime = 0.0f;
 			s_duckStandZ = pPlayer->pev->origin.z;
 			s_bucket = -1;
@@ -3009,6 +3064,7 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 				int inAirFinish;
 
 				s_inDuck = 0;
+				s_crouchDone = 1;
 				pPlayer->pev->flags |= FL_DUCKING;
 				inAirFinish = ( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) ) ? 1 : 0;
 				if( inAirFinish )
@@ -3020,43 +3076,7 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 					EFW_LogLine( line );
 					return 0;
 				}
-				else
-				{
-					Vector dropped;
-					Vector saved;
-					int i;
-					int freed;
-
-					dropped = pPlayer->pev->origin;
-					dropped.z -= 18.0f;
-					saved = dropped;
-					freed = 0;
-					for( i = 0; i < 36; i++ )
-					{
-						TraceResult stuck;
-
-						UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
-							pPlayer->edict(), &stuck );
-						if( !stuck.fStartSolid && !stuck.fAllSolid )
-						{
-							freed = 1;
-							break;
-						}
-						dropped.z += 1.0f;
-					}
-					if( !freed )
-						dropped = saved;
-					pPlayer->pev->origin = dropped;
-					UTIL_SetOrigin( pPlayer->pev, dropped );
-					s_floorZ = dropped.z;
-					s_floorSet = 1;
-					pPlayer->pev->view_ofs.z = 12.0f;
-					snprintf( line, sizeof( line ),
-						"efw: duck drop z=%.1f -> %.1f at %.0f %.0f\n",
-						s_duckStandZ, dropped.z, dropped.x, dropped.y );
-					EFW_LogLine( line );
-					return 1;
-				}
+				return EFW_PlaceDuckHull( pPlayer, "duck drop" );
 			}
 			else
 			{
@@ -3086,6 +3106,7 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 	{
 		/* Released during the spline, before the origin drop. */
 		s_inDuck = 0;
+		s_crouchDone = 0;
 		s_duckTime = 0.0f;
 		pPlayer->pev->view_ofs.z = 28.0f;
 		snprintf( line, sizeof( line ),
@@ -3123,6 +3144,7 @@ static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pre
 		else
 		{
 			s_inDuck = 0;
+			s_crouchDone = 0;
 			s_duckTime = 0.0f;
 			pPlayer->pev->flags &= ~FL_DUCKING;
 			pPlayer->pev->origin = up;
