@@ -754,6 +754,9 @@ static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
    not WALK_MOVE. */
 static void EFW_EngineChangeYaw( entvars_t *pev );
 static int EFW_YawHoldsStep( entvars_t *pev );
+/* Set when every chase probe fails and ideal_yaw is restored. The next
+   chunk of this MoveExecute turns back toward that heading. */
+static int s_chaseRestored;
 
 static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
 {
@@ -801,10 +804,19 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 	if( !EFW_TraceHitBody( pev, &tr ) && EFW_LandMonster( pev, end, &stepLand ) )
 	{
 		horiz = ( stepLand - start ).Length2D();
-		if( horiz >= 0.5f && EFW_CheckBottom( pev, stepLand ) )
+		if( horiz >= 0.5f )
 		{
-			*out = stepLand;
-			return 1;
+			int bottom = EFW_CheckBottom( pev, stepLand );
+
+			/* FL_PARTIALGROUND keeps a step whose corners hang off.
+			   A solid landing clears the flag. */
+			if( bottom || ( pev->flags & FL_PARTIALGROUND ) )
+			{
+				if( bottom )
+					pev->flags &= ~FL_PARTIALGROUND;
+				*out = stepLand;
+				return 1;
+			}
 		}
 	}
 	if( tr.fAllSolid || tr.fStartSolid || tr.flFraction <= 0.0f )
@@ -819,8 +831,16 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 			stepLand.z = start.z;
 	}
 	horiz = ( stepLand - start ).Length2D();
-	if( horiz < 0.5f || !EFW_CheckBottom( pev, stepLand ) )
+	if( horiz < 0.5f )
 		return 0;
+	{
+		int bottom = EFW_CheckBottom( pev, stepLand );
+
+		if( !bottom && !( pev->flags & FL_PARTIALGROUND ) )
+			return 0;
+		if( bottom )
+			pev->flags &= ~FL_PARTIALGROUND;
+	}
 	*out = stepLand;
 	return 1;
 }
@@ -840,6 +860,7 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	float deltay;
 	float dirx;
 	float diry;
+	float olddir;
 	float turnaround;
 	float tryYaw[16];
 	int ntry;
@@ -850,7 +871,9 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	deltay = goal.y - start.y;
 	dirx = ( deltax > 10.0f ) ? 0.0f : ( deltax < -10.0f ) ? 180.0f : -1.0f;
 	diry = ( deltay < -10.0f ) ? 270.0f : ( deltay > 10.0f ) ? 90.0f : -1.0f;
-	turnaround = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f - 180.0f );
+	/* SV_NewChaseDir snaps the heading it will restore if every probe fails. */
+	olddir = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f );
+	turnaround = EFW_NormYaw360( olddir - 180.0f );
 	ntry = 0;
 	if( dirx >= 0.0f && diry >= 0.0f )
 	{
@@ -935,12 +958,41 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 		*out = landed;
 		return 1;
 	}
+	/* Every probe failed. Put ideal_yaw back on the snapped heading.
+	   A hull that is already off a full floor gets FL_PARTIALGROUND,
+	   and the next chunk may step anyway. */
+	pev->ideal_yaw = olddir;
 	{
-		static int s_stuck;
-		if( s_stuck < 4 )
+		int partial = 0;
+		const char *tn = STRING( pev->targetname );
+
+		if( !EFW_CheckBottom( pev, start ) )
 		{
-			s_stuck++;
-			EFW_DebugPrint( "chase stuck %.0f %.0f", start.x, start.y );
+			pev->flags |= FL_PARTIALGROUND;
+			partial = 1;
+		}
+		s_chaseRestored = 1;
+		if( tn && !strcmp( tn, "Elika" ) )
+		{
+			static int s_restore;
+
+			if( s_restore < 4 )
+			{
+				s_restore++;
+				EFW_DebugPrint( "chase restore Elika ideal=%.0f ang=%.0f partial=%d",
+					pev->ideal_yaw, pev->angles.y, partial );
+			}
+		}
+		else
+		{
+			static int s_stuck;
+
+			if( s_stuck < 4 )
+			{
+				s_stuck++;
+				EFW_DebugPrint( "chase stuck %.0f %.0f partial=%d",
+					start.x, start.y, partial );
+			}
 		}
 	}
 	return 0;
@@ -1135,6 +1187,23 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		   goal vector is only the chase target. A held origin still
 		   returns, so the next chunk turns again. */
 		EFW_EngineChangeYaw( pev );
+		if( s_chaseRestored )
+		{
+			const char *tn = STRING( pev->targetname );
+
+			s_chaseRestored = 0;
+			if( tn && !strcmp( tn, "Elika" ) )
+			{
+				static int s_again;
+
+				if( s_again < 4 )
+				{
+					s_again++;
+					EFW_DebugPrint( "chase again Elika ang=%.0f ideal=%.0f",
+						pev->angles.y, pev->ideal_yaw );
+				}
+			}
+		}
 		{
 			float yawRad = pev->ideal_yaw * 0.01745329252f;
 
@@ -1248,16 +1317,32 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		   still has floor. */
 		if( stepLen >= 0.5f && !EFW_CheckBottom( pev, stepLand ) )
 		{
-			static int s_bot;
-
-			if( s_bot < 6 )
+			if( pev->flags & FL_PARTIALGROUND )
 			{
-				s_bot++;
-				EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
-					stepLand.x, stepLand.y, stepLand.z );
+				static int s_part;
+
+				if( s_part < 4 )
+				{
+					s_part++;
+					EFW_DebugPrint( "partial step at %.0f %.0f z=%.0f",
+						stepLand.x, stepLand.y, stepLand.z );
+				}
 			}
-			stepLen = 0.0f;
+			else
+			{
+				static int s_bot;
+
+				if( s_bot < 6 )
+				{
+					s_bot++;
+					EFW_DebugPrint( "bottom hold at %.0f %.0f z=%.0f",
+						stepLand.x, stepLand.y, stepLand.z );
+				}
+				stepLen = 0.0f;
+			}
 		}
+		else if( stepLen >= 0.5f )
+			pev->flags &= ~FL_PARTIALGROUND;
 		/* SV_StepDirection keeps the origin when the body has not turned
 		   to within that band of ideal_yaw. A blocked step still chases. */
 		if( stepLen >= 0.5f && EFW_YawHoldsStep( pev ) )
@@ -1296,7 +1381,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				continue;
 			}
 			if( !chase )
-				break;
+			{
+				/* ideal_yaw is the snapped heading again. Spend this
+				   chunk and let the next one turn back toward it. */
+				total -= step;
+				continue;
+			}
 			stepLand = chased;
 			stepLen = ( stepLand - start ).Length();
 			if( stepLen < 0.5f )
@@ -1336,6 +1426,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				dt, speed, speed * dt, moved, chunks );
 		}
 	}
+	s_chaseRestored = 0;
 	if( moved < 0.5f )
 	{
 		s_npcStep = 0;
