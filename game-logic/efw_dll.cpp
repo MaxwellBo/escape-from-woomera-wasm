@@ -3781,6 +3781,121 @@ static int EFW_FlyDisplace( CBasePlayer *pPlayer, const Vector &wish, Vector *ou
 
 static void EFW_EmitStep( CBasePlayer *pPlayer, const Vector &at, float fvol, const char *tag );
 
+/* The command that meets the floor is still air. Every later command in
+   this pump is PM_WalkMove. Stopping at the landing left the hull there
+   until the next pump. */
+static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
+{
+	Vector wish;
+	Vector origin0;
+	float wishspeed;
+	float moved;
+	float given;
+	int fwd;
+	int side;
+	int slices;
+	static int s_log;
+
+	if( !pPlayer || left <= 0.0005f )
+		return;
+	if( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) )
+		return;
+	fwd = s_moveFwd;
+	side = s_moveSide;
+	if( !fwd && !side && EFW_CmdFresh() )
+	{
+		fwd = s_cmdFwd;
+		side = s_cmdSide;
+	}
+	if( !fwd && !side )
+	{
+		int buttons = EFW_LiveButtons( pPlayer );
+
+		if( buttons & IN_FORWARD )
+			fwd++;
+		if( buttons & IN_BACK )
+			fwd--;
+		if( buttons & IN_MOVERIGHT )
+			side++;
+		if( buttons & IN_MOVELEFT )
+			side--;
+	}
+	origin0 = pPlayer->pev->origin;
+	given = left;
+	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
+	slices = 0;
+	while( left > 0.0005f && slices < 200 )
+	{
+		float slice;
+		float speed;
+		Vector dest;
+
+		slice = left;
+		if( slice > 0.01f )
+			slice = 0.01f;
+		EFW_GroundFriction( pPlayer, slice );
+		if( wishspeed > 0.0f )
+			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
+		speed = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+		if( speed < 1.0f )
+		{
+			s_hvx = 0.0f;
+			s_hvy = 0.0f;
+			break;
+		}
+		dest = pPlayer->pev->origin;
+		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
+			break;
+		{
+			float hx = dest.x - pPlayer->pev->origin.x;
+			float hy = dest.y - pPlayer->pev->origin.y;
+			float horiz = sqrtf( hx * hx + hy * hy );
+			float drop = horiz + 2.0f;
+			TraceResult floor;
+			Vector bot;
+			int leftFloor;
+
+			if( drop < 18.0f )
+				drop = 18.0f;
+			leftFloor = 0;
+			bot = dest;
+			bot.z -= drop;
+			UTIL_TraceHull( dest, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &floor );
+			if( !floor.fStartSolid && floor.flFraction < 1.0f
+				&& floor.vecPlaneNormal.z >= 0.7f
+				&& dest.z - floor.vecEndPos.z >= 0.5f )
+				dest = floor.vecEndPos;
+			else if( !floor.fStartSolid && floor.flFraction >= 1.0f )
+				leftFloor = 1;
+			pPlayer->pev->origin = dest;
+			UTIL_SetOrigin( pPlayer->pev, dest );
+			left -= slice;
+			slices++;
+			if( leftFloor )
+			{
+				pPlayer->pev->flags &= ~FL_ONGROUND;
+				break;
+			}
+		}
+	}
+	pPlayer->pev->velocity.x = s_hvx;
+	pPlayer->pev->velocity.y = s_hvy;
+	pPlayer->pev->velocity.z = 0.0f;
+	moved = ( pPlayer->pev->origin - origin0 ).Length();
+	if( s_log < 6 && ( moved > 1.0f || slices > 0 ) )
+	{
+		char line[160];
+
+		s_log++;
+		snprintf( line, sizeof( line ),
+			"efw: landwalk moved=%.0f remain=%.3f at %.0f %.0f z=%.1f\n",
+			moved, given,
+			pPlayer->pev->origin.x, pPlayer->pev->origin.y,
+			pPlayer->pev->origin.z );
+		EFW_LogLine( line );
+	}
+}
+
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
@@ -4142,6 +4257,10 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			left -= slice;
 			slices++;
 		}
+		/* The landing slice already left the budget. What remains is
+		   the walk along the floor. */
+		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND ) && left > 0.0005f )
+			EFW_WalkAfterLand( pPlayer, left );
 	}
 
 	if( !( buttons & IN_DUCK ) && !s_inDuck && !( pPlayer->pev->flags & FL_DUCKING ) )
