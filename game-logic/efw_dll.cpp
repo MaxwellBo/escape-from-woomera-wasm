@@ -2690,17 +2690,21 @@ static float s_airBudget;
    loud. Two seconds is 200 commands. */
 static float s_cmdSpd[200];
 static unsigned char s_cmdGround[200];
+static unsigned char s_cmdDuck[200];
 static int s_cmdN;
 
-/* One GoldSrc command. The step reads on-ground at the start of that
-   command, before friction. A pump that ends in the air used to silence
-   the slices that were still on the floor. */
-static void EFW_NoteStepSlice( float speed, int onGround )
+/* One GoldSrc command. Speed and on-ground are from before friction.
+   FL_DUCKING is after this command's crouch, so the slice that drops
+   the hull steps quietly and earlier slices stay loud. A pump that
+   ends in the air used to silence the slices still on the floor.
+   One flag from the end of the pump marked those earlier steps ducked. */
+static void EFW_NoteStepSlice( float speed, int onGround, int ducked )
 {
 	if( s_cmdN >= 200 )
 		return;
 	s_cmdSpd[s_cmdN] = speed;
 	s_cmdGround[s_cmdN] = onGround ? 1 : 0;
+	s_cmdDuck[s_cmdN] = ducked ? 1 : 0;
 	s_cmdN++;
 }
 /* PM_CheckFalling writes punchangle[2]. The refdef never reads that
@@ -3690,7 +3694,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( incoming, 1 );
+			EFW_NoteStepSlice( incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			groundLeft = left;
@@ -4144,7 +4148,7 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( incoming, 1 );
+			EFW_NoteStepSlice( incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			if( leftFloor )
@@ -4294,7 +4298,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			/* In the air the crouch finishes on this command and the
 			   origin stays. The landing slice is still that air command. */
 			EFW_AdvanceDuck( pPlayer, slice, buttons, pressed );
-			EFW_NoteStepSlice( 0.0f, 0 );
+			EFW_NoteStepSlice( 0.0f, 0, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			s_jumpT += slice;
 			arcVz = s_jumpVz0 - 800.0f * s_jumpT;
 			s_vz = arcVz;
@@ -4762,25 +4766,27 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
+	int sawStand;
+	int sawDuck;
+	float standVol;
+	float duckVol;
+
 	budget = EFW_MoveBudget();
 	left = (int)( budget * 1000.0f + 0.5f );
 	if( left < 1 )
 		left = 1;
 	if( left > 2000 )
 		left = 2000;
-	ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
-	if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
-	{
-		velwalk = 60.0f;
-		velrun = 80.0f;
-		flduck = 100.0f;
-	}
-	else
-	{
-		velwalk = 120.0f;
-		velrun = 210.0f;
-		flduck = 0.0f;
-	}
+	/* Duck thresholds are per command. PM_Duck has already run, so a
+	   slice before the origin drop is still a standing step. */
+	ducked = 0;
+	velwalk = 120.0f;
+	velrun = 210.0f;
+	flduck = 0.0f;
+	sawStand = 0;
+	sawDuck = 0;
+	standVol = 0.0f;
+	duckVol = 0.0f;
 	/* ReduceTimers still runs while frozen, airborne, or standing.
 	   The timer stays at 0, so the next grounded step plays at once.
 	   On-ground is the flag from the start of each command, not the
@@ -4805,9 +4811,23 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		Vector start;
 		Vector end;
 
-		/* Speed and on-ground at the start of this command, before friction. */
+		/* Speed, on-ground, and crouch at the start of this command,
+		   before friction. The flag at the end of the pump is later. */
 		speed = ( guard < s_cmdN ) ? s_cmdSpd[guard] : 0.0f;
 		grounded = ( guard < s_cmdN ) ? s_cmdGround[guard] : 0;
+		ducked = ( guard < s_cmdN ) ? s_cmdDuck[guard] : 0;
+		if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
+		{
+			velwalk = 60.0f;
+			velrun = 80.0f;
+			flduck = 100.0f;
+		}
+		else
+		{
+			velwalk = 120.0f;
+			velrun = 210.0f;
+			flduck = 0.0f;
+		}
 		guard++;
 		msec = left > 10 ? 10 : left;
 		left -= msec;
@@ -4902,6 +4922,19 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 				s_skipWade = 0;
 		}
 		sample = EFW_StepSample( step, irand );
+		if( ducked )
+		{
+			if( !sawDuck )
+			{
+				sawDuck = 1;
+				duckVol = fvol;
+			}
+		}
+		else if( !sawStand )
+		{
+			sawStand = 1;
+			standVol = fvol;
+		}
 		EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
 		played++;
 		/* This pump ends in the air. The slices above were still on
@@ -4926,8 +4959,8 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 			char line[160];
 			s_log++;
 			snprintf( line, sizeof( line ),
-				"efw: step %s vol=%.2f spd=%.0f tex=%s\n",
-				sample, fvol, speed, texName ? texName : "-" );
+				"efw: step %s vol=%.2f spd=%.0f duck=%d tex=%s\n",
+				sample, fvol, speed, ducked, texName ? texName : "-" );
 			EFW_LogLine( line );
 		}
 		if( played >= 12 )
@@ -4949,6 +4982,20 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 			"efw: step burst n=%d iv=%.3f spd=%.0f\n",
 			played, budget, speed );
 		EFW_LogLine( line );
+	}
+	if( sawStand && sawDuck )
+	{
+		static int s_mix;
+		char line[96];
+
+		if( s_mix < 4 )
+		{
+			s_mix++;
+			snprintf( line, sizeof( line ),
+				"efw: step crouch stand=%.2f duck=%.2f\n",
+				standVol, duckVol );
+			EFW_LogLine( line );
+		}
 	}
 }
 
