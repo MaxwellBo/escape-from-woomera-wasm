@@ -2636,12 +2636,21 @@ static void EFW_DrawInteractPrompt( void )
 	{
 		if( g_vguiN <= 0 )
 		{
-			gHUD.DrawHudString( ScreenWidth / 2 - 75, ScreenHeight / 2 - 100,
-				ScreenWidth, "No interactive objects", 255, 127, 127 );
+			int nx = ScreenWidth / 2 - 75;
+			int ny = ScreenHeight / 2 - 100;
+			/* FUN_1001e7d0 at (width/2-75, height/2-100), RGB 255,127,127.
+			   pfnDrawCharacter has no HUD font in this mod, so the line
+			   uses the console glyph, the same path as the click caption. */
+			if( gEngfuncs.pfnDrawSetTextColor )
+				gEngfuncs.pfnDrawSetTextColor( 1.0f, 127.0f / 255.0f, 127.0f / 255.0f );
+			if( gEngfuncs.pfnDrawConsoleString )
+				gEngfuncs.pfnDrawConsoleString( nx, ny, (char *)"No interactive objects" );
+			else
+				gHUD.DrawHudString( nx, ny, ScreenWidth, "No interactive objects", 255, 127, 127 );
 			if( !s_noneLog )
 			{
 				s_noneLog = 1;
-				gEngfuncs.Con_Printf( ">>> FUN_10046590 none\n" );
+				gEngfuncs.Con_Printf( ">>> FUN_10046590 none x=%d y=%d rgb=255,127,127\n", nx, ny );
 			}
 		}
 		else
