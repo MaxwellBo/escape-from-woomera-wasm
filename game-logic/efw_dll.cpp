@@ -2668,6 +2668,11 @@ static float s_jumpT;
 static float s_jumpVz0;
 static float s_hvx;
 static float s_hvy;
+/* PM_UpdateStepSound reads the velocity at the start of each command.
+   One sample after the whole pump made a stand-to-run's first step
+   loud. Two seconds is 200 commands. */
+static float s_cmdSpd[200];
+static int s_cmdN;
 /* PM_CheckFalling writes punchangle[2]. The refdef never reads that
    field here, so the same roll is added in EFW_ViewRoll. */
 static float s_punchRoll;
@@ -3280,6 +3285,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 
 	if( !pPlayer || !s_walkOn )
 		return;
+	s_cmdN = 0;
 	if( EFW_GetHudInt( 6 ) )
 		return;
 	/* The usercmd arrives (pev->button, forwardmove on the client) but
@@ -3370,6 +3376,12 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		float slice = left;
 		if( slice > 0.01f )
 			slice = 0.01f;
+		/* Incoming speed. The step plays before this command's friction. */
+		if( s_cmdN < 200 )
+		{
+			s_cmdSpd[s_cmdN] = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
+			s_cmdN++;
+		}
 		EFW_GroundFriction( pPlayer, slice );
 		if( wishspeed > 0.0f )
 			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
@@ -4432,7 +4444,6 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		left = 1;
 	if( left > 2000 )
 		left = 2000;
-	speed = pPlayer->pev->velocity.Length();
 	ducked = ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0;
 	if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
 	{
@@ -4453,8 +4464,6 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		canPlay = 0;
 	if( !( pPlayer->pev->flags & FL_ONGROUND ) && pPlayer->pev->movetype != MOVETYPE_FLY )
 		canPlay = 0;
-	if( speed <= 0.0f )
-		canPlay = 0;
 	played = 0;
 	guard = 0;
 	while( left > 0 && guard < 200 )
@@ -4473,6 +4482,8 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		Vector start;
 		Vector end;
 
+		/* Speed at the start of this command, before its friction. */
+		speed = ( guard < s_cmdN ) ? s_cmdSpd[guard] : 0.0f;
 		guard++;
 		msec = left > 10 ? 10 : left;
 		left -= msec;
@@ -4485,6 +4496,10 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		if( pPlayer->m_flTimeStepSound > 0.0f )
 			continue;
 		if( !canPlay )
+			continue;
+		/* Length(velocity) > 0. A stopped slice does not play, and a
+		   timer already at 0 still plays the first step under velwalk. */
+		if( speed <= 0.0f )
 			continue;
 		if( speed < velwalk && pPlayer->m_flTimeStepSound != 0.0f )
 			continue;
