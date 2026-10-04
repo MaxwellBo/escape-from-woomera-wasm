@@ -2706,9 +2706,9 @@ static int s_cmdN;
    the hull steps quietly and earlier slices stay loud. A pump that
    ends in the air used to silence the slices still on the floor.
    One flag from the end of the pump marked those earlier steps ducked.
-   PM_CatagorizeTextureType traces from this command's origin. The
-   origin here is where the slice landed, one command after GoldSrc
-   samples, so a run that crosses materials keeps the earlier ground. */
+   PM_UpdateStepSound runs before PM_WalkMove, so the texture trace
+   is this command's origin before the step. The ground the hull
+   reaches is the next command. */
 static void EFW_NoteStepSlice( CBasePlayer *pPlayer, float speed, int onGround, int ducked )
 {
 	if( s_cmdN >= 200 || !pPlayer )
@@ -3746,9 +3746,10 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			}
 			else if( !floor.fStartSolid && floor.flFraction >= 1.0f )
 				leftFloor = 1;
+			/* PM_UpdateStepSound already ran, before this step. */
+			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			groundLeft = left;
@@ -4197,9 +4198,10 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 				dest = floor.vecEndPos;
 			else if( !floor.fStartSolid && floor.flFraction >= 1.0f )
 				leftFloor = 1;
+			/* Same start-of-command sample as the ground walk. */
+			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			if( leftFloor )
@@ -5046,8 +5048,9 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 			char line[160];
 			s_log++;
 			snprintf( line, sizeof( line ),
-				"efw: step %s vol=%.2f spd=%.0f duck=%d tex=%s\n",
-				sample, fvol, speed, ducked, texName ? texName : "-" );
+				"efw: step %s vol=%.2f spd=%.0f duck=%d tex=%s at %.0f %.0f\n",
+				sample, fvol, speed, ducked, texName ? texName : "-",
+				at.x, at.y );
 			EFW_LogLine( line );
 		}
 		if( played >= 12 )
