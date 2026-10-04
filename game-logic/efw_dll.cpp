@@ -2676,7 +2676,20 @@ static float s_airBudget;
    One sample after the whole pump made a stand-to-run's first step
    loud. Two seconds is 200 commands. */
 static float s_cmdSpd[200];
+static unsigned char s_cmdGround[200];
 static int s_cmdN;
+
+/* One GoldSrc command. The step reads on-ground at the start of that
+   command, before friction. A pump that ends in the air used to silence
+   the slices that were still on the floor. */
+static void EFW_NoteStepSlice( float speed, int onGround )
+{
+	if( s_cmdN >= 200 )
+		return;
+	s_cmdSpd[s_cmdN] = speed;
+	s_cmdGround[s_cmdN] = onGround ? 1 : 0;
+	s_cmdN++;
+}
 /* PM_CheckFalling writes punchangle[2]. The refdef never reads that
    field here, so the same roll is added in EFW_ViewRoll. */
 static float s_punchRoll;
@@ -3385,14 +3398,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	while( left > 0.0005f && slices < 200 )
 	{
 		float slice = left;
+		float incoming;
 		if( slice > 0.01f )
 			slice = 0.01f;
-		/* Incoming speed. The step plays before this command's friction. */
-		if( s_cmdN < 200 )
-		{
-			s_cmdSpd[s_cmdN] = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
-			s_cmdN++;
-		}
+		/* Incoming speed. The step plays before this command's friction.
+		   A slice that breaks before it is committed hands that time to
+		   the fall, so it is not also a ground step. */
+		incoming = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
 		EFW_GroundFriction( pPlayer, slice );
 		if( wishspeed > 0.0f )
 			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
@@ -3452,6 +3464,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
+			EFW_NoteStepSlice( incoming, 1 );
 			left -= slice;
 			slices++;
 			groundLeft = left;
@@ -3828,11 +3841,15 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 	{
 		float slice;
 		float speed;
+		float incoming;
 		Vector dest;
 
 		slice = left;
 		if( slice > 0.01f )
 			slice = 0.01f;
+		/* Same incoming speed the ground walk records. This slice is
+		   already back on the floor. */
+		incoming = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
 		EFW_GroundFriction( pPlayer, slice );
 		if( wishspeed > 0.0f )
 			EFW_GroundAccelerate( wish.x, wish.y, wishspeed, slice );
@@ -3869,6 +3886,7 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
+			EFW_NoteStepSlice( incoming, 1 );
 			left -= slice;
 			slices++;
 			if( leftFloor )
@@ -4137,6 +4155,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			slice = left;
 			if( slice > 0.01f )
 				slice = 0.01f;
+			/* Categorize already ran for this command, and the hull was
+			   still in the air. The landing slice is that air command. */
+			EFW_NoteStepSlice( 0.0f, 0 );
 			s_jumpT += slice;
 			arcVz = s_jumpVz0 - 800.0f * s_jumpT;
 			s_vz = arcVz;
@@ -4591,7 +4612,7 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 	float velrun;
 	float flduck;
 	int ducked;
-	int canPlay;
+	int frozen;
 	static int s_skipWade;
 	static int s_log;
 	static int s_burst;
@@ -4618,12 +4639,10 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		flduck = 0.0f;
 	}
 	/* ReduceTimers still runs while frozen, airborne, or standing.
-	   The timer stays at 0, so the next grounded step plays at once. */
-	canPlay = 1;
-	if( pPlayer->pev->flags & FL_FROZEN )
-		canPlay = 0;
-	if( !( pPlayer->pev->flags & FL_ONGROUND ) && pPlayer->pev->movetype != MOVETYPE_FLY )
-		canPlay = 0;
+	   The timer stays at 0, so the next grounded step plays at once.
+	   On-ground is the flag from the start of each command, not the
+	   flag left at the end of the pump. */
+	frozen = ( pPlayer->pev->flags & FL_FROZEN ) ? 1 : 0;
 	played = 0;
 	guard = 0;
 	while( left > 0 && guard < 200 )
@@ -4636,14 +4655,16 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		const char *texName;
 		char texType;
 		int walking;
+		int grounded;
 		float height;
 		Vector knee;
 		Vector feet;
 		Vector start;
 		Vector end;
 
-		/* Speed at the start of this command, before its friction. */
+		/* Speed and on-ground at the start of this command, before friction. */
 		speed = ( guard < s_cmdN ) ? s_cmdSpd[guard] : 0.0f;
+		grounded = ( guard < s_cmdN ) ? s_cmdGround[guard] : 0;
 		guard++;
 		msec = left > 10 ? 10 : left;
 		left -= msec;
@@ -4655,7 +4676,9 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		}
 		if( pPlayer->m_flTimeStepSound > 0.0f )
 			continue;
-		if( !canPlay )
+		if( frozen )
+			continue;
+		if( !grounded && pPlayer->pev->movetype != MOVETYPE_FLY )
 			continue;
 		/* Length(velocity) > 0. A stopped slice does not play, and a
 		   timer already at 0 still plays the first step under velwalk. */
@@ -4738,6 +4761,23 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		sample = EFW_StepSample( step, irand );
 		EMIT_SOUND_DYN( pPlayer->edict(), CHAN_BODY, sample, fvol, ATTN_NORM, 0, PITCH_NORM );
 		played++;
+		/* This pump ends in the air. The slices above were still on
+		   the floor, so the step plays anyway. */
+		if( !( pPlayer->pev->flags & FL_ONGROUND )
+			&& pPlayer->pev->movetype != MOVETYPE_FLY )
+		{
+			static int s_off;
+
+			if( s_off < 4 )
+			{
+				char line[96];
+
+				s_off++;
+				snprintf( line, sizeof( line ),
+					"efw: step off spd=%.0f\n", speed );
+				EFW_LogLine( line );
+			}
+		}
 		if( s_log < 8 )
 		{
 			char line[160];
