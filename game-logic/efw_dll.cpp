@@ -2696,20 +2696,29 @@ static float s_airBudget;
 static float s_cmdSpd[200];
 static unsigned char s_cmdGround[200];
 static unsigned char s_cmdDuck[200];
+static float s_cmdX[200];
+static float s_cmdY[200];
+static float s_cmdZ[200];
 static int s_cmdN;
 
 /* One GoldSrc command. Speed and on-ground are from before friction.
    FL_DUCKING is after this command's crouch, so the slice that drops
    the hull steps quietly and earlier slices stay loud. A pump that
    ends in the air used to silence the slices still on the floor.
-   One flag from the end of the pump marked those earlier steps ducked. */
-static void EFW_NoteStepSlice( float speed, int onGround, int ducked )
+   One flag from the end of the pump marked those earlier steps ducked.
+   PM_CatagorizeTextureType traces from this command's origin. The
+   origin here is where the slice landed, one command after GoldSrc
+   samples, so a run that crosses materials keeps the earlier ground. */
+static void EFW_NoteStepSlice( CBasePlayer *pPlayer, float speed, int onGround, int ducked )
 {
-	if( s_cmdN >= 200 )
+	if( s_cmdN >= 200 || !pPlayer )
 		return;
 	s_cmdSpd[s_cmdN] = speed;
 	s_cmdGround[s_cmdN] = onGround ? 1 : 0;
 	s_cmdDuck[s_cmdN] = ducked ? 1 : 0;
+	s_cmdX[s_cmdN] = pPlayer->pev->origin.x;
+	s_cmdY[s_cmdN] = pPlayer->pev->origin.y;
+	s_cmdZ[s_cmdN] = pPlayer->pev->origin.z;
 	s_cmdN++;
 }
 /* PM_CheckFalling writes punchangle[2]. The refdef never reads that
@@ -3744,7 +3753,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
+			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			groundLeft = left;
@@ -4198,7 +4207,7 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 				leftFloor = 1;
 			pPlayer->pev->origin = dest;
 			UTIL_SetOrigin( pPlayer->pev, dest );
-			EFW_NoteStepSlice( incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
+			EFW_NoteStepSlice( pPlayer, incoming, 1, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			left -= slice;
 			slices++;
 			if( leftFloor )
@@ -4348,7 +4357,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			/* In the air the crouch finishes on this command and the
 			   origin stays. The landing slice is still that air command. */
 			EFW_AdvanceDuck( pPlayer, slice, buttons, pressed );
-			EFW_NoteStepSlice( 0.0f, 0, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
+			EFW_NoteStepSlice( pPlayer, 0.0f, 0, ( pPlayer->pev->flags & FL_DUCKING ) ? 1 : 0 );
 			s_jumpT += slice;
 			arcVz = s_jumpVz0 - 800.0f * s_jumpT;
 			s_vz = arcVz;
@@ -4820,6 +4829,10 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 	int sawDuck;
 	float standVol;
 	float duckVol;
+	char texA[32];
+	char texB[32];
+	char typeA;
+	char typeB;
 
 	budget = EFW_MoveBudget();
 	left = (int)( budget * 1000.0f + 0.5f );
@@ -4837,6 +4850,10 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 	sawDuck = 0;
 	standVol = 0.0f;
 	duckVol = 0.0f;
+	texA[0] = '\0';
+	texB[0] = '\0';
+	typeA = 'C';
+	typeB = 'C';
 	/* ReduceTimers still runs while frozen, airborne, or standing.
 	   The timer stays at 0, so the next grounded step plays at once.
 	   On-ground is the flag from the start of each command, not the
@@ -4856,16 +4873,27 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		int walking;
 		int grounded;
 		float height;
+		Vector at;
 		Vector knee;
 		Vector feet;
 		Vector start;
 		Vector end;
+		int idx;
 
-		/* Speed, on-ground, and crouch at the start of this command,
-		   before friction. The flag at the end of the pump is later. */
-		speed = ( guard < s_cmdN ) ? s_cmdSpd[guard] : 0.0f;
-		grounded = ( guard < s_cmdN ) ? s_cmdGround[guard] : 0;
-		ducked = ( guard < s_cmdN ) ? s_cmdDuck[guard] : 0;
+		/* Speed, on-ground, crouch, and origin for this command.
+		   The flag at the end of the pump is a later step. */
+		idx = guard;
+		speed = ( idx < s_cmdN ) ? s_cmdSpd[idx] : 0.0f;
+		grounded = ( idx < s_cmdN ) ? s_cmdGround[idx] : 0;
+		ducked = ( idx < s_cmdN ) ? s_cmdDuck[idx] : 0;
+		if( idx < s_cmdN )
+		{
+			at.x = s_cmdX[idx];
+			at.y = s_cmdY[idx];
+			at.z = s_cmdZ[idx];
+		}
+		else
+			at = pPlayer->pev->origin;
 		if( ducked || pPlayer->pev->movetype == MOVETYPE_FLY )
 		{
 			velwalk = 60.0f;
@@ -4901,9 +4929,11 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 			continue;
 		walking = speed < velrun;
 		texName = NULL;
-		height = pPlayer->pev->maxs.z - pPlayer->pev->mins.z;
-		knee = pPlayer->pev->origin;
-		feet = pPlayer->pev->origin;
+		/* Knee and feet follow this command's hull. The pump can
+		   finish crouched while earlier steps were still standing. */
+		height = ducked ? 36.0f : 72.0f;
+		knee = at;
+		feet = at;
 		knee.z -= 0.3f * height;
 		feet.z -= 0.5f * height;
 		if( pPlayer->pev->movetype == MOVETYPE_FLY )
@@ -4928,12 +4958,27 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 		{
 			edict_t *world;
 
-			start = pPlayer->pev->origin;
-			end = start;
+			start = at;
+			end = at;
 			end.z -= 64.0f;
 			world = INDEXENT( 0 );
 			texName = world ? TRACE_TEXTURE( world, start, end ) : NULL;
 			texType = EFW_TextureType( texName );
+			/* The engine reuses the texture name. Copy it before the
+			   next command traces a different spot. */
+			if( texName && texName[0] )
+			{
+				if( !texA[0] )
+				{
+					snprintf( texA, sizeof( texA ), "%s", texName );
+					typeA = texType;
+				}
+				else if( !texB[0] && strcmp( texA, texName ) )
+				{
+					snprintf( texB, sizeof( texB ), "%s", texName );
+					typeB = texType;
+				}
+			}
 			switch( texType )
 			{
 			case 'M': step = 1; break;
@@ -5044,6 +5089,20 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 			snprintf( line, sizeof( line ),
 				"efw: step crouch stand=%.2f duck=%.2f\n",
 				standVol, duckVol );
+			EFW_LogLine( line );
+		}
+	}
+	if( texA[0] && texB[0] )
+	{
+		static int s_span;
+		char line[96];
+
+		if( s_span < 4 )
+		{
+			s_span++;
+			snprintf( line, sizeof( line ),
+				"efw: step tex %s/%c then %s/%c\n",
+				texA, typeA, texB, typeB );
 			EFW_LogLine( line );
 		}
 	}
