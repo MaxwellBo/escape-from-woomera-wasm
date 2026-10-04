@@ -357,8 +357,9 @@ void EFW_AdjustHope( float delta )
 }
 
 static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
-static float s_hostInterval; /* same pump delta, read by MoveExecute steps */
-static float s_hostClock; /* sum of those deltas; Squark's 1s gate reads this */
+static float s_hostInterval; /* quarter-second step, read by MoveExecute */
+static float s_hostClock; /* sum of those steps; Squark's 1s gate reads this */
+static float s_moveBudget; /* real pump gap for the player's 10ms PM slices */
 
 float EFW_HostClock( void )
 {
@@ -371,6 +372,17 @@ float EFW_HostInterval( void )
 	if( s_hostInterval < 0.001f || s_hostInterval > 0.25f )
 		return 0.1f;
 	return s_hostInterval;
+}
+
+static float EFW_MoveBudget( void )
+{
+	/* PM_Move spends cmd.msec, and those cmds add up to the host frame.
+	   This pump is that frame. 2s is the same stall clamp as hope. */
+	if( s_moveBudget < 0.001f )
+		return 0.1f;
+	if( s_moveBudget > 2.0f )
+		return 2.0f;
+	return s_moveBudget;
 }
 
 void EFW_ThinkHope( void )
@@ -1978,6 +1990,7 @@ static void EFW_HostPump( void )
 		if( wall > 2.0f )
 			wall = 2.0f;
 		s_hopeWall += wall;
+		s_moveBudget = wall;
 		step = wall;
 		if( step > 0.25f )
 			step = 0.25f;
@@ -3306,11 +3319,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			return;
 		}
 	}
-	dt = g_efw.dt;
-	if( dt <= 0.0f )
-		dt = EFW_HostInterval();
-	if( dt > 0.2f )
-		dt = 0.2f;
+	/* FUN_100c6a70 caps one Win32 frame at 0.2s. Those frames still
+	   add up to the pump, so the 10ms slices below spend the gap. */
+	dt = EFW_MoveBudget();
 	if( inAir )
 	{
 		Vector wish;
@@ -3339,7 +3350,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 	left = dt;
 	slices = 0;
-	while( left > 0.0005f && slices < 25 )
+	while( left > 0.0005f && slices < 200 )
 	{
 		float slice = left;
 		if( slice > 0.01f )
@@ -3597,8 +3608,8 @@ static void EFW_ViewBob( CBasePlayer *pPlayer, float dt )
 	{
 		if( dt < 0.001f )
 			dt = 0.1f;
-		if( dt > 0.25f )
-			dt = 0.25f;
+		if( dt > 2.0f )
+			dt = 2.0f;
 		bobcycle = CVAR_GET_FLOAT( "cl_bobcycle" );
 		bobup = CVAR_GET_FLOAT( "cl_bobup" );
 		bobscale = CVAR_GET_FLOAT( "cl_bob" );
@@ -3715,11 +3726,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		return;
 	if( EFW_GetHudInt( 6 ) )
 		return;
-	dt = g_efw.dt;
-	if( dt <= 0.0f )
-		dt = EFW_HostInterval();
-	if( dt > 0.2f )
-		dt = 0.2f;
+	dt = EFW_MoveBudget();
 	EFW_DropPunch( dt );
 	buttons = EFW_LiveButtons( pPlayer );
 	pressed = buttons & ~s_oldAirButtons;
@@ -3929,7 +3936,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		left = dt;
 		slices = 0;
 		dest = pPlayer->pev->origin;
-		while( s_airborne && left > 0.0005f && slices < 25 )
+		while( s_airborne && left > 0.0005f && slices < 200 )
 		{
 			float slice;
 			float z;
@@ -4284,7 +4291,7 @@ static void EFW_UpdateStepSound( CBasePlayer *pPlayer )
 
 	if( !pPlayer )
 		return;
-	msec = (int)( EFW_HostInterval() * 1000.0f );
+	msec = (int)( EFW_MoveBudget() * 1000.0f );
 	if( msec < 1 )
 		msec = 1;
 	if( pPlayer->m_flTimeStepSound > 0.0f )
