@@ -925,6 +925,64 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	return 0;
 }
 
+/* Engine CHANGE_YAW inside SV_StepDirection. The turn is yaw_speed
+   degrees for this step. Move() already applied yaw_speed * frametime * 10
+   once, before the chunks. Calling that path again would multiply it. */
+static void EFW_EngineChangeYaw( entvars_t *pev )
+{
+	float current;
+	float ideal;
+	float move;
+	float speed;
+	float before;
+	const char *tn;
+
+	if( !pev )
+		return;
+	current = UTIL_AngleMod( pev->angles.y );
+	ideal = pev->ideal_yaw;
+	speed = pev->yaw_speed;
+	if( speed < 0.0f )
+		speed = 0.0f;
+	if( current == ideal )
+		return;
+	move = ideal - current;
+	if( ideal > current )
+	{
+		if( move >= 180.0f )
+			move = move - 360.0f;
+	}
+	else
+	{
+		if( move <= -180.0f )
+			move = move + 360.0f;
+	}
+	if( move > 0.0f )
+	{
+		if( move > speed )
+			move = speed;
+	}
+	else
+	{
+		if( move < -speed )
+			move = -speed;
+	}
+	before = current;
+	pev->angles.y = UTIL_AngleMod( current + move );
+	tn = STRING( pev->targetname );
+	if( tn && !strcmp( tn, "Elika" ) )
+	{
+		static int s_engYaw;
+
+		if( s_engYaw < 4 )
+		{
+			s_engYaw++;
+			EFW_DebugPrint( "engine yaw Elika before=%.0f ang=%.0f ideal=%.0f spd=%.0f",
+				before, pev->angles.y, ideal, speed );
+		}
+	}
+}
+
 /* SV_StepDirection undoes a step when angles.y - ideal_yaw is still
    between 45 and 315. The facing has not caught up, so the origin
    stays and the chase is not tried. */
@@ -1052,6 +1110,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			step = 16.0f;
 		if( step > remain )
 			step = remain;
+		/* SV_StepDirection turns, then steps along that yaw. A held
+		   origin still returns, so the next chunk turns again. */
+		EFW_EngineChangeYaw( pev );
 		wish = delta * ( step / remain );
 		end = start + wish;
 		savedMins = pev->mins.z;
