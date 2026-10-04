@@ -194,7 +194,8 @@ static int EFW_GetClientHudInt( int idx );
    intro, and snapping to it finished the dawn (time < 4, black 255)
    before the comic was dismissed. While hudInt[6] is set, hold the
    clock. While it is clear, follow a single frame of flTime, or wall
-   time when that clock is stuck near 1. */
+   time when that clock is stuck near 1. A late redraw is that frame.
+   2s is the same stall clamp as hope. */
 static double EFW_WallSeconds( void )
 {
 	struct timespec ts;
@@ -242,8 +243,8 @@ static float EFW_HudPlayTime( float flTime )
 		dt = (double)( flTime - s_engine );
 		if( dt < 0.0 )
 			dt = 0.0;
-		if( dt > 0.25 )
-			dt = 0.25;
+		if( dt > 2.0 )
+			dt = 2.0;
 		s_play += (float)dt;
 	}
 	else if( s_wall > 0.0 )
@@ -251,8 +252,8 @@ static float EFW_HudPlayTime( float flTime )
 		dt = now - s_wall;
 		if( dt < 0.0 )
 			dt = 0.0;
-		if( dt > 0.25 )
-			dt = 0.25;
+		if( dt > 2.0 )
+			dt = 2.0;
 		s_play += (float)dt;
 	}
 	s_engine = flTime;
