@@ -758,6 +758,45 @@ static int EFW_YawHoldsStep( entvars_t *pev );
    chunk of this MoveExecute turns back toward that heading. */
 static int s_chaseRestored;
 
+/* SV_movestep: the down-trace from one step above the wish to one step
+   below it missed. FL_PARTIALGROUND still takes that horizontal move,
+   then clears FL_ONGROUND. MoveExecute's next chunk calls MoveToOrigin,
+   and that call returns before it turns or steps. */
+static void EFW_LeavePartialGround( entvars_t *pev, const Vector &pos )
+{
+	Vector floor;
+	const char *tn;
+
+	if( !pev || !( pev->flags & FL_PARTIALGROUND ) )
+		return;
+	if( EFW_LandMonster( pev, pos, &floor ) )
+		return;
+	pev->flags &= ~FL_ONGROUND;
+	tn = STRING( pev->targetname );
+	if( tn && !strcmp( tn, "Elika" ) )
+	{
+		static int s_air;
+
+		if( s_air < 4 )
+		{
+			s_air++;
+			EFW_DebugPrint( "partial fall Elika at %.0f %.0f z=%.0f",
+				pos.x, pos.y, pos.z );
+		}
+	}
+	else
+	{
+		static int s_air;
+
+		if( s_air < 4 )
+		{
+			s_air++;
+			EFW_DebugPrint( "partial fall at %.0f %.0f z=%.0f",
+				pos.x, pos.y, pos.z );
+		}
+	}
+}
+
 static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
 {
 	Vector wish;
@@ -840,6 +879,8 @@ static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir,
 			return 0;
 		if( bottom )
 			pev->flags &= ~FL_PARTIALGROUND;
+		else
+			EFW_LeavePartialGround( pev, stepLand );
 	}
 	*out = stepLand;
 	return 1;
@@ -1343,6 +1384,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 		else if( stepLen >= 0.5f )
 			pev->flags &= ~FL_PARTIALGROUND;
+		/* A kept step with no floor in the column is the air step.
+		   FL_ONGROUND clears before the facing test restores an origin. */
+		if( stepLen >= 0.5f )
+			EFW_LeavePartialGround( pev, stepLand );
 		/* SV_StepDirection keeps the origin when the body has not turned
 		   to within that band of ideal_yaw. A blocked step still chases. */
 		if( stepLen >= 0.5f && EFW_YawHoldsStep( pev ) )
@@ -1363,6 +1408,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					pev->angles.y, pev->ideal_yaw, start.x, start.y );
 			}
 			total -= step;
+			if( !( pev->flags & FL_ONGROUND ) )
+				break;
 			continue;
 		}
 		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
@@ -1378,6 +1425,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			if( chase == 2 )
 			{
 				total -= step;
+				if( !( pev->flags & FL_ONGROUND ) )
+					break;
 				continue;
 			}
 			if( !chase )
@@ -1385,12 +1434,27 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				/* ideal_yaw is the snapped heading again. Spend this
 				   chunk and let the next one turn back toward it. */
 				total -= step;
+				if( !( pev->flags & FL_ONGROUND ) )
+					break;
 				continue;
 			}
 			stepLand = chased;
 			stepLen = ( stepLand - start ).Length();
 			if( stepLen < 0.5f )
 				break;
+		}
+		/* The air step already cleared FL_ONGROUND. Another chunk would
+		   be MoveToOrigin with that flag clear, which does not move. */
+		if( !( pev->flags & FL_ONGROUND ) )
+		{
+			if( stepLen >= 0.5f )
+			{
+				landed = stepLand;
+				start = stepLand;
+				moved += stepLen;
+				chunks++;
+			}
+			break;
 		}
 		landed = stepLand;
 		start = stepLand;
