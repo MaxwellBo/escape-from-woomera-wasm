@@ -3961,6 +3961,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		{
 			float slice;
 			float z;
+			float arcVz;
 			Vector top;
 			Vector wish;
 			int hit;
@@ -3969,7 +3970,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			if( slice > 0.01f )
 				slice = 0.01f;
 			s_jumpT += slice;
-			s_vz = s_jumpVz0 - 800.0f * s_jumpT;
+			arcVz = s_jumpVz0 - 800.0f * s_jumpT;
+			s_vz = arcVz;
 			z = s_floorZ + s_jumpVz0 * s_jumpT - 0.5f * 800.0f * s_jumpT * s_jumpT;
 			top = pPlayer->pev->origin;
 			wish = Vector( s_hvx * slice, s_hvy * slice, z - top.z );
@@ -4060,6 +4062,26 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 				}
 				/* A later PostThink must not apply this impact again. */
 				pPlayer->m_flFallVelocity = 0.0f;
+			}
+			else if( arcVz > 0.0f && s_vz == 0.0f )
+			{
+				static int s_ceilLog;
+
+				/* A downward plane cleared the rise. The next slice was
+				   writing the old parabola back, so the hull stayed on
+				   that ceiling until the apex. The fall starts here. */
+				s_floorZ = dest.z;
+				s_jumpVz0 = 0.0f;
+				s_jumpT = 0.0f;
+				s_vz = 0.0f;
+				if( s_ceilLog < 6 )
+				{
+					s_ceilLog++;
+					snprintf( line, sizeof( line ),
+						"efw: ceiling z=%.1f at %.0f %.0f\n",
+						dest.z, dest.x, dest.y );
+					EFW_LogLine( line );
+				}
 			}
 			pPlayer->pev->origin = dest;
 			pPlayer->pev->velocity.z = s_vz;
