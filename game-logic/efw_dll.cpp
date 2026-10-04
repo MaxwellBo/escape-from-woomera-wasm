@@ -31,6 +31,7 @@ int gmsgEFWCtPrv = 0;
 static EfwDllState g_efw;
 static int s_hudPulse; /* StartFrame pulses; ThinkHope drains once per pulse if sv.time is frozen */
 static int EFW_UseNearbyDoor( CBasePlayer *pPlayer );
+static void EFW_LatchDuck( int on );
 
 typedef char EFW_SCAN_SIZE_CHECK[( sizeof( EfwScanSlot ) == EFW_SCAN_BYTES ) ? 1 : -1];
 
@@ -1718,6 +1719,9 @@ static void EFW_HostFwd( void )
 	if( pcmd && !strcmp( pcmd, "efw_cduck" ) )
 	{
 		int on = ( CMD_ARGC() > 1 ) ? atoi( CMD_ARGV( 1 ) ) : 0;
+		/* The usercmd copy goes stale across a long pump. The crouch
+		   has to stay down while those slices still walk. */
+		EFW_LatchDuck( on );
 		if( pPlayer )
 			CLIENT_COMMAND( pPlayer->edict(), "efw_pduck %d\n", on ? 1 : 0 );
 		EFW_DebugPrint( ">>> efw_cduck stuff %d pawn=%d", on ? 1 : 0, pPlayer ? 1 : 0 );
@@ -2169,6 +2173,7 @@ static int s_moveFwd; /* HostFwd efw_move: -1/0/1 */
 static int s_moveSide;
 static int s_speedKey; /* HostFwd efw_pspeed, or pev->button IN_RUN */
 static int s_useHeld; /* HostFwd efw_puse, or pev->button IN_USE */
+static int s_duckHeld; /* HostFwd efw_cduck; survives a stale usercmd */
 /* CmdStart still runs while libmenu pauses PM_Move, so pev->button stays
    0. The pump reads this copy of the usercmd. */
 static int s_cmdFwd;
@@ -2204,6 +2209,11 @@ void EFW_LatchSpeed( int on )
 void EFW_LatchUseHold( int on )
 {
 	s_useHeld = on ? 1 : 0;
+}
+
+static void EFW_LatchDuck( int on )
+{
+	s_duckHeld = on ? 1 : 0;
 }
 
 /* A usercmd older than this has stopped arriving. Holding the last one
@@ -2254,6 +2264,8 @@ static int EFW_LiveButtons( CBasePlayer *pPlayer )
 	buttons = pPlayer ? pPlayer->pev->button : 0;
 	if( EFW_CmdFresh() )
 		buttons |= s_cmdButtons;
+	if( s_duckHeld )
+		buttons |= IN_DUCK;
 	return buttons;
 }
 
@@ -2962,6 +2974,170 @@ static float EFW_DuckSpline( float time )
 	return 3.0f * valueSquared - 2.0f * valueSquared * value;
 }
 
+/* One command of PM_ReduceTimers + PM_Duck. TIME_TO_DUCK is 0.4s.
+   In the air the crouch finishes on that command and the origin stays.
+   On the ground the origin drops 18 when the timer matures, and only
+   the later commands move at the ducked wish. Returns 1 when this
+   call dropped the origin. */
+static int EFW_AdvanceDuck( CBasePlayer *pPlayer, float dt, int buttons, int pressed )
+{
+	char line[160];
+	static int s_bucket = -1;
+
+	if( !pPlayer || dt <= 0.0f )
+		return 0;
+	if( buttons & IN_DUCK )
+	{
+		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
+		{
+			s_inDuck = 1;
+			s_duckTime = 0.0f;
+			s_duckStandZ = pPlayer->pev->origin.z;
+			s_bucket = -1;
+		}
+		if( s_inDuck )
+		{
+			float frac;
+
+			s_duckTime += dt;
+			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air.
+			   On the ground the origin drops by 18 (duck mins.z − standing
+			   mins.z) and the eye becomes VEC_DUCK_VIEW. In the air the eye
+			   is 12 and the origin stays. */
+			if( s_duckTime >= 0.4f || s_airborne )
+			{
+				int inAirFinish;
+
+				s_inDuck = 0;
+				pPlayer->pev->flags |= FL_DUCKING;
+				inAirFinish = ( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) ) ? 1 : 0;
+				if( inAirFinish )
+				{
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck air viewz=12 z=%.1f\n",
+						pPlayer->pev->origin.z );
+					EFW_LogLine( line );
+					return 0;
+				}
+				else
+				{
+					Vector dropped;
+					Vector saved;
+					int i;
+					int freed;
+
+					dropped = pPlayer->pev->origin;
+					dropped.z -= 18.0f;
+					saved = dropped;
+					freed = 0;
+					for( i = 0; i < 36; i++ )
+					{
+						TraceResult stuck;
+
+						UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
+							pPlayer->edict(), &stuck );
+						if( !stuck.fStartSolid && !stuck.fAllSolid )
+						{
+							freed = 1;
+							break;
+						}
+						dropped.z += 1.0f;
+					}
+					if( !freed )
+						dropped = saved;
+					pPlayer->pev->origin = dropped;
+					UTIL_SetOrigin( pPlayer->pev, dropped );
+					s_floorZ = dropped.z;
+					s_floorSet = 1;
+					pPlayer->pev->view_ofs.z = 12.0f;
+					snprintf( line, sizeof( line ),
+						"efw: duck drop z=%.1f -> %.1f at %.0f %.0f\n",
+						s_duckStandZ, dropped.z, dropped.x, dropped.y );
+					EFW_LogLine( line );
+					return 1;
+				}
+			}
+			else
+			{
+				int bucket;
+
+				frac = EFW_DuckSpline( s_duckTime );
+				pPlayer->pev->view_ofs.z = ( ( 12.0f - 18.0f ) * frac ) + ( 28.0f * ( 1.0f - frac ) );
+				bucket = (int)( s_duckTime * 10.0f );
+				if( bucket != s_bucket )
+				{
+					static int s_viewLog;
+
+					s_bucket = bucket;
+					if( s_viewLog < 6 )
+					{
+						s_viewLog++;
+						snprintf( line, sizeof( line ),
+							"efw: duck viewz=%.1f t=%.2f z=%.1f\n",
+							pPlayer->pev->view_ofs.z, s_duckTime, pPlayer->pev->origin.z );
+						EFW_LogLine( line );
+					}
+				}
+			}
+		}
+	}
+	else if( s_inDuck )
+	{
+		/* Released during the spline, before the origin drop. */
+		s_inDuck = 0;
+		s_duckTime = 0.0f;
+		pPlayer->pev->view_ofs.z = 28.0f;
+		snprintf( line, sizeof( line ),
+			"efw: unduck viewz=28 z=%.1f\n", pPlayer->pev->origin.z );
+		EFW_LogLine( line );
+	}
+	else if( pPlayer->pev->flags & FL_DUCKING )
+	{
+		Vector up;
+		TraceResult stand;
+		float lift;
+
+		/* PM_UnDuck adds the 18 back only after a ground drop, and only
+		   when the standing hull fits. A low ceiling leaves the crouch. */
+		up = pPlayer->pev->origin;
+		lift = 0.0f;
+		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND )
+			&& pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
+			lift = 18.0f;
+		up.z += lift;
+		UTIL_TraceHull( up, up, dont_ignore_monsters, human_hull, pPlayer->edict(), &stand );
+		if( stand.fStartSolid || stand.fAllSolid )
+		{
+			static int s_blockLog;
+
+			pPlayer->pev->view_ofs.z = 12.0f;
+			if( s_blockLog < 4 )
+			{
+				s_blockLog++;
+				snprintf( line, sizeof( line ),
+					"efw: unduck blocked z=%.1f\n", pPlayer->pev->origin.z );
+				EFW_LogLine( line );
+			}
+		}
+		else
+		{
+			s_inDuck = 0;
+			s_duckTime = 0.0f;
+			pPlayer->pev->flags &= ~FL_DUCKING;
+			pPlayer->pev->origin = up;
+			UTIL_SetOrigin( pPlayer->pev, up );
+			s_floorZ = up.z;
+			s_floorSet = 1;
+			pPlayer->pev->view_ofs.z = 28.0f;
+			snprintf( line, sizeof( line ),
+				"efw: unduck z=%.1f lift=%.0f\n", up.z, lift );
+			EFW_LogLine( line );
+		}
+	}
+	return 0;
+}
+
 /* One PM_WalkMove hull step. Returns 0 when the standing trace is solid
    and the step-up cannot leave it; s_hv is left alone in that case. */
 static int EFW_ClipGroundStep( CBasePlayer *pPlayer, float slice, Vector *out )
@@ -3299,6 +3475,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	int fromCmd;
 	int inAir;
 	float groundLeft;
+	int handAir;
+	float skipDuck;
+	float unducked;
+	int duckedMid;
+	float dropX;
+	int duckBtn;
+	int duckPressed;
 	static int s_moveN;
 
 	if( !pPlayer || !s_walkOn )
@@ -3344,6 +3527,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		inAir = ( s_airborne || jumpEdge || !onGround ) ? 1 : 0;
 	}
 	groundLeft = 0.0f;
+	handAir = 0;
+	skipDuck = 0.0f;
+	unducked = 0.0f;
+	duckedMid = 0;
+	dropX = 0.0f;
+	duckBtn = EFW_LiveButtons( pPlayer );
+	duckPressed = duckBtn & ~s_oldAirButtons;
 	if( !fwd && !side && !inAir )
 	{
 		float spd = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
@@ -3357,6 +3547,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			   on a slope never told the client to tilt. */
 			if( pPlayer->pev->flags & FL_ONGROUND )
 				EFW_IdealPitch( pPlayer );
+			/* A stand still spends the crouch timer. The whole gap is
+			   one sample; nothing walks after the origin drop. */
+			EFW_AdvanceDuck( pPlayer, EFW_MoveBudget(), duckBtn, duckPressed );
 			return;
 		}
 	}
@@ -3401,6 +3594,15 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		float incoming;
 		if( slice > 0.01f )
 			slice = 0.01f;
+		/* PM_Duck before this command's friction. The crouch that
+		   matures here drops the origin, and the wish that follows
+		   is the ducked one. */
+		if( EFW_AdvanceDuck( pPlayer, slice, duckBtn, duckPressed ) )
+		{
+			duckedMid = 1;
+			dropX = pPlayer->pev->origin.x;
+		}
+		EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 		/* Incoming speed. The step plays before this command's friction.
 		   A slice that breaks before it is committed hands that time to
 		   the fall, so it is not also a ground step. */
@@ -3415,12 +3617,14 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			s_hvy = 0.0f;
 			groundLeft = left;
 			s_airBudget = left;
+			skipDuck = slice;
 			break;
 		}
 		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
 		{
 			groundLeft = left;
 			s_airBudget = left;
+			skipDuck = slice;
 			break;
 		}
 		/* Downhill the horizontal slice is clear and the floor falls
@@ -3474,6 +3678,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			if( leftFloor )
 			{
 				s_airBudget = left;
+				handAir = 1;
 				break;
 			}
 		}
@@ -3531,6 +3736,25 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			EFW_LogLine( line );
 		}
 	}
+	if( duckedMid )
+	{
+		static int s_duckWalk;
+		char line[176];
+
+		if( s_duckWalk < 4 )
+		{
+			s_duckWalk++;
+			snprintf( line, sizeof( line ),
+				"efw: duckwalk end at %.0f %.0f z=%.1f wish=%.0f moved=%.0f dropat=%.0f\n",
+				dest.x, dest.y, dest.z, wishspeed, moved, dropX );
+			EFW_LogLine( line );
+		}
+	}
+	unducked = left - skipDuck;
+	if( unducked < 0.0f )
+		unducked = 0.0f;
+	if( handAir )
+		unducked = 0.0f;
 	}
 	pPlayer->pev->velocity.x = s_hvx;
 	pPlayer->pev->velocity.y = s_hvy;
@@ -3588,6 +3812,10 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	}
 	pPlayer->pev->origin = dest;
 	UTIL_SetOrigin( pPlayer->pev, dest );
+	/* Stopped on the floor with time left. That gap still ages the crouch.
+	   A lip handed the same gap to the fall, which ducks its own slices. */
+	if( !inAir && ( pPlayer->pev->flags & FL_ONGROUND ) && unducked > 0.0005f )
+		EFW_AdvanceDuck( pPlayer, unducked, duckBtn, duckPressed );
 	if( pPlayer->pev->flags & FL_ONGROUND )
 		EFW_IdealPitch( pPlayer );
 	s_moveN++;
@@ -3833,8 +4061,13 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 		if( buttons & IN_MOVELEFT )
 			side--;
 	}
+	int duckBtn;
+	int duckPressed;
+
 	origin0 = pPlayer->pev->origin;
 	given = left;
+	duckBtn = EFW_LiveButtons( pPlayer );
+	duckPressed = duckBtn & ~s_oldAirButtons;
 	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 	slices = 0;
 	while( left > 0.0005f && slices < 200 )
@@ -3847,6 +4080,9 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 		slice = left;
 		if( slice > 0.01f )
 			slice = 0.01f;
+		/* The landing's leftover commands duck before they walk. */
+		EFW_AdvanceDuck( pPlayer, slice, duckBtn, duckPressed );
+		EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 		/* Same incoming speed the ground walk records. This slice is
 		   already back on the floor. */
 		incoming = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
@@ -3920,7 +4156,6 @@ static void EFW_WalkAfterLand( CBasePlayer *pPlayer, float left )
 static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 {
 	float dt;
-	float frac;
 	int buttons;
 	int pressed;
 	Vector dest;
@@ -3944,138 +4179,7 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		s_floorZ = pPlayer->pev->origin.z;
 	}
 
-	if( buttons & IN_DUCK )
-	{
-		if( ( pressed & IN_DUCK ) && !( pPlayer->pev->flags & FL_DUCKING ) && !s_inDuck )
-		{
-			s_inDuck = 1;
-			s_duckTime = 0.0f;
-			s_duckStandZ = pPlayer->pev->origin.z;
-		}
-		if( s_inDuck )
-		{
-			s_duckTime += dt;
-			/* PM finishes the crouch at TIME_TO_DUCK, or at once in the air.
-			   On the ground the origin drops by 18 (duck mins.z − standing
-			   mins.z) and the eye becomes VEC_DUCK_VIEW. In the air the eye
-			   is 12 and the origin stays. */
-			if( s_duckTime >= 0.4f || s_airborne )
-			{
-				int inAirFinish;
-
-				s_inDuck = 0;
-				pPlayer->pev->flags |= FL_DUCKING;
-				inAirFinish = ( s_airborne || !( pPlayer->pev->flags & FL_ONGROUND ) ) ? 1 : 0;
-				if( inAirFinish )
-				{
-					pPlayer->pev->view_ofs.z = 12.0f;
-					snprintf( line, sizeof( line ),
-						"efw: duck air viewz=12 z=%.1f\n",
-						pPlayer->pev->origin.z );
-					EFW_LogLine( line );
-				}
-				else
-				{
-					Vector dropped;
-					Vector saved;
-					int i;
-					int freed;
-
-					dropped = pPlayer->pev->origin;
-					dropped.z -= 18.0f;
-					saved = dropped;
-					freed = 0;
-					for( i = 0; i < 36; i++ )
-					{
-						TraceResult stuck;
-
-						UTIL_TraceHull( dropped, dropped, dont_ignore_monsters, head_hull,
-							pPlayer->edict(), &stuck );
-						if( !stuck.fStartSolid && !stuck.fAllSolid )
-						{
-							freed = 1;
-							break;
-						}
-						dropped.z += 1.0f;
-					}
-					if( !freed )
-						dropped = saved;
-					pPlayer->pev->origin = dropped;
-					UTIL_SetOrigin( pPlayer->pev, dropped );
-					s_floorZ = dropped.z;
-					s_floorSet = 1;
-					pPlayer->pev->view_ofs.z = 12.0f;
-					snprintf( line, sizeof( line ),
-						"efw: duck drop z=%.1f -> %.1f\n",
-						s_duckStandZ, dropped.z );
-					EFW_LogLine( line );
-				}
-			}
-			else
-			{
-				frac = EFW_DuckSpline( s_duckTime );
-				pPlayer->pev->view_ofs.z = ( ( 12.0f - 18.0f ) * frac ) + ( 28.0f * ( 1.0f - frac ) );
-				snprintf( line, sizeof( line ),
-					"efw: duck viewz=%.1f t=%.2f z=%.1f\n",
-					pPlayer->pev->view_ofs.z, s_duckTime, pPlayer->pev->origin.z );
-				EFW_LogLine( line );
-			}
-		}
-	}
-	else if( s_inDuck )
-	{
-		/* Released during the spline, before the origin drop. */
-		s_inDuck = 0;
-		s_duckTime = 0.0f;
-		pPlayer->pev->view_ofs.z = 28.0f;
-		snprintf( line, sizeof( line ),
-			"efw: unduck viewz=28 z=%.1f\n", pPlayer->pev->origin.z );
-		EFW_LogLine( line );
-	}
-	else if( pPlayer->pev->flags & FL_DUCKING )
-	{
-		Vector up;
-		TraceResult stand;
-		float lift;
-
-		/* PM_UnDuck adds the 18 back only after a ground drop, and only
-		   when the standing hull fits. A low ceiling leaves the crouch. */
-		up = pPlayer->pev->origin;
-		lift = 0.0f;
-		if( !s_airborne && ( pPlayer->pev->flags & FL_ONGROUND )
-			&& pPlayer->pev->origin.z < s_duckStandZ - 9.0f )
-			lift = 18.0f;
-		up.z += lift;
-		UTIL_TraceHull( up, up, dont_ignore_monsters, human_hull, pPlayer->edict(), &stand );
-		if( stand.fStartSolid || stand.fAllSolid )
-		{
-			static int s_blockLog;
-
-			pPlayer->pev->view_ofs.z = 12.0f;
-			if( s_blockLog < 4 )
-			{
-				s_blockLog++;
-				snprintf( line, sizeof( line ),
-					"efw: unduck blocked z=%.1f\n", pPlayer->pev->origin.z );
-				EFW_LogLine( line );
-			}
-		}
-		else
-		{
-			s_inDuck = 0;
-			s_duckTime = 0.0f;
-			pPlayer->pev->flags &= ~FL_DUCKING;
-			pPlayer->pev->origin = up;
-			UTIL_SetOrigin( pPlayer->pev, up );
-			s_floorZ = up.z;
-			s_floorSet = 1;
-			pPlayer->pev->view_ofs.z = 28.0f;
-			snprintf( line, sizeof( line ),
-				"efw: unduck z=%.1f lift=%.0f\n", up.z, lift );
-			EFW_LogLine( line );
-		}
-	}
-
+	/* Crouch time is spent in the 10ms slices, before each move. */
 	if( !s_airborne && ( pressed & IN_JUMP ) )
 	{
 		int onGround = ( pPlayer->pev->flags & FL_ONGROUND ) != 0;
@@ -4165,8 +4269,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 			slice = left;
 			if( slice > 0.01f )
 				slice = 0.01f;
-			/* Categorize already ran for this command, and the hull was
-			   still in the air. The landing slice is that air command. */
+			/* In the air the crouch finishes on this command and the
+			   origin stays. The landing slice is still that air command. */
+			EFW_AdvanceDuck( pPlayer, slice, buttons, pressed );
 			EFW_NoteStepSlice( 0.0f, 0 );
 			s_jumpT += slice;
 			arcVz = s_jumpVz0 - 800.0f * s_jumpT;
