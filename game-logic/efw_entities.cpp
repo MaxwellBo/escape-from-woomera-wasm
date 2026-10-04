@@ -752,6 +752,9 @@ static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
    be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
    the other 45-degree headings. This is that search with the hull trace,
    not WALK_MOVE. */
+static void EFW_EngineChangeYaw( entvars_t *pev );
+static int EFW_YawHoldsStep( entvars_t *pev );
+
 static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
 {
 	Vector wish;
@@ -900,16 +903,34 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 		dir.x = cosf( yaw * 0.01745329252f );
 		dir.y = sinf( yaw * 0.01745329252f );
 		dir.z = 0.0f;
+		/* SV_StepDirection sets ideal_yaw to this probe and turns before
+		   the move. A failed probe keeps that turn. A clear probe returns
+		   even when the facing test restores the origin. */
+		pev->ideal_yaw = yaw;
+		EFW_EngineChangeYaw( pev );
 		if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
 			continue;
 		{
+			int held = EFW_YawHoldsStep( pev );
+			const char *tn = STRING( pev->targetname );
 			static int s_chase;
-			if( s_chase < 6 )
+			static int s_elikaChase;
+
+			if( tn && !strcmp( tn, "Elika" ) && s_elikaChase < 4 )
+			{
+				s_elikaChase++;
+				EFW_DebugPrint( "chase turn Elika ang=%.0f ideal=%.0f held=%d at %.0f %.0f -> %.0f %.0f",
+					pev->angles.y, pev->ideal_yaw, held,
+					start.x, start.y, landed.x, landed.y );
+			}
+			else if( s_chase < 6 )
 			{
 				s_chase++;
 				EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
 					yaw, start.x, start.y, landed.x, landed.y );
 			}
+			if( held )
+				return 2;
 		}
 		*out = landed;
 		return 1;
@@ -1110,10 +1131,17 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			step = 16.0f;
 		if( step > remain )
 			step = remain;
-		/* SV_StepDirection turns, then steps along that yaw. A held
-		   origin still returns, so the next chunk turns again. */
+		/* SV_StepDirection turns, then steps along ideal_yaw. The
+		   goal vector is only the chase target. A held origin still
+		   returns, so the next chunk turns again. */
 		EFW_EngineChangeYaw( pev );
-		wish = delta * ( step / remain );
+		{
+			float yawRad = pev->ideal_yaw * 0.01745329252f;
+
+			wish.x = cosf( yawRad ) * step;
+			wish.y = sinf( yawRad ) * step;
+			wish.z = 0.0f;
+		}
 		end = start + wish;
 		savedMins = pev->mins.z;
 		if( savedMins < 1.0f )
@@ -1257,8 +1285,17 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( stepLen < 0.5f )
 		{
 			Vector chased;
+			int chase;
 
-			if( !EFW_ChaseChunk( pev, start, goal, step, &chased ) )
+			chase = EFW_ChaseChunk( pev, start, goal, step, &chased );
+			/* Facing test restored the origin. ideal_yaw stays on
+			   that probe, and the next chunk steps along it. */
+			if( chase == 2 )
+			{
+				total -= step;
+				continue;
+			}
+			if( !chase )
 				break;
 			stepLand = chased;
 			stepLen = ( stepLand - start ).Length();
