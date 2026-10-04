@@ -630,6 +630,11 @@ static void EFW_NpcFall( entvars_t *pev )
 	}
 	pev->flags &= ~FL_ONGROUND;
 	dt = EFW_HostInterval();
+	/* One Euler step of 800*dt^2 tunnels a thin floor once dt is the
+	   whole pump. The walk spends that gap; the fall stays on the
+	   quarter-second step that still hits the hull. */
+	if( dt > 0.25f )
+		dt = 0.25f;
 	grav = 800.0f;
 	if( pev->gravity > 0.0f )
 		grav *= pev->gravity;

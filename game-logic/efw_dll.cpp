@@ -357,8 +357,8 @@ void EFW_AdjustHope( float delta )
 }
 
 static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
-static float s_hostInterval; /* quarter-second step, read by MoveExecute */
-static float s_hostClock; /* sum of those steps; Squark's 1s gate reads this */
+static float s_hostInterval; /* this pump's gap, read by MoveExecute */
+static float s_hostClock; /* sum of those gaps; Squark's 1s gate reads this */
 static float s_moveBudget; /* real pump gap for the player's 10ms PM slices */
 
 float EFW_HostClock( void )
@@ -368,9 +368,12 @@ float EFW_HostClock( void )
 
 float EFW_HostInterval( void )
 {
-	/* MonsterThink schedules itself at +0.1s. The pump is that clock. */
-	if( s_hostInterval < 0.001f || s_hostInterval > 0.25f )
+	/* MonsterThink schedules itself at +0.1s. A late pump is one frame
+	   that covers the gap, same 2s stall clamp as the player walk. */
+	if( s_hostInterval < 0.001f )
 		return 0.1f;
+	if( s_hostInterval > 2.0f )
+		return 2.0f;
 	return s_hostInterval;
 }
 
@@ -414,7 +417,7 @@ void EFW_ThinkHope( void )
 	else
 		return;
 	/* A late pump is one host frame that covers the gap. 2s drops a
-	   stall. The 0.25s movement step stays in EFW_HostPump. */
+	   stall. NPC steps read that same gap from EFW_HostInterval. */
 	if( elapsed > 2.0f )
 		elapsed = 2.0f;
 	hope = EFW_GetHudFloat( 1 );
@@ -1981,7 +1984,6 @@ static void EFW_HostPump( void )
 	n++;
 	{
 		float wall = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.12f;
-		float step;
 		if( wall < 0.0f )
 			wall = 0.0f;
 		/* FUN_100c6ad0 multiplies this frame's delta by 1/12. Win32
@@ -1991,11 +1993,10 @@ static void EFW_HostPump( void )
 			wall = 2.0f;
 		s_hopeWall += wall;
 		s_moveBudget = wall;
-		step = wall;
-		if( step > 0.25f )
-			step = 0.25f;
-		s_hostInterval = step;
-		s_hostClock += step;
+		/* FUN_1005d160's frametime is this same gap. A 0.25s cap left
+		   the walk at 16 units while the pump was about a second. */
+		s_hostInterval = wall;
+		s_hostClock += wall;
 	}
 	EFW_StartFrame();
 	EFW_RunQueuedChangeLevel();
