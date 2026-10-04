@@ -2668,6 +2668,10 @@ static float s_jumpT;
 static float s_jumpVz0;
 static float s_hvx;
 static float s_hvy;
+/* Time still left in this pump after the hull leaves the floor.
+   The ground walk used to spend the whole gap at the lip, and the
+   fall then spent that gap again. */
+static float s_airBudget;
 /* PM_UpdateStepSound reads the velocity at the start of each command.
    One sample after the whole pump made a stand-to-run's first step
    loud. Two seconds is 200 commands. */
@@ -3281,6 +3285,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	int side;
 	int fromCmd;
 	int inAir;
+	float groundLeft;
 	static int s_moveN;
 
 	if( !pPlayer || !s_walkOn )
@@ -3325,6 +3330,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		   keeps the velocity already built on the ground. */
 		inAir = ( s_airborne || jumpEdge || !onGround ) ? 1 : 0;
 	}
+	groundLeft = 0.0f;
 	if( !fwd && !side && !inAir )
 	{
 		float spd = sqrtf( s_hvx * s_hvx + s_hvy * s_hvy );
@@ -3332,6 +3338,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		{
 			s_hvx = 0.0f;
 			s_hvy = 0.0f;
+			s_airBudget = 0.0f;
 			/* Quake samples the grade every think, including a stand.
 			   The walk early-out used to skip that, so a hull placed
 			   on a slope never told the client to tilt. */
@@ -3354,6 +3361,9 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 		EFW_AirAccelerate( wish.x, wish.y, wishspeed, dt );
 		dest = pPlayer->pev->origin;
+		/* Already in the air, or the jump edge. The ground walk does
+		   not run, so the fall owns this whole pump. */
+		s_airBudget = dt;
 	}
 	else
 	{
@@ -3370,6 +3380,7 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 	dest = origin0;
 	EFW_WishMove( pPlayer, fwd, side, &wish, &wishspeed );
 	left = dt;
+	s_airBudget = 0.0f;
 	slices = 0;
 	while( left > 0.0005f && slices < 200 )
 	{
@@ -3390,10 +3401,16 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		{
 			s_hvx = 0.0f;
 			s_hvy = 0.0f;
+			groundLeft = left;
+			s_airBudget = left;
 			break;
 		}
 		if( !EFW_ClipGroundStep( pPlayer, slice, &dest ) )
+		{
+			groundLeft = left;
+			s_airBudget = left;
 			break;
+		}
 		/* Downhill the horizontal slice is clear and the floor falls
 		   away. A lip onto a 45-degree ramp can drop more than one
 		   slice of travel, up to STEPSIZE. Snap that far. A deeper
@@ -3403,11 +3420,13 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			float hy = dest.y - pPlayer->pev->origin.y;
 			float horiz = sqrtf( hx * hx + hy * hy );
 			float drop = horiz + 2.0f;
+			int leftFloor;
 			if( drop < 18.0f )
 				drop = 18.0f;
 			TraceResult floor;
 			Vector bot;
 
+			leftFloor = 0;
 			bot = dest;
 			bot.z -= drop;
 			UTIL_TraceHull( dest, bot, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &floor );
@@ -3429,11 +3448,22 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 				}
 				dest = floor.vecEndPos;
 			}
+			else if( !floor.fStartSolid && floor.flFraction >= 1.0f )
+				leftFloor = 1;
+			pPlayer->pev->origin = dest;
+			UTIL_SetOrigin( pPlayer->pev, dest );
+			left -= slice;
+			slices++;
+			groundLeft = left;
+			/* PM_CatagorizePosition runs after each command. The step
+			   that leaves the lip is still a ground move. The rest of
+			   this pump is the fall, not another walk at lip height. */
+			if( leftFloor )
+			{
+				s_airBudget = left;
+				break;
+			}
 		}
-		pPlayer->pev->origin = dest;
-		UTIL_SetOrigin( pPlayer->pev, dest );
-		left -= slice;
-		slices++;
 	}
 	moved = ( dest - origin0 ).Length();
 	{
@@ -3510,7 +3540,11 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 		floorEnd.z -= 2.0f;
 		UTIL_TraceHull( dest, floorEnd, dont_ignore_monsters, EFW_PlayerHull( pPlayer ), pPlayer->edict(), &down );
 		if( down.fStartSolid )
+		{
 			pPlayer->pev->flags |= FL_ONGROUND;
+			if( !inAir )
+				s_airBudget = 0.0f;
+		}
 		else if( down.flFraction < 1.0f && down.vecPlaneNormal.z >= 0.7f )
 		{
 			if( dest.z - down.vecEndPos.z >= 0.5f )
@@ -3518,10 +3552,16 @@ static void EFW_ApplyLatchedMove( CBasePlayer *pPlayer )
 			pPlayer->pev->flags |= FL_ONGROUND;
 			s_vz = 0.0f;
 			pPlayer->pev->velocity.z = 0.0f;
+			/* A jump edge is still on the floor here. Zeroing the air
+			   budget would cancel the hop. */
+			if( !inAir )
+				s_airBudget = 0.0f;
 		}
 		else
 		{
 			pPlayer->pev->flags &= ~FL_ONGROUND;
+			if( s_airBudget <= 0.0005f && groundLeft > 0.0005f )
+				s_airBudget = groundLeft;
 			if( s_ledgeLog < 8 )
 			{
 				char line[96];
@@ -3953,8 +3993,8 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		{
 			s_dropLog++;
 			snprintf( line, sizeof( line ),
-				"efw: drop z=%.1f at %.0f %.0f\n",
-				s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+				"efw: drop z=%.1f at %.0f %.0f remain=%.3f\n",
+				s_floorZ, pPlayer->pev->origin.x, pPlayer->pev->origin.y, s_airBudget );
 			EFW_LogLine( line );
 		}
 	}
@@ -3965,8 +4005,9 @@ static void EFW_ApplyUsercmdAir( CBasePlayer *pPlayer )
 		int slices;
 
 		/* A GoldSrc usercmd is about 10ms. One 0.2s diagonal clears a
-		   deck that those short steps land on. */
-		left = dt;
+		   deck that those short steps land on. The ground walk already
+		   spent the part of this pump before the lip. */
+		left = s_airBudget;
 		slices = 0;
 		dest = pPlayer->pev->origin;
 		while( s_airborne && left > 0.0005f && slices < 200 )
