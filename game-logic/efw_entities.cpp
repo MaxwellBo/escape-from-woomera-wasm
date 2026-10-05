@@ -2628,16 +2628,49 @@ void CRefugee::IdleThink( void )
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
 			/* 0x100c6654: movement activity ACT_WALK and dist < 100 calls
-			   vtable+0x1a8(ACT_IDLE). Move() at 0x1005d500 runs only in the
-			   100..300 band. ResetSequenceInfo sets animtime to now, so the
-			   host-interval advance must not play that sequence; framerate 0
-			   is that zero step. The next IdleThink entry restores it.
-			   AnimMoveThink still calls Move(). MoveExecute copies the
-			   movement activity into the ideal and the idle sequence's
-			   ground speed is 0, so this think does not slide. The next
-			   pulse's RunAI plays that walk before it steps. */
+			   vtable+0x1a8(ACT_IDLE). MoveToTarget (0x1005d500) runs only
+			   in the 100..300 band. FUN_1005d160 still calls Move while
+			   the goal is set. 0x1005f35d faces the player. ResetSequenceInfo
+			   sets animtime to now, so the host-interval advance must not
+			   play that sequence; framerate 0 is that zero step. The idle
+			   sequence's ground speed is 0, so this think turns and does
+			   not step. The next pulse's RunAI plays that walk before it
+			   steps once he is outside this band again. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
+			{
+				float beforeFace = pev->angles.y;
+				int yawSpeed = (int)pev->yaw_speed;
+				Vector face = pPlayer->pev->origin - pev->origin;
+
+				face.z = 0.0f;
+				if( yawSpeed < 1 )
+					yawSpeed = 70;
+				if( face.Length() >= 1.0f )
+				{
+					float turned;
+
+					MakeIdealYaw( pPlayer->pev->origin );
+					EFW_PeChangeYaw( this, yawSpeed );
+					turned = pev->angles.y - beforeFace;
+					if( turned < 0.0f )
+						turned = -turned;
+					if( turned > 180.0f )
+						turned = 360.0f - turned;
+					if( tn && !strcmp( tn, "Amir" ) && turned >= 1.0f )
+					{
+						static int s_cface;
+
+						if( s_cface < 6 )
+						{
+							s_cface++;
+							EFW_DebugPrint( "close face Amir ang=%.0f ideal=%.0f origin=%.0f %.0f",
+								pev->angles.y, pev->ideal_yaw,
+								pev->origin.x, pev->origin.y );
+						}
+					}
+				}
+			}
 			if( m_IdealActivity != m_movementActivity )
 			{
 				m_IdealActivity = m_movementActivity;
