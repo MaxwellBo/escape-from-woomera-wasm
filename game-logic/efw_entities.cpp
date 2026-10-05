@@ -2969,8 +2969,9 @@ void EFW_PatrolAlertAll( void )
 		pg->m_iAlert = 4;
 		if( pPlayer )
 			pg->m_vecLastSeen = pPlayer->pev->origin;
-		if( pg->m_Activity != ACT_RUN )
-			pg->SetActivity( ACT_RUN );
+		/* MoveToTarget (0x1005d500) stores ACT_RUN and does not
+		   SetActivity. MoveExecute copies that into ideal after this
+		   think has already stepped, and RunAI applies it next think. */
 		{
 			const char *gn = STRING( pg->pev->targetname );
 			EFW_DebugPrint( "patrol alert RUN %s seq=%d act=%d",
@@ -3170,31 +3171,15 @@ void CPatrolGuard::PatrolThink( void )
 			m_moveWaitTime = 0;
 			m_movementActivity = ACT_RUN;
 			m_movementGoal = MOVEGOAL_TARGETENT;
-			if( m_Activity != ACT_RUN )
 			{
-				SetActivity( ACT_RUN );
-				EFW_DebugPrint( "patrol chase RUN %s seq=%d",
-					( tn && tn[0] ) ? tn : "?", pev->sequence );
-			}
-		}
-		/* MoveExecute (0x1005f700) copies m_movementActivity (+0x284)
-		   into m_IdealActivity (+0x1d0) once the move-wait timer has
-		   passed. AlertAll already stored ACT_RUN during the fail idle,
-		   and that idle left the sequence on idle. */
-		else if( m_movementGoal == MOVEGOAL_TARGETENT
-			&& m_movementActivity == ACT_RUN
-			&& m_Activity != ACT_RUN )
-		{
-			SetActivity( ACT_RUN );
-			{
-				static int s_resume;
+				static int s_arm;
 
-				if( s_resume < 4 )
+				if( s_arm < 4 )
 				{
-					s_resume++;
-					EFW_DebugPrint( "chase resume %s seq=%d act=%d gs=%.0f",
+					s_arm++;
+					EFW_DebugPrint( "patrol chase store %s seq=%d act=%d",
 						( tn && tn[0] ) ? tn : "?",
-						pev->sequence, (int)m_Activity, m_flGroundSpeed );
+						pev->sequence, (int)m_Activity );
 				}
 			}
 		}
@@ -3226,6 +3211,25 @@ void CPatrolGuard::PatrolThink( void )
 	if( m_iAlert == 2 || m_iAlert == 3 || m_iAlert == 4 )
 		EFW_IdleHeadTurn( this, m_vecLastSeen );
 
+	/* FUN_1005d160 calls RunAI (vtable+0x120) before the anim.
+	   That syncs m_Activity to m_IdealActivity. MoveExecute has
+	   not copied the new movement activity yet, so this is the
+	   previous think's pose. */
+	if( m_iAlert == 4 && m_Activity != m_IdealActivity )
+	{
+		SetActivity( m_IdealActivity );
+		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
+		{
+			static int s_pose;
+
+			if( s_pose < 4 )
+			{
+				s_pose++;
+				EFW_DebugPrint( "chase pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+					tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+			}
+		}
+	}
 	/* MonsterThink anim, then the hull step stands in for Move. */
 	float flInterval = EFW_AdvanceNpcAnim( this, tn );
 	{
@@ -3241,10 +3245,43 @@ void CPatrolGuard::PatrolThink( void )
 				(int)m_Activity, pev->movetype );
 		}
 	}
+	/* MoveExecute (0x1005f700) copies movement activity into ideal
+	   and then steps. The sequence stays until the next think. */
+	if( m_iAlert == 4 && m_movementGoal == MOVEGOAL_TARGETENT
+		&& m_IdealActivity != m_movementActivity )
+	{
+		static int s_ideal;
+
+		m_IdealActivity = m_movementActivity;
+		if( tn && !strcmp( tn, "Patrol_Guard_2" ) && s_ideal < 4 )
+		{
+			s_ideal++;
+			EFW_DebugPrint( "chase ideal %s seq=%d act=%d gs=%.0f",
+				tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
+		}
+	}
 	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
 	{
-		float speed = EFW_NpcGroundSpeed( this );
-		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval, pPlayer->edict() );
+		float speed = m_flGroundSpeed * pev->framerate;
+		int moved;
+
+		/* MoveExecute multiplies the sequence ground speed. The 64
+		   floor is for a walk whose linear movement is missing. An
+		   idle sequence is 0, and that step does not slide. */
+		if( speed < 1.0f && m_Activity != ACT_IDLE )
+			speed = 64.0f;
+		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval, pPlayer->edict() );
+		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
+		{
+			static int s_g2;
+
+			if( s_g2 < 6 )
+			{
+				s_g2++;
+				EFW_DebugPrint( "chase step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
+					tn, moved, pev->sequence, (int)m_Activity, speed, flInterval );
+			}
+		}
 		{
 			static int s_chaseLog;
 			if( s_chaseLog < 6 )
