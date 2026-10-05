@@ -1376,7 +1376,6 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	int chunks;
 	int onDetour;
 	int cutCorner;
-	int stepNext;
 	int localOk;
 	float cutDist;
 	Vector chaseGoal;
@@ -1401,7 +1400,6 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	moveGoal = goal;
 	onDetour = 0;
 	cutCorner = 0;
-	stepNext = 0;
 	localOk = 0;
 	cutDist = 0.0f;
 	{
@@ -1735,10 +1733,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				static int s_remain;
 
-				/* AdvanceRoute stored the next slot. MoveExecute walks
-				   that point. The body already faced the one we left. */
+				/* AdvanceRoute stored the next slot. A blocked step
+				   chases that point. MOVE_NORMAL still steps along
+				   ideal_yaw, which faces the slot we just left. */
 				chaseGoal = slot->pt[slot->i];
-				stepNext = 1;
 				if( s_remain < 4 )
 				{
 					s_remain++;
@@ -1756,13 +1754,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	}
 	/* A path corner within 8 advances before MoveExecute. The local
 	   probe already used the old point, and that leftover is the budget.
-	   The hull walks the next point. A detour slot owns this think
-	   instead, and a failed probe keeps the apex it just stored. */
-	if( pStepToward && !onDetour && localOk && !stepNext )
-	{
+	   MOVE_NORMAL steps along ideal_yaw, which still faces that point.
+	   The goal argument is the next route point, and a blocked step
+	   chases it. A detour slot owns this think instead, and a failed
+	   probe keeps the apex it just stored. */
+	if( pStepToward && !onDetour && localOk )
 		chaseGoal = *pStepToward;
-		stepNext = 1;
-	}
 	start = pev->origin;
 	landed = start;
 	moved = 0.0f;
@@ -1786,8 +1783,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		/* SV_StepDirection steps along the ideal_yaw Move() stored.
 		   It does not turn the body. A chase that failed has put
 		   ideal_yaw back on the snapped heading for this chunk.
-		   After AdvanceRoute, MoveExecute ignores that yaw and walks
-		   the route point just stored. The body stays on the old one. */
+		   AdvanceRoute has already stored the next point, and that
+		   point is only the chase goal. The step still follows the
+		   yaw that faces the point this think already aimed at. */
 		if( s_chaseRestored )
 		{
 			const char *tn = STRING( pev->targetname );
@@ -1806,23 +1804,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 		{
-			float stepYaw = pev->ideal_yaw;
+			float yawRad = pev->ideal_yaw * 0.01745329252f;
 
-			if( stepNext )
-			{
-				Vector aim = chaseGoal - start;
-
-				aim.z = 0.0f;
-				if( aim.Length() > 0.001f )
-					stepYaw = UTIL_VecToYaw( aim );
-			}
-			{
-				float yawRad = stepYaw * 0.01745329252f;
-
-				wish.x = cosf( yawRad ) * step;
-				wish.y = sinf( yawRad ) * step;
-				wish.z = 0.0f;
-			}
+			wish.x = cosf( yawRad ) * step;
+			wish.y = sinf( yawRad ) * step;
+			wish.z = 0.0f;
 		}
 		{
 			int kind;
@@ -2970,7 +2956,7 @@ void CPatrolGuard::PatrolThink( void )
 			cornerDist = delta.Length();
 			moved = 0;
 			/* Move faces this corner, then ShouldAdvanceRoute. The leftover
-			   budget stays that distance. MoveExecute walks the next point. */
+			   budget stays that distance and is spent along that facing. */
 			if( m_Activity != ACT_WALK )
 				SetActivity( ACT_WALK );
 			{
@@ -3018,7 +3004,7 @@ void CPatrolGuard::PatrolThink( void )
 				}
 				/* A zero-interval SetActivity think returns before the
 				   leftover. Keep this corner so the next think still
-				   spends that distance toward the point AdvanceRoute stores. */
+				   faces it and spends that distance along that yaw. */
 				if( moved || cornerDist <= 1.0f )
 					m_pGoalEnt = next;
 			}
@@ -3311,7 +3297,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		moved = 0;
 		/* ShouldAdvanceRoute uses the distance from the start of Move.
 		   AdvanceRoute stores the next corner, then MoveExecute spends
-		   that leftover toward it. Yaw stays on the corner just reached. */
+		   that leftover along the yaw that still faces this corner. */
 		{
 			CBaseEntity *next = NULL;
 			Vector faceAt = pMon->m_pGoalEnt->pev->origin;
