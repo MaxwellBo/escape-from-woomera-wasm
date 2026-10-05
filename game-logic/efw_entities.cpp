@@ -1591,11 +1591,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( lead && skew <= 0.001f )
 		{
 			static int s_leadStep;
+			const char *tn = STRING( pev->targetname );
+			int elec = tn && !strcmp( tn, "efw_electrician" );
 
-			if( s_leadStep < 4 )
+			if( ( elec && s_leadStep < 6 ) || ( !elec && s_leadStep < 2 ) )
 			{
-				const char *tn = STRING( pev->targetname );
-
 				s_leadStep++;
 				EFW_DebugPrint( "anim lead %s iv=%.3f origin=%.0f %.0f",
 					( tn && tn[0] ) ? tn : "?", dt,
@@ -2214,8 +2214,9 @@ static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 		if( skew <= 0.001f )
 		{
 			static int s_leadAnim;
+			int elec = name && !strcmp( name, "efw_electrician" );
 
-			if( s_leadAnim < 4 )
+			if( ( elec && s_leadAnim < 6 ) || ( !elec && s_leadAnim < 2 ) )
 			{
 				s_leadAnim++;
 				EFW_DebugPrint( "anim lead %s iv=%.3f origin=%.0f %.0f",
