@@ -1362,6 +1362,50 @@ static int EFW_Near2D( const Vector &a, const Vector &b )
 	return d.Length() < 8.0f;
 }
 
+/* Engine CHANGE_YAW inside SV_StepDirection. This chunk turns at most
+   yaw_speed degrees. Move() already applied yaw_speed * frametime * 10
+   once, before these chunks. */
+static void EFW_EngineChangeYaw( entvars_t *pev )
+{
+	float current;
+	float ideal;
+	float move;
+	float speed;
+
+	if( !pev )
+		return;
+	current = UTIL_AngleMod( pev->angles.y );
+	ideal = pev->ideal_yaw;
+	speed = pev->yaw_speed;
+	/* 0x1000cde0 default is 70 when SetActivity has not stored one. */
+	if( speed < 1.0f )
+		speed = 70.0f;
+	if( current == ideal )
+		return;
+	move = ideal - current;
+	if( ideal > current )
+	{
+		if( move >= 180.0f )
+			move = move - 360.0f;
+	}
+	else
+	{
+		if( move <= -180.0f )
+			move = move + 360.0f;
+	}
+	if( move > 0.0f )
+	{
+		if( move > speed )
+			move = speed;
+	}
+	else
+	{
+		if( move < -speed )
+			move = -speed;
+	}
+	pev->angles.y = UTIL_AngleMod( current + move );
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL, const Vector *pStepToward = NULL )
 {
 	Vector delta;
@@ -1780,12 +1824,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		step = total;
 		if( step > 16.0f )
 			step = 16.0f;
-		/* SV_StepDirection steps along the ideal_yaw Move() stored.
-		   It does not turn the body. A chase that failed has put
+		/* SV_StepDirection turns at most yaw_speed degrees, then steps
+		   along the ideal_yaw Move() stored. A chase that failed has put
 		   ideal_yaw back on the snapped heading for this chunk.
 		   AdvanceRoute has already stored the next point, and that
 		   point is only the chase goal. The step still follows the
 		   yaw that faces the point this think already aimed at. */
+		EFW_EngineChangeYaw( pev );
 		if( s_chaseRestored )
 		{
 			const char *tn = STRING( pev->targetname );
@@ -1835,6 +1880,29 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 			else
 			{
+				float delta = pev->angles.y - pev->ideal_yaw;
+
+				/* SV_StepDirection puts the origin back when angles.y
+				   minus ideal_yaw is still between 45 and 315. The
+				   facing has not caught up, so this chunk does not
+				   move and the chase is not tried. */
+				if( delta > 45.0f && delta < 315.0f )
+				{
+					static int s_holdYaw;
+
+					if( s_holdYaw < 4 )
+					{
+						const char *tn = STRING( pev->targetname );
+
+						s_holdYaw++;
+						EFW_DebugPrint( "yaw hold %s ang=%.0f ideal=%.0f delta=%.0f origin=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?",
+							pev->angles.y, pev->ideal_yaw, delta,
+							start.x, start.y );
+					}
+					total -= step;
+					continue;
+				}
 				float dz = stepLand.z - start.z;
 
 				if( dz < 0.0f )
