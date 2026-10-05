@@ -2487,6 +2487,7 @@ void CRefugee::IdleThink( void )
 	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
 	static int s_idleLog;
 	static int s_startArm;
+	static int s_spotDone;
 	int walkStart = 0;
 	int peThink = 0;
 
@@ -2752,8 +2753,14 @@ void CRefugee::IdleThink( void )
 			float speed;
 			float dt;
 			int moved;
+			float remain;
+			Vector spot;
 			static int s_follow;
 			static int s_afterPose;
+
+			spot = m_vecMoveGoal - pev->origin;
+			spot.z = 0.0f;
+			remain = spot.Length();
 
 			if( m_Activity != m_IdealActivity )
 			{
@@ -2849,6 +2856,44 @@ void CRefugee::IdleThink( void )
 					EFW_DebugPrint( "refugee far %s moved=%d dist=%.0f origin=%.0f %.0f",
 						tn, moved, dist, pev->origin.x, pev->origin.y );
 				}
+			}
+			/* ShouldAdvanceRoute (0x1005f6e0) is true once the route
+			   point is within 8. The last point clears the goal.
+			   MoveExecute spends that leftover, then Stop() stores the
+			   idle ideal and RouteClear (0x1005d290) stores ACT_IDLE.
+			   A zero interval has not spent it. */
+			if( !posed && remain <= 8.0f && ( moved || remain <= 1.0f ) )
+			{
+				m_movementGoal = MOVEGOAL_NONE;
+				m_movementActivity = ACT_IDLE;
+				Forget( bits_MEMORY_MOVE_FAILED );
+				if( m_Activity != ACT_IDLE )
+					SetActivity( ACT_IDLE );
+				m_IdealActivity = ACT_IDLE;
+				s_spotDone = 1;
+				if( tn && !strcmp( tn, "Amir" ) )
+				{
+					static int s_done;
+
+					if( s_done < 4 )
+					{
+						s_done++;
+						EFW_DebugPrint( "walk done Amir act=%d goal=%d origin=%.0f %.0f remain=%.1f",
+							(int)m_Activity, m_movementGoal,
+							pev->origin.x, pev->origin.y, remain );
+					}
+				}
+			}
+		}
+		if( s_spotDone && tn && !strcmp( tn, "Amir" ) )
+		{
+			static int s_still;
+
+			if( s_still < 4 )
+			{
+				s_still++;
+				EFW_DebugPrint( "walk still Amir act=%d goal=%d origin=%.0f %.0f",
+					(int)m_Activity, m_movementGoal, pev->origin.x, pev->origin.y );
 			}
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
