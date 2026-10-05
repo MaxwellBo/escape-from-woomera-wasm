@@ -1362,7 +1362,7 @@ static int EFW_Near2D( const Vector &a, const Vector &b )
 	return d.Length() < 8.0f;
 }
 
-static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL )
+static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL, const Vector *pStepToward = NULL )
 {
 	Vector delta;
 	Vector start;
@@ -1376,6 +1376,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	int chunks;
 	int onDetour;
 	int cutCorner;
+	int stepNext;
+	int localOk;
 	float cutDist;
 	Vector chaseGoal;
 
@@ -1399,6 +1401,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	moveGoal = goal;
 	onDetour = 0;
 	cutCorner = 0;
+	stepNext = 0;
+	localOk = 0;
 	cutDist = 0.0f;
 	{
 		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
@@ -1530,6 +1534,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached, pTarget, &onTarget );
 		if( local == 2 )
 		{
+			localOk = 1;
 			static int s_clear;
 			static int s_target;
 
@@ -1730,7 +1735,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				static int s_remain;
 
+				/* AdvanceRoute stored the next slot. MoveExecute walks
+				   that point. The body already faced the one we left. */
 				chaseGoal = slot->pt[slot->i];
+				stepNext = 1;
 				if( s_remain < 4 )
 				{
 					s_remain++;
@@ -1745,6 +1753,15 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			s_npcStep = 0;
 			return 0;
 		}
+	}
+	/* A path corner within 8 advances before MoveExecute. The local
+	   probe already used the old point, and that leftover is the budget.
+	   The hull walks the next point. A detour slot owns this think
+	   instead, and a failed probe keeps the apex it just stored. */
+	if( pStepToward && !onDetour && localOk && !stepNext )
+	{
+		chaseGoal = *pStepToward;
+		stepNext = 1;
 	}
 	start = pev->origin;
 	landed = start;
@@ -1768,7 +1785,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			step = 16.0f;
 		/* SV_StepDirection steps along the ideal_yaw Move() stored.
 		   It does not turn the body. A chase that failed has put
-		   ideal_yaw back on the snapped heading for this chunk. */
+		   ideal_yaw back on the snapped heading for this chunk.
+		   After AdvanceRoute, MoveExecute ignores that yaw and walks
+		   the route point just stored. The body stays on the old one. */
 		if( s_chaseRestored )
 		{
 			const char *tn = STRING( pev->targetname );
@@ -1787,11 +1806,23 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 		{
-			float yawRad = pev->ideal_yaw * 0.01745329252f;
+			float stepYaw = pev->ideal_yaw;
 
-			wish.x = cosf( yawRad ) * step;
-			wish.y = sinf( yawRad ) * step;
-			wish.z = 0.0f;
+			if( stepNext )
+			{
+				Vector aim = chaseGoal - start;
+
+				aim.z = 0.0f;
+				if( aim.Length() > 0.001f )
+					stepYaw = UTIL_VecToYaw( aim );
+			}
+			{
+				float yawRad = stepYaw * 0.01745329252f;
+
+				wish.x = cosf( yawRad ) * step;
+				wish.y = sinf( yawRad ) * step;
+				wish.z = 0.0f;
+			}
 		}
 		{
 			int kind;
@@ -2938,14 +2969,30 @@ void CPatrolGuard::PatrolThink( void )
 			delta.z = 0;
 			cornerDist = delta.Length();
 			moved = 0;
-			/* Same leftover as Move: face this corner, spend at most that
-			   distance, then AdvanceRoute. The next corner is the next think. */
+			/* Move faces this corner, then ShouldAdvanceRoute. The leftover
+			   budget stays that distance. MoveExecute walks the next point. */
 			if( m_Activity != ACT_WALK )
 				SetActivity( ACT_WALK );
+			{
+				CBaseEntity *next = NULL;
+				Vector faceAt = m_pGoalEnt->pev->origin;
+				Vector nextAt;
+				int haveNext = 0;
+
+				if( cornerDist <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
+				{
+					next = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+					if( next )
+					{
+						nextAt = next->pev->origin;
+						haveNext = 1;
+					}
+				}
 			if( m_Activity == ACT_WALK && cornerDist > 1.0f )
 			{
 				speed = EFW_NpcGroundSpeed( this );
-				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed, flInterval );
+				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
+					haveNext ? &nextAt : NULL );
 				{
 					static int s_stepLog;
 					if( s_stepLog < 6 )
@@ -2957,25 +3004,24 @@ void CPatrolGuard::PatrolThink( void )
 					}
 				}
 			}
-			if( cornerDist <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
+			if( haveNext )
 			{
-				CBaseEntity *next;
+				static int s_hold;
 
-				next = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
-				if( next )
+				if( s_hold < 4 )
 				{
-					static int s_hold;
-
-					if( s_hold < 4 )
-					{
-						s_hold++;
-						EFW_DebugPrint( "corner hold %s dist=%.1f moved=%d origin=%.0f %.0f next=%.0f %.0f",
-							( tn && tn[0] ) ? tn : "?", cornerDist, moved,
-							pev->origin.x, pev->origin.y,
-							next->pev->origin.x, next->pev->origin.y );
-					}
-					m_pGoalEnt = next;
+					s_hold++;
+					EFW_DebugPrint( "corner hold %s dist=%.1f moved=%d origin=%.0f %.0f next=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", cornerDist, moved,
+						pev->origin.x, pev->origin.y,
+						nextAt.x, nextAt.y );
 				}
+				/* A zero-interval SetActivity think returns before the
+				   leftover. Keep this corner so the next think still
+				   spends that distance toward the point AdvanceRoute stores. */
+				if( moved || cornerDist <= 1.0f )
+					m_pGoalEnt = next;
+			}
 			}
 		}
 	}
@@ -3264,27 +3310,39 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		cornerDist = delta.Length();
 		moved = 0;
 		/* ShouldAdvanceRoute uses the distance from the start of Move.
-		   A corner inside 8 spends that leftover, then the route moves on. */
-		if( cornerDist > 1.0f )
+		   AdvanceRoute stores the next corner, then MoveExecute spends
+		   that leftover toward it. Yaw stays on the corner just reached. */
 		{
-			speed = EFW_NpcGroundSpeed( pMon );
-			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed, flInterval );
+			CBaseEntity *next = NULL;
+			Vector faceAt = pMon->m_pGoalEnt->pev->origin;
+			Vector nextAt;
+			int haveNext = 0;
+
+			if( cornerDist <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
 			{
-				static int s_step;
-				if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
+				next = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
+				if( next )
 				{
-					s_step++;
-					EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
-						tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
+					nextAt = next->pev->origin;
+					haveNext = 1;
 				}
 			}
-		}
-		if( cornerDist <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
-		{
-			CBaseEntity *next;
-
-			next = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
-			if( next )
+			if( cornerDist > 1.0f )
+			{
+				speed = EFW_NpcGroundSpeed( pMon );
+				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
+					haveNext ? &nextAt : NULL );
+				{
+					static int s_step;
+					if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
+					{
+						s_step++;
+						EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
+							tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
+					}
+				}
+			}
+			if( haveNext )
 			{
 				static int s_hold;
 
@@ -3294,9 +3352,10 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 					EFW_DebugPrint( "corner hold %s dist=%.1f moved=%d origin=%.0f %.0f next=%.0f %.0f",
 						( tn && tn[0] ) ? tn : "?", cornerDist, moved,
 						pev->origin.x, pev->origin.y,
-						next->pev->origin.x, next->pev->origin.y );
+						nextAt.x, nextAt.y );
 				}
-				pMon->m_pGoalEnt = next;
+				if( moved || cornerDist <= 1.0f )
+					pMon->m_pGoalEnt = next;
 			}
 		}
 	}
