@@ -3807,20 +3807,53 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		if( !pMon->m_pGoalEnt )
 			pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
 	}
-	/* The corner within 8 is still this think's goal. AdvanceRoute runs
-	   after the leftover step, so SetActivity stays on the walk he is in.
-	   StartTask at 0x10005df5 stores MoveToTarget(ACT_WALK, 2). */
+	/* StartMonster sets idle before the schedule. 0x10005df5 then
+	   pushes wait 2 and ACT_WALK into MoveToTarget (0x1005d500).
+	   That stores the movement activity and does not SetActivity,
+	   so this step keeps the sequence already playing. */
+	int wasReset = ( pMon->m_Activity == ACT_RESET );
+
+	if( wasReset )
+		pMon->SetActivity( ACT_IDLE );
 	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
 	{
 		pMon->m_moveWaitTime = 2.0f;
-		if( pMon->m_Activity != ACT_WALK )
-			pMon->SetActivity( ACT_WALK );
+		pMon->m_movementActivity = ACT_WALK;
+		if( EFW_FStrEq( tn, "efw_electrician" ) && pMon->m_Activity != ACT_WALK )
+		{
+			static int s_ostore;
+
+			if( s_ostore < 4 )
+			{
+				s_ostore++;
+				EFW_DebugPrint( "officer store %s seq=%d act=%d gs=%.0f",
+					tn, pev->sequence, (int)pMon->m_Activity, pMon->m_flGroundSpeed );
+			}
+		}
 	}
-	else if( pMon->m_Activity == ACT_RESET || pMon->m_Activity == ACT_WALK )
+	else if( wasReset || pMon->m_Activity == ACT_WALK )
 	{
 		if( pMon->m_Activity != ACT_IDLE )
 			pMon->SetActivity( ACT_IDLE );
 		EFW_ClearDetour( pev );
+	}
+	/* FUN_1005d160 calls RunAI before the anim, so the pose is the
+	   previous think's ideal. */
+	if( pMon->m_Activity != pMon->m_IdealActivity )
+	{
+		pMon->SetActivity( pMon->m_IdealActivity );
+		if( EFW_FStrEq( tn, "efw_electrician" ) )
+		{
+			static int s_opose;
+
+			if( s_opose < 4 )
+			{
+				s_opose++;
+				EFW_DebugPrint( "officer pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+					tn, pev->sequence, (int)pMon->m_Activity,
+					pMon->m_flGroundSpeed, pev->frame );
+			}
+		}
 	}
 	float flInterval = EFW_AdvanceNpcAnim( pMon, tn );
 	{
@@ -3832,7 +3865,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 				tn, pev->sequence, pev->frame, (int)pMon->m_Activity, pev->movetype );
 		}
 	}
-	if( pMon->m_pGoalEnt && pMon->m_Activity == ACT_WALK )
+	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
 	{
 		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
 		float cornerDist;
@@ -3843,7 +3876,9 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		moved = 0;
 		/* ShouldAdvanceRoute uses the distance from the start of Move.
 		   AdvanceRoute stores the next corner, then MoveExecute spends
-		   that leftover along the yaw that still faces this corner. */
+		   that leftover along the yaw that still faces this corner.
+		   MoveExecute uses the sequence ground speed. An idle sequence
+		   is 0, and that step does not slide. */
 		{
 			CBaseEntity *next = NULL;
 			Vector faceAt = pMon->m_pGoalEnt->pev->origin;
@@ -3861,7 +3896,9 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 			}
 			if( cornerDist > 1.0f )
 			{
-				speed = EFW_NpcGroundSpeed( pMon );
+				speed = pMon->m_flGroundSpeed * pev->framerate;
+				if( speed < 1.0f && pMon->m_Activity != ACT_IDLE )
+					speed = 64.0f;
 				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
 					haveNext ? &nextAt : NULL );
 				{
@@ -3869,9 +3906,21 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 					if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
 					{
 						s_step++;
-						EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
-							tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
+						EFW_DebugPrint( "officer step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
+							tn, moved, pev->sequence, (int)pMon->m_Activity, speed, flInterval );
 					}
+				}
+			}
+			if( pMon->m_IdealActivity != pMon->m_movementActivity )
+			{
+				static int s_oideal;
+
+				pMon->m_IdealActivity = pMon->m_movementActivity;
+				if( EFW_FStrEq( tn, "efw_electrician" ) && s_oideal < 4 )
+				{
+					s_oideal++;
+					EFW_DebugPrint( "officer ideal %s seq=%d act=%d gs=%.0f",
+						tn, pev->sequence, (int)pMon->m_Activity, pMon->m_flGroundSpeed );
 				}
 			}
 			if( haveNext )
