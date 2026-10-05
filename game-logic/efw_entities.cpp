@@ -3156,13 +3156,27 @@ void CPatrolGuard::PatrolThink( void )
 	{
 		Vector delta = m_vecMoveGoal - pev->origin;
 		float remain;
+		int moved;
 		delta.z = 0;
 		remain = delta.Length();
-		/* FUN_1005f6e0: the waypoint distance is 2D, and the route
-		   advances at 8. A 12-unit stop left the last-seen walk short. */
-		if( remain > 8.0f )
+		moved = 0;
+		/* ShouldAdvanceRoute completes a goal once it is within 8.
+		   MoveExecute still spends that leftover on this think, then
+		   MovementIsComplete idles. A stop at 8 left the last-seen
+		   walk a body short of the spot. */
+		if( remain > 1.0f )
 		{
-			if( remain < 20.0f )
+			if( remain <= 8.0f )
+			{
+				static int s_spend;
+				if( s_spend < 4 )
+				{
+					s_spend++;
+					EFW_DebugPrint( "investigate spend %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", remain );
+				}
+			}
+			else if( remain < 20.0f )
 			{
 				static int s_close;
 				if( s_close < 6 )
@@ -3175,19 +3189,24 @@ void CPatrolGuard::PatrolThink( void )
 			/* Move (0x1005f200) passes m_hTargetEnt when the goal is
 			   MOVEGOAL_LOCATION. A probe that meets that edict is a
 			   clear walk, and the hull step still stops on the body. */
-			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval,
+			moved = EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval,
 				pPlayer ? pPlayer->edict() : NULL );
 		}
-		else
+		/* A zero-interval SetActivity think has not spent the
+		   leftover. Keep the goal so the next pump still walks it. */
+		if( remain <= 8.0f && ( moved || remain <= 1.0f ) )
 		{
+			Vector left = m_vecMoveGoal - pev->origin;
+			float leftDist;
+			static int s_arrive;
+
+			left.z = 0;
+			leftDist = left.Length();
+			if( s_arrive < 4 )
 			{
-				static int s_arrive;
-				if( s_arrive < 4 )
-				{
-					s_arrive++;
-					EFW_DebugPrint( "investigate arrive %s dist=%.1f",
-						( tn && tn[0] ) ? tn : "?", remain );
-				}
+				s_arrive++;
+				EFW_DebugPrint( "investigate arrive %s dist=%.1f moved=%d",
+					( tn && tn[0] ) ? tn : "?", leftDist, moved );
 			}
 			m_movementGoal = MOVEGOAL_NONE;
 			if( m_Activity != ACT_IDLE )
