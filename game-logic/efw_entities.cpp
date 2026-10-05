@@ -1581,14 +1581,38 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			if( !EFW_Triangulate( pev, pev->origin, moveGoal, reached, &apex, pTarget ) )
 			{
 				static int s_block;
+				CBaseEntity *pEnt;
+				CBaseMonster *pMon;
+				const char *cn;
 
 				if( onDetour )
 					EFW_ClearDetour( pev );
+				/* Move() at 0x1005f5ac calls Stop(), then TaskFail when
+				   m_moveWaitTime is 0. Stop stores ACT_IDLE and that Move
+				   returns. Refugee IdleThink calls Move again only while
+				   the walk goal is still stored. Drop the goal and the
+				   detour. The next 0x52 gate is MoveToTarget, which would
+				   have rebuilt the route. Patrol and officer thinks store
+				   their own goal again, so this give-up is the refugee. */
+				pEnt = CBaseEntity::Instance( ENT( pev ) );
+				pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
+				cn = STRING( pev->classname );
+				if( pMon && cn && !strcmp( cn, "monster_refugee" ) )
+				{
+					pMon->SetActivity( ACT_IDLE );
+					pMon->m_movementActivity = ACT_IDLE;
+					pMon->m_movementGoal = MOVEGOAL_NONE;
+				}
 				if( s_block < 4 )
 				{
 					s_block++;
 					EFW_DebugPrint( "local block %s reached=%.0f cap=%.0f",
 						( tn && tn[0] ) ? tn : "?", reached, cap );
+					if( pMon && cn && !strcmp( cn, "monster_refugee" ) )
+						EFW_DebugPrint( "move fail %s act=%d goal=%d origin=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?",
+							(int)pMon->m_Activity, pMon->m_movementGoal,
+							pev->origin.x, pev->origin.y );
 				}
 				s_npcStep = 0;
 				return 0;
