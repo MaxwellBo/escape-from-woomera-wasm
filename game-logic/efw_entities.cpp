@@ -2618,8 +2618,25 @@ void CRefugee::IdleThink( void )
 			m_movementGoal = MOVEGOAL_TARGETENT;
 			m_movementActivity = ACT_WALK;
 			m_hTargetEnt = pPlayer;
+			/* MoveToTarget (0x1005d500) calls BuildRoute once.
+			   0x1005e720 copies the target origin into the route.
+			   Move() aims at that point on later thinks. The 100 and
+			   300 gates still use the live player. */
+			m_vecMoveGoal = pPlayer->pev->origin;
+			m_moveWaitTime = 0.0f;
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
+			if( tn && !strcmp( tn, "Amir" ) )
+			{
+				static int s_take;
+
+				if( s_take < 4 )
+				{
+					s_take++;
+					EFW_DebugPrint( "walk take Amir spot=%.0f %.0f",
+						m_vecMoveGoal.x, m_vecMoveGoal.y );
+				}
+			}
 			/* FUN_1005d500 stores the walk. FUN_1005d160 then passes 0 to
 			   StudioFrameAdvance, so this think stays on frame 0, and
 			   Move() yaws without translating. The next pulse steps. */
@@ -2641,7 +2658,7 @@ void CRefugee::IdleThink( void )
 			{
 				float beforeFace = pev->angles.y;
 				int yawSpeed = (int)pev->yaw_speed;
-				Vector face = pPlayer->pev->origin - pev->origin;
+				Vector face = m_vecMoveGoal - pev->origin;
 
 				face.z = 0.0f;
 				if( yawSpeed < 1 )
@@ -2650,7 +2667,9 @@ void CRefugee::IdleThink( void )
 				{
 					float turned;
 
-					MakeIdealYaw( pPlayer->pev->origin );
+					/* 0x1005f35d faces the route point BuildRoute stored,
+					   the same spot the step uses. */
+					MakeIdealYaw( m_vecMoveGoal );
 					EFW_PeChangeYaw( this, yawSpeed );
 					turned = pev->angles.y - beforeFace;
 					if( turned < 0.0f )
@@ -2770,7 +2789,7 @@ void CRefugee::IdleThink( void )
 				dt = EFW_HostInterval();
 				if( dt < 0.001f )
 					dt = 0.05f;
-				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
+				moved = EFW_StepNpc( pev, m_vecMoveGoal, speed, dt, pPlayer->edict() );
 			}
 			if( s_follow < 8 )
 			{
@@ -2778,6 +2797,25 @@ void CRefugee::IdleThink( void )
 				EFW_DebugPrint( "pe follow %s moved=%d dist=%.0f origin=%.0f %.0f",
 					( tn && tn[0] ) ? tn : "?", moved, dist,
 					pev->origin.x, pev->origin.y );
+			}
+			if( tn && !strcmp( tn, "Amir" ) )
+			{
+				Vector off = pPlayer->pev->origin - m_vecMoveGoal;
+
+				off.z = 0.0f;
+				if( off.Length() > 40.0f )
+				{
+					static int s_spot;
+
+					if( s_spot < 6 )
+					{
+						s_spot++;
+						EFW_DebugPrint( "walk spot Amir goal=%.0f %.0f origin=%.0f %.0f player=%.0f %.0f",
+							m_vecMoveGoal.x, m_vecMoveGoal.y,
+							pev->origin.x, pev->origin.y,
+							pPlayer->pev->origin.x, pPlayer->pev->origin.y );
+					}
+				}
 			}
 			if( tn && !strcmp( tn, "Amir" ) && ( posed || s_afterPose > 0 ) )
 			{
