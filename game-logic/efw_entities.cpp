@@ -3177,6 +3177,27 @@ void CPatrolGuard::PatrolThink( void )
 					( tn && tn[0] ) ? tn : "?", pev->sequence );
 			}
 		}
+		/* MoveExecute (0x1005f700) copies m_movementActivity (+0x284)
+		   into m_IdealActivity (+0x1d0) once the move-wait timer has
+		   passed. AlertAll already stored ACT_RUN during the fail idle,
+		   and that idle left the sequence on idle. */
+		else if( m_movementGoal == MOVEGOAL_TARGETENT
+			&& m_movementActivity == ACT_RUN
+			&& m_Activity != ACT_RUN )
+		{
+			SetActivity( ACT_RUN );
+			{
+				static int s_resume;
+
+				if( s_resume < 4 )
+				{
+					s_resume++;
+					EFW_DebugPrint( "chase resume %s seq=%d act=%d gs=%.0f",
+						( tn && tn[0] ) ? tn : "?",
+						pev->sequence, (int)m_Activity, m_flGroundSpeed );
+				}
+			}
+		}
 		m_hEnemy = pPlayer;
 	}
 	else if( m_iAlert == 2 || m_iAlert == 3 )
