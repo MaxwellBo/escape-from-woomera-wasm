@@ -3192,15 +3192,23 @@ void CPatrolGuard::PatrolThink( void )
 		/* Move() advances a location route at ShouldAdvanceRoute's 8. */
 		if( seen.Length() > 8.0f )
 		{
+			/* 0x1005d4b0 stores ACT_WALK, wait 0, goal LOCATION.
+			   It does not SetActivity. This step keeps the sequence
+			   already playing. RunAI applies the walk next think. */
 			m_moveWaitTime = 0;
 			m_movementActivity = ACT_WALK;
 			m_movementGoal = MOVEGOAL_LOCATION;
 			m_vecMoveGoal = m_vecLastSeen;
-			if( m_Activity != ACT_WALK )
+			if( tn && !strcmp( tn, "Patrol_Guard_2" ) && m_Activity != m_movementActivity )
 			{
-				SetActivity( ACT_WALK );
-				EFW_DebugPrint( "patrol investigate WALK %s seq=%d",
-					( tn && tn[0] ) ? tn : "?", pev->sequence );
+				static int s_istore;
+
+				if( s_istore < 4 )
+				{
+					s_istore++;
+					EFW_DebugPrint( "investigate store %s seq=%d act=%d gs=%.0f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
+				}
 			}
 		}
 		if( pPlayer )
@@ -3214,19 +3222,34 @@ void CPatrolGuard::PatrolThink( void )
 	/* FUN_1005d160 calls RunAI (vtable+0x120) before the anim.
 	   That syncs m_Activity to m_IdealActivity. MoveExecute has
 	   not copied the new movement activity yet, so this is the
-	   previous think's pose. */
-	if( m_iAlert == 4 && m_Activity != m_IdealActivity )
+	   previous think's pose. Alert 2/3 is the same sync. */
+	if( ( m_iAlert == 2 || m_iAlert == 3 || m_iAlert == 4 )
+		&& m_Activity != m_IdealActivity )
 	{
 		SetActivity( m_IdealActivity );
 		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
 		{
-			static int s_pose;
-
-			if( s_pose < 4 )
+			if( m_iAlert == 4 )
 			{
-				s_pose++;
-				EFW_DebugPrint( "chase pose %s seq=%d act=%d gs=%.0f frame=%.1f",
-					tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+				static int s_pose;
+
+				if( s_pose < 4 )
+				{
+					s_pose++;
+					EFW_DebugPrint( "chase pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+				}
+			}
+			else
+			{
+				static int s_ipose;
+
+				if( s_ipose < 4 )
+				{
+					s_ipose++;
+					EFW_DebugPrint( "investigate pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+				}
 			}
 		}
 	}
@@ -3257,6 +3280,20 @@ void CPatrolGuard::PatrolThink( void )
 		{
 			s_ideal++;
 			EFW_DebugPrint( "chase ideal %s seq=%d act=%d gs=%.0f",
+				tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
+		}
+	}
+	else if( ( m_iAlert == 2 || m_iAlert == 3 )
+		&& m_movementGoal == MOVEGOAL_LOCATION
+		&& m_IdealActivity != m_movementActivity )
+	{
+		static int s_iideal;
+
+		m_IdealActivity = m_movementActivity;
+		if( tn && !strcmp( tn, "Patrol_Guard_2" ) && s_iideal < 4 )
+		{
+			s_iideal++;
+			EFW_DebugPrint( "investigate ideal %s seq=%d act=%d gs=%.0f",
 				tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
 		}
 	}
@@ -3329,9 +3366,28 @@ void CPatrolGuard::PatrolThink( void )
 			}
 			/* Move (0x1005f200) passes m_hTargetEnt when the goal is
 			   MOVEGOAL_LOCATION. A probe that meets that edict is a
-			   clear walk, and the hull step still stops on the body. */
-			moved = EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval,
-				pPlayer ? pPlayer->edict() : NULL );
+			   clear walk, and the hull step still stops on the body.
+			   MoveExecute uses the sequence ground speed. An idle
+			   sequence is 0, and that step does not slide. */
+			{
+				float speed = m_flGroundSpeed * pev->framerate;
+
+				if( speed < 1.0f && m_Activity != ACT_IDLE )
+					speed = 64.0f;
+				moved = EFW_StepNpc( pev, m_vecMoveGoal, speed, flInterval,
+					pPlayer ? pPlayer->edict() : NULL );
+				if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
+				{
+					static int s_istep;
+
+					if( s_istep < 6 )
+					{
+						s_istep++;
+						EFW_DebugPrint( "investigate step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
+							tn, moved, pev->sequence, (int)m_Activity, speed, flInterval );
+					}
+				}
+			}
 		}
 		/* A zero-interval SetActivity think has not spent the
 		   leftover. Keep the goal so the next pump still walks it. */
