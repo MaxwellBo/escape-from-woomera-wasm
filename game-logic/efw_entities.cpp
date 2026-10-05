@@ -2424,6 +2424,7 @@ void CRefugee::IdleThink( void )
 	static int s_idleLog;
 	static int s_startArm;
 	int walkStart = 0;
+	int peThink = 0;
 
 	// CRefugee::IdleThink 0x100c6440
 	{
@@ -2484,7 +2485,6 @@ void CRefugee::IdleThink( void )
 		int slot = ENTINDEX( edict() );
 		static float s_nextPe[512];
 		static int s_peLog;
-		int peThink = 0;
 
 		if( slot > 0 && slot < 512
 			&& ( s_nextPe[slot] <= 0.0f || now >= s_nextPe[slot] ) )
@@ -2714,9 +2714,23 @@ void CRefugee::IdleThink( void )
 		}
 		}
 	}
-	/* FUN_1005d160 still advances the pose on the pulses the 0.1s
-	   gate skips, so the client frame does not stall. */
-	EFW_AdvanceNpcAnim( this, tn );
+	/* FUN_1005d160 is the 0.1s think. A faster pump, and the link that
+	   re-enters this function, are not that think. Playing the walk
+	   there turns the cycle while the hull is still on the start
+	   origin. Idle still advances, so a standing pose does not freeze. */
+	if( peThink || m_movementActivity != ACT_WALK )
+		EFW_AdvanceNpcAnim( this, tn );
+	else if( tn && !strcmp( tn, "Amir" ) && s_startArm == 1 )
+	{
+		static int s_whold;
+
+		if( s_whold < 4 )
+		{
+			s_whold++;
+			EFW_DebugPrint( "refugee walk hold %s frame=%.1f origin=%.0f %.0f",
+				tn, pev->frame, pev->origin.x, pev->origin.y );
+		}
+	}
 	if( walkStart && pPlayer )
 	{
 		/* Move() at 0x1005f35d faces the goal after the zero advance.
