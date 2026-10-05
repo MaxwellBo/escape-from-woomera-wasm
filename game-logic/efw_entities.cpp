@@ -1180,7 +1180,7 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
    with that entity and returns LOCALMOVE_VALID. A landing more than 64
    below the check point is a miss, unless that target is in the air.
    Flags from the probe are put back. */
-static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end, float *pflDist, edict_t *pTarget = NULL, int *pOnTarget = NULL )
+static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end, float *pflDist, edict_t *pTarget = NULL, int *pOnTarget = NULL, edict_t **ppBlocker = NULL )
 {
 	float yaw;
 	float dist;
@@ -1192,6 +1192,8 @@ static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end
 		*pflDist = 0.0f;
 	if( pOnTarget )
 		*pOnTarget = 0;
+	if( ppBlocker )
+		*ppBlocker = NULL;
 	if( !pev )
 		return 0;
 	yaw = UTIL_VecToYaw( end - start );
@@ -1216,24 +1218,24 @@ static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end
 		wish.x = cosf( yawRad ) * stepSize;
 		wish.y = sinf( yawRad ) * stepSize;
 		wish.z = 0.0f;
-		{
-			edict_t *hit = NULL;
+		edict_t *hit = NULL;
 
-			kind = EFW_MoveStep( pev, pos, wish, &landed, &hit );
-			/* 0x1005e408: a failed step whose trace_ent is the target
-			   is LOCALMOVE_VALID. The probe stops there. */
-			if( kind == 0 && pTarget && hit == pTarget )
-			{
-				if( pOnTarget )
-					*pOnTarget = 1;
-				break;
-			}
+		kind = EFW_MoveStep( pev, pos, wish, &landed, &hit );
+		/* 0x1005e408: a failed step whose trace_ent is the target
+		   is LOCALMOVE_VALID. The probe stops there. */
+		if( kind == 0 && pTarget && hit == pTarget )
+		{
+			if( pOnTarget )
+				*pOnTarget = 1;
+			break;
 		}
 		if( kind <= 0 )
 		{
 			pev->flags = flags;
 			if( pflDist )
 				*pflDist = traveled;
+			if( ppBlocker && hit )
+				*ppBlocker = hit;
 			return 0;
 		}
 		pos = landed;
@@ -1504,6 +1506,11 @@ static void EFW_AnimLeadStamp( entvars_t *pev )
 	s_animLead[slot] = pev->animtime;
 }
 
+/* Amir's walk start arms the electrician leg log. The yield path arms
+   the wait log so a later idle is that same hold. */
+static int s_amirWalk;
+static int s_yieldArmed;
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL, const Vector *pStepToward = NULL )
 {
 	Vector delta;
@@ -1698,8 +1705,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			checkEnd = pev->origin + dir * ( cap / dirLen );
 		else
 			checkEnd = pev->origin;
+		edict_t *blockerEnt = NULL;
+
 		onTarget = 0;
-		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached, pTarget, &onTarget );
+		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached, pTarget, &onTarget, &blockerEnt );
 		if( local == 2 )
 		{
 			localOk = 1;
@@ -1733,8 +1742,60 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		else
 		{
 			Vector apex;
+			int room = 0;
+			CBaseEntity *pSelf = CBaseEntity::Instance( ENT( pev ) );
+			CBaseMonster *pSelfMon = pSelf ? pSelf->MyMonsterPointer() : NULL;
+			CBaseEntity *pBlocker = NULL;
 
-			if( !EFW_Triangulate( pev, pev->origin, moveGoal, reached, &apex, pTarget ) )
+			/* Move() at 0x1005f453 stops, then 0x1005f4b5 keeps the
+			   detour for a blocker that is moving and is not the
+			   player, once three seconds have passed since the last
+			   wait. A clear prefix shorter than one second of walk
+			   (0x1005f4ec) waits m_moveWaitTime and does not
+			   triangulate. A longer prefix still steps. */
+			if( blockerEnt && !FNullEnt( blockerEnt ) )
+				pBlocker = CBaseEntity::Instance( blockerEnt );
+			if( pSelfMon && pBlocker && pSelfMon->m_moveWaitTime > 0.0f
+				&& pBlocker->IsMoving() && !pBlocker->IsPlayer()
+				&& ( EFW_HostClock() - pSelfMon->m_flMoveWaitFinished ) > 3.0f )
+			{
+				float now = EFW_HostClock();
+				const char *bn = STRING( pBlocker->pev->targetname );
+
+				if( reached < pSelfMon->m_flGroundSpeed )
+				{
+					static int s_yield;
+
+					pSelfMon->Stop();
+					pSelfMon->m_flMoveWaitFinished = now + pSelfMon->m_moveWaitTime;
+					if( tn && !strcmp( tn, "efw_electrician" ) )
+						s_yieldArmed = 1;
+					if( s_yield < 4 )
+					{
+						s_yield++;
+						EFW_DebugPrint( "move yield %s reached=%.0f gs=%.0f wait=%.0f origin=%.0f %.0f blocker=%s",
+							( tn && tn[0] ) ? tn : "?", reached, pSelfMon->m_flGroundSpeed,
+							pSelfMon->m_moveWaitTime, pev->origin.x, pev->origin.y,
+							( bn && bn[0] ) ? bn : "?" );
+					}
+					s_npcStep = 0;
+					return 0;
+				}
+				room = 1;
+				{
+					static int s_room;
+
+					if( s_room < 4 )
+					{
+						s_room++;
+						EFW_DebugPrint( "move room %s reached=%.0f gs=%.0f origin=%.0f %.0f blocker=%s",
+							( tn && tn[0] ) ? tn : "?", reached, pSelfMon->m_flGroundSpeed,
+							pev->origin.x, pev->origin.y,
+							( bn && bn[0] ) ? bn : "?" );
+					}
+				}
+			}
+			if( !room && !EFW_Triangulate( pev, pev->origin, moveGoal, reached, &apex, pTarget ) )
 			{
 				static int s_block;
 				CBaseEntity *pEnt;
@@ -1836,6 +1897,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				s_npcStep = 0;
 				return 0;
 			}
+			if( !room )
+			{
 			chaseGoal = apex;
 			{
 				EFW_DetourSlot *keep = EFW_DetourSlotFor( pev, 1 );
@@ -1933,6 +1996,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 						}
 					}
 				}
+			}
 			}
 		}
 	}
@@ -2760,11 +2824,12 @@ void CRefugee::IdleThink( void )
 		{
 			static int s_rstart;
 
-			if( s_rstart < 4 )
-			{
-				s_rstart++;
-				s_startArm = 1;
-				EFW_DebugPrint( "refugee start %s seq=%d act=%d gs=%.0f frame=%.1f yaw %.0f -> %.0f origin=%.0f %.0f",
+				if( s_rstart < 4 )
+				{
+					s_rstart++;
+					s_startArm = 1;
+					s_amirWalk = 1;
+					EFW_DebugPrint( "refugee start %s seq=%d act=%d gs=%.0f frame=%.1f yaw %.0f -> %.0f origin=%.0f %.0f",
 					tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame,
 					before, pev->angles.y, pev->origin.x, pev->origin.y );
 			}
@@ -3922,6 +3987,17 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 						pMon->m_flMoveWaitFinished - now, (int)pMon->m_Activity );
 				}
 			}
+			if( s_yieldArmed && tn && !strcmp( tn, "efw_electrician" ) )
+			{
+				static int s_ywait;
+
+				if( s_ywait < 4 )
+				{
+					s_ywait++;
+					EFW_DebugPrint( "yield wait %s origin=%.0f %.0f",
+						tn, pev->origin.x, pev->origin.y );
+				}
+			}
 			EFW_AdvanceNpcAnim( pMon, tn );
 			return;
 		}
@@ -4016,6 +4092,21 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 				{
 					nextAt = next->pev->origin;
 					haveNext = 1;
+				}
+			}
+			if( s_amirWalk && EFW_FStrEq( tn, "efw_electrician" ) )
+			{
+				static int s_leg;
+				static float s_legAt;
+				float nowLeg = EFW_HostClock();
+
+				if( s_leg < 8 && ( s_legAt <= 0.0f || nowLeg - s_legAt >= 0.5f ) )
+				{
+					s_leg++;
+					s_legAt = nowLeg;
+					EFW_DebugPrint( "officer ahead origin=%.0f %.0f goal=%.0f %.0f dist=%.0f gs=%.0f",
+						pev->origin.x, pev->origin.y, faceAt.x, faceAt.y,
+						cornerDist, pMon->m_flGroundSpeed );
 				}
 			}
 			if( cornerDist > 1.0f )
