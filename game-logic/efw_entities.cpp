@@ -1364,10 +1364,12 @@ static void EFW_ClearDetour( entvars_t *pev )
 static int EFW_RouteSimplify( entvars_t *pev, const Vector *inRoute, int count, edict_t *pTarget, Vector *outRoute );
 
 /* BuildRoute (0x1005e720) copies the target, then the local move.
-   A blocked line triangulates. The apex is the first waypoint, and
-   Move() on the start think faces that point. A clear line keeps
-   the target. The probe must not leave the hull where it walked. */
-static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *pTarget )
+   Result 2 keeps that point. A blocked line (not 1) triangulates,
+   and the apex is the first waypoint Move() faces. Result 1 is the
+   z miss: no triangle, and with no node graph the route stays empty.
+   A failed triangle does the same. The probe must not leave the hull
+   where it walked. 2 = walk the spot, 1 = walk the corner, 0 = no route. */
+static int EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *pTarget )
 {
 	float reached;
 	Vector apex;
@@ -1376,7 +1378,7 @@ static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *p
 	int local;
 
 	if( !pev )
-		return;
+		return 0;
 	EFW_ClearDetour( pev );
 	saved = pev->origin;
 	flags = pev->flags;
@@ -1384,10 +1386,14 @@ static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *p
 	local = EFW_LocalMove( pev, saved, goal, &reached, pTarget );
 	pev->origin = saved;
 	pev->flags = flags;
+	/* 0x1005e78b keeps the point only when the local move is 2.
+	   0x1005e79c skips the triangle when the result is 1. */
+	if( local == 2 )
+		return 2;
 	if( local != 0 )
-		return;
+		return 0;
 	if( !EFW_Triangulate( pev, saved, goal, reached, &apex, pTarget ) )
-		return;
+		return 0;
 	{
 		Vector inRoute[2];
 		Vector outRoute[16];
@@ -1399,11 +1405,14 @@ static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *p
 		inRoute[0] = apex;
 		inRoute[1] = goal;
 		outCount = EFW_RouteSimplify( pev, inRoute, 2, pTarget, outRoute );
+		/* RouteSimplify still leaves a route when it cuts the apex.
+		   That walk aims at the spot. No slot means the same thing
+		   only when a point remains; an empty cut is no route. */
 		if( outCount <= 1 )
-			return;
+			return outCount > 0 ? 2 : 0;
 		slot = EFW_DetourSlotFor( pev, 1 );
 		if( !slot )
-			return;
+			return 0;
 		ncopy = outCount;
 		if( ncopy > 8 )
 			ncopy = 8;
@@ -1422,6 +1431,7 @@ static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *p
 					slot->pt[0].x, slot->pt[0].y, goal.x, goal.y, reached );
 			}
 		}
+		return 1;
 	}
 }
 
@@ -2552,6 +2562,7 @@ void CRefugee::IdleThink( void )
 	static int s_idleLog;
 	static int s_startArm;
 	static int s_spotDone;
+	static int s_routeMiss;
 	int walkStart = 0;
 	int peThink = 0;
 
@@ -2691,25 +2702,54 @@ void CRefugee::IdleThink( void )
 			m_moveWaitTime = 0.0f;
 			/* The route is this spot. A wall on the way stores the
 			   corner in front of it, the way BuildRoute does before
-			   the first Move(). */
-			EFW_SeedBlockedRoute( pev, m_vecMoveGoal, pPlayer->edict() );
-			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
-				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
-			if( tn && !strcmp( tn, "Amir" ) )
+			   the first Move(). A z miss or a failed triangle leaves
+			   the route empty. Move() then stops without facing it. */
 			{
-				static int s_take;
+				int built;
 
-				if( s_take < 4 )
+				built = EFW_SeedBlockedRoute( pev, m_vecMoveGoal, pPlayer->edict() );
+				if( !built )
 				{
-					s_take++;
-					EFW_DebugPrint( "walk take Amir spot=%.0f %.0f",
-						m_vecMoveGoal.x, m_vecMoveGoal.y );
+					float heldYaw = pev->angles.y;
+
+					m_movementGoal = MOVEGOAL_NONE;
+					m_movementActivity = ACT_IDLE;
+					m_IdealActivity = ACT_IDLE;
+					SetActivity( ACT_IDLE );
+					if( tn && !strcmp( tn, "Amir" ) )
+					{
+						static int s_miss;
+
+						s_routeMiss = 1;
+						if( s_miss < 4 )
+						{
+							s_miss++;
+							EFW_DebugPrint( "walk miss Amir yaw=%.0f origin=%.0f %.0f",
+								heldYaw, pev->origin.x, pev->origin.y );
+						}
+					}
+				}
+				else
+				{
+					EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
+						( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
+					if( tn && !strcmp( tn, "Amir" ) )
+					{
+						static int s_take;
+
+						if( s_take < 4 )
+						{
+							s_take++;
+							EFW_DebugPrint( "walk take Amir spot=%.0f %.0f",
+								m_vecMoveGoal.x, m_vecMoveGoal.y );
+						}
+					}
+					/* FUN_1005d500 stores the walk. FUN_1005d160 then passes 0 to
+					   StudioFrameAdvance, so this think stays on frame 0, and
+					   Move() yaws without translating. The next pulse steps. */
+					walkStart = 1;
 				}
 			}
-			/* FUN_1005d500 stores the walk. FUN_1005d160 then passes 0 to
-			   StudioFrameAdvance, so this think stays on frame 0, and
-			   Move() yaws without translating. The next pulse steps. */
-			walkStart = 1;
 		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
@@ -2962,6 +3002,17 @@ void CRefugee::IdleThink( void )
 				s_still++;
 				EFW_DebugPrint( "walk still Amir act=%d goal=%d origin=%.0f %.0f",
 					(int)m_Activity, m_movementGoal, pev->origin.x, pev->origin.y );
+			}
+		}
+		if( s_routeMiss && tn && !strcmp( tn, "Amir" ) )
+		{
+			static int s_held;
+
+			if( s_held < 4 )
+			{
+				s_held++;
+				EFW_DebugPrint( "walk held Amir act=%d yaw=%.0f origin=%.0f %.0f",
+					(int)m_Activity, pev->angles.y, pev->origin.x, pev->origin.y );
 			}
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
