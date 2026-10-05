@@ -1759,6 +1759,29 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					pMon->m_movementActivity = ACT_IDLE;
 					pMon->m_movementGoal = MOVEGOAL_NONE;
 				}
+				/* Move() calls Stop(), then TaskFail when m_moveWaitTime
+				   is 0. The fail schedule is idle, then a 2 second wait.
+				   A blocked path kept the walk cycle and stepped again
+				   on the next think. */
+				else if( pMon && cn && ( !strcmp( cn, "monster_patrol_guard" )
+					|| !strcmp( cn, "monster_efw_guard" )
+					|| !strcmp( cn, "monster_barney" ) ) )
+				{
+					pMon->SetActivity( ACT_IDLE );
+					pMon->m_movementActivity = ACT_IDLE;
+					pMon->m_flMoveWaitFinished = EFW_HostClock() + 2.0f;
+					{
+						static int s_pfail;
+
+						if( s_pfail < 4 )
+						{
+							s_pfail++;
+							EFW_DebugPrint( "path fail %s act=%d",
+								( tn && tn[0] ) ? tn : "?",
+								(int)pMon->m_Activity );
+						}
+					}
+				}
 				if( s_block < 4 )
 				{
 					s_block++;
@@ -3079,6 +3102,26 @@ void CPatrolGuard::PatrolThink( void )
 	   (WALK_MOVE) and stall, so only their goal fields are stored. Alert 0
 	   falls through to MonsterThink; the path_corner walk stands in for the
 	   schedule RunAI would run and that we still cannot call. */
+	/* TaskFail's schedule waits two seconds in idle before the path
+	   is tried again. */
+	if( m_flMoveWaitFinished > now )
+	{
+		if( m_Activity != ACT_IDLE )
+			SetActivity( ACT_IDLE );
+		{
+			static int s_pathWait;
+
+			if( s_pathWait < 4 )
+			{
+				s_pathWait++;
+				EFW_DebugPrint( "path wait %s left=%.1f act=%d",
+					( tn && tn[0] ) ? tn : "?",
+					m_flMoveWaitFinished - now, (int)m_Activity );
+			}
+		}
+		EFW_AdvanceNpcAnim( this, tn );
+		return;
+	}
 	if( m_iAlert == 4 )
 	{
 		if( m_movementGoal == MOVEGOAL_NONE && pPlayer )
@@ -3527,6 +3570,29 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 		{
 			s_mv = 1;
 			EFW_DebugPrint( "officer movetype STEP" );
+		}
+	}
+	/* The same fail schedule: a blocked walk idles for two seconds. */
+	{
+		float now = EFW_HostClock();
+
+		if( pMon->m_flMoveWaitFinished > now )
+		{
+			if( pMon->m_Activity != ACT_IDLE )
+				pMon->SetActivity( ACT_IDLE );
+			{
+				static int s_pathWait;
+
+				if( s_pathWait < 4 )
+				{
+					s_pathWait++;
+					EFW_DebugPrint( "path wait %s left=%.1f act=%d",
+						( tn && tn[0] ) ? tn : "?",
+						pMon->m_flMoveWaitFinished - now, (int)pMon->m_Activity );
+				}
+			}
+			EFW_AdvanceNpcAnim( pMon, tn );
+			return;
 		}
 	}
 	if( !FStringNull( pev->target ) )
