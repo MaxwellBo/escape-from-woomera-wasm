@@ -2422,6 +2422,8 @@ void CRefugee::IdleThink( void )
 	float dist = 0.0f;
 	static int s_walkTick; /* DAT_10132ca8, shared across refugees */
 	static int s_idleLog;
+	static int s_startArm;
+	int walkStart = 0;
 
 	// CRefugee::IdleThink 0x100c6440
 	{
@@ -2542,7 +2544,7 @@ void CRefugee::IdleThink( void )
 			/* vtable+0x1a8(3), FUN_1005d290, then FUN_1005d500(this, ACT_WALK, 0)
 			   which is MoveToTarget. FRefreshRoute's local move calls WALK_MOVE
 			   and stalls the WASM frame, so the route is not built. The hull
-			   step below is that move. */
+			   step is the next pulse. This one only stores the walk. */
 			EFW_DebugPrint( "SetActivity WALK %s before seq=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, dist );
 			SetActivity( ACT_WALK );
@@ -2554,25 +2556,10 @@ void CRefugee::IdleThink( void )
 			m_hTargetEnt = pPlayer;
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
-			/* FUN_1005d500 is this first Move. Later thinks keep stepping
-			   from FUN_1005d160 while the goal stays in the 100..300 band. */
-			{
-				float speed = EFW_NpcGroundSpeed( this );
-				float dt = EFW_HostInterval();
-				int moved;
-				static int s_peMove;
-
-				if( dt < 0.001f )
-					dt = 0.05f;
-				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
-				if( s_peMove < 6 )
-				{
-					s_peMove++;
-					EFW_DebugPrint( "pe move %s moved=%d dist=%.0f origin=%.0f %.0f",
-						( tn && tn[0] ) ? tn : "?", moved, dist,
-						pev->origin.x, pev->origin.y );
-				}
-			}
+			/* FUN_1005d500 stores the walk. FUN_1005d160 then passes 0 to
+			   StudioFrameAdvance, so this think stays on frame 0, and
+			   Move() yaws without translating. The next pulse steps. */
+			walkStart = 1;
 		}
 		else if( m_movementActivity == ACT_WALK && dist < 100.0f )
 		{
@@ -2708,6 +2695,12 @@ void CRefugee::IdleThink( void )
 			}
 			if( m_IdealActivity != m_movementActivity )
 				m_IdealActivity = m_movementActivity;
+			if( tn && !strcmp( tn, "Amir" ) && s_startArm == 1 && !posed )
+			{
+				s_startArm = 2;
+				EFW_DebugPrint( "refugee start step %s moved=%d seq=%d act=%d frame=%.1f iv=%.3f",
+					tn, moved, pev->sequence, (int)m_Activity, pev->frame, dt );
+			}
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
 		pev->movetype = MOVETYPE_STEP;
@@ -2724,6 +2717,37 @@ void CRefugee::IdleThink( void )
 	/* FUN_1005d160 still advances the pose on the pulses the 0.1s
 	   gate skips, so the client frame does not stall. */
 	EFW_AdvanceNpcAnim( this, tn );
+	if( walkStart && pPlayer )
+	{
+		/* Move() at 0x1005f35d faces the goal after the zero advance.
+		   The feet stay where SetActivity left them. */
+		float before = pev->angles.y;
+		int yawSpeed = (int)pev->yaw_speed;
+
+		if( yawSpeed < 1 )
+			yawSpeed = 70;
+		MakeIdealYaw( pPlayer->pev->origin );
+		EFW_PeChangeYaw( this, yawSpeed );
+		if( tn && !strcmp( tn, "Amir" ) )
+		{
+			static int s_rstart;
+
+			if( s_rstart < 4 )
+			{
+				s_rstart++;
+				s_startArm = 1;
+				EFW_DebugPrint( "refugee start %s seq=%d act=%d gs=%.0f frame=%.1f yaw %.0f -> %.0f origin=%.0f %.0f",
+					tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame,
+					before, pev->angles.y, pev->origin.x, pev->origin.y );
+			}
+		}
+	}
+	else if( s_startArm == 2 && tn && !strcmp( tn, "Amir" ) )
+	{
+		s_startArm = 0;
+		EFW_DebugPrint( "refugee start frame %s seq=%d frame=%.1f origin=%.0f %.0f",
+			tn, pev->sequence, pev->frame, pev->origin.x, pev->origin.y );
+	}
 }
 
 void CRefugee::Precache( void )
