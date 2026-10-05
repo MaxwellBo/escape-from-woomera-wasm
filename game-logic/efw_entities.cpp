@@ -2903,7 +2903,11 @@ void CPatrolGuard::PatrolThink( void )
 						( tn && tn[0] ) ? tn : "?", remain );
 				}
 			}
-			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval );
+			/* Move (0x1005f200) passes m_hTargetEnt when the goal is
+			   MOVEGOAL_LOCATION. A probe that meets that edict is a
+			   clear walk, and the hull step still stops on the body. */
+			EFW_StepNpc( pev, m_vecMoveGoal, EFW_NpcGroundSpeed( this ), flInterval,
+				pPlayer ? pPlayer->edict() : NULL );
 		}
 		else
 		{
