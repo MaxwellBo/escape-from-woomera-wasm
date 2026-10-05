@@ -1023,6 +1023,113 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	return 0;
 }
 
+/* CheckLocalMove walks the lookahead in 16-unit steps and stops one unit
+   short. WALK_MOVE and DROP_TO_FLOOR stall the frame, so this is that
+   walk with the same hull step MoveExecute uses. A landing more than 64
+   below the check point is a miss. Flags from the probe are put back. */
+static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end, float *pflDist )
+{
+	float yaw;
+	float dist;
+	float traveled;
+	Vector pos;
+	int flags;
+
+	if( pflDist )
+		*pflDist = 0.0f;
+	if( !pev )
+		return 0;
+	yaw = UTIL_VecToYaw( end - start );
+	dist = ( end - start ).Length2D();
+	pos = start;
+	flags = pev->flags;
+	traveled = 0.0f;
+	while( traveled < dist )
+	{
+		float stepSize;
+		Vector wish;
+		Vector landed;
+		float yawRad;
+		int kind;
+
+		stepSize = 16.0f;
+		if( traveled + 16.0f >= dist - 1.0f )
+			stepSize = ( dist - traveled ) - 1.0f;
+		if( stepSize < 0.001f )
+			break;
+		yawRad = yaw * 0.01745329252f;
+		wish.x = cosf( yawRad ) * stepSize;
+		wish.y = sinf( yawRad ) * stepSize;
+		wish.z = 0.0f;
+		kind = EFW_MoveStep( pev, pos, wish, &landed );
+		if( kind <= 0 )
+		{
+			pev->flags = flags;
+			if( pflDist )
+				*pflDist = traveled;
+			return 0;
+		}
+		pos = landed;
+		traveled += 16.0f;
+	}
+	pev->flags = flags;
+	if( fabsf( end.z - pos.z ) > 64.0f )
+		return 1;
+	return 2;
+}
+
+/* FTriangulate. The apex steps out from the blockage by the hull width.
+   Both legs have to be a clear local move. The far leg is the route
+   goal, so a goal inside a wall does not become a detour. */
+static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &end, float flDist, Vector *apex )
+{
+	Vector delta;
+	Vector forward;
+	Vector side;
+	Vector left;
+	Vector right;
+	float sizeX;
+	float len;
+	int i;
+
+	if( !pev || !apex )
+		return 0;
+	sizeX = pev->size.x;
+	if( sizeX < 24.0f )
+		sizeX = 24.0f;
+	else if( sizeX > 48.0f )
+		sizeX = 48.0f;
+	delta = end - start;
+	len = delta.Length();
+	if( len < 0.001f )
+		return 0;
+	forward = delta * ( 1.0f / len );
+	side.x = forward.y;
+	side.y = -forward.x;
+	side.z = 0.0f;
+	right = start + forward * ( flDist + sizeX ) + side * ( sizeX * 3.0f );
+	left = start + forward * ( flDist + sizeX ) - side * ( sizeX * 3.0f );
+	side = side * ( sizeX * 2.0f );
+	for( i = 0; i < 8; i++ )
+	{
+		if( EFW_LocalMove( pev, start, right, NULL ) == 2
+			&& EFW_LocalMove( pev, right, end, NULL ) == 2 )
+		{
+			*apex = right;
+			return 1;
+		}
+		if( EFW_LocalMove( pev, start, left, NULL ) == 2
+			&& EFW_LocalMove( pev, left, end, NULL ) == 2 )
+		{
+			*apex = left;
+			return 1;
+		}
+		right = right + side;
+		left = left - side;
+	}
+	return 0;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
 {
 	Vector delta;
@@ -1034,6 +1141,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	float total;
 	float moved;
 	int chunks;
+	Vector chaseGoal;
 
 	if( !pev || s_npcStep )
 		return 0;
@@ -1127,6 +1235,63 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 	}
 	s_npcStep = 1;
+	chaseGoal = goal;
+	/* Move() traces origin + normalize(3D delta) * flCheckDist before
+	   MoveExecute. A miss tries a detour. No detour means this think
+	   does not spend the step. */
+	{
+		Vector dir = goal - pev->origin;
+		float dirLen = dir.Length();
+		Vector checkEnd;
+		float reached;
+		int local;
+		const char *tn = STRING( pev->targetname );
+
+		if( dirLen > 0.001f )
+			checkEnd = pev->origin + dir * ( cap / dirLen );
+		else
+			checkEnd = pev->origin;
+		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached );
+		if( local == 2 )
+		{
+			static int s_clear;
+
+			if( s_clear < 2 && tn && !strcmp( tn, "efw_electrician" ) )
+			{
+				s_clear++;
+				EFW_DebugPrint( "local clear %s cap=%.0f", tn, cap );
+			}
+		}
+		else
+		{
+			Vector apex;
+
+			if( !EFW_Triangulate( pev, pev->origin, goal, reached, &apex ) )
+			{
+				static int s_block;
+
+				if( s_block < 4 )
+				{
+					s_block++;
+					EFW_DebugPrint( "local block %s reached=%.0f cap=%.0f",
+						( tn && tn[0] ) ? tn : "?", reached, cap );
+				}
+				s_npcStep = 0;
+				return 0;
+			}
+			chaseGoal = apex;
+			{
+				static int s_detour;
+
+				if( s_detour < 4 )
+				{
+					s_detour++;
+					EFW_DebugPrint( "local detour %s apex=%.0f %.0f reached=%.0f",
+						( tn && tn[0] ) ? tn : "?", apex.x, apex.y, reached );
+				}
+			}
+		}
+	}
 	start = pev->origin;
 	landed = start;
 	moved = 0.0f;
@@ -1250,7 +1415,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			Vector chased;
 			int chase;
 
-			chase = EFW_ChaseChunk( pev, start, goal, step, &chased );
+			chase = EFW_ChaseChunk( pev, start, chaseGoal, step, &chased );
 			if( !chase )
 			{
 				/* ideal_yaw is the snapped heading again. Spend this
