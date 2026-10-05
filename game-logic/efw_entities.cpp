@@ -1029,6 +1029,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	Vector start;
 	Vector landed;
 	float len;
+	float len3;
+	float cap;
 	float total;
 	float moved;
 	int chunks;
@@ -1047,11 +1049,19 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( support == 0 )
 			return 0;
 	}
+	/* Move() measures the waypoint in 3D, then shrinks this think so
+	   groundSpeed * interval stays inside min(that distance, 200).
+	   The step itself stays horizontal. A goal above the hull still
+	   spends that budget past the goal's ground point. */
 	delta = goal - pev->origin;
+	len3 = delta.Length();
+	cap = len3;
 	delta.z = 0.0f;
 	len = delta.Length();
 	if( len < 1.0f )
 		return 0;
+	if( cap > 200.0f )
+		cap = 200.0f;
 	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
 	   once, before the 16-unit chunks, including the think whose
 	   StudioFrameAdvance interval is 0. */
@@ -1101,10 +1111,21 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 	}
 	total = speed * dt;
-	if( total > len )
-		total = len;
+	if( total > cap )
+		total = cap;
 	if( total < 0.001f )
 		return 0;
+	{
+		const char *tn = STRING( pev->targetname );
+		static int s_budget;
+
+		if( s_budget < 4 && cap > len + 0.5f )
+		{
+			s_budget++;
+			EFW_DebugPrint( "step budget %s dist2=%.0f dist3=%.0f wish=%.1f",
+				( tn && tn[0] ) ? tn : "?", len, len3, total );
+		}
+	}
 	s_npcStep = 1;
 	start = pev->origin;
 	landed = start;
@@ -1120,18 +1141,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		Vector stepLand;
 		float step;
 		float stepLen;
-		float remain;
 
-		delta = goal - start;
-		delta.z = 0.0f;
-		remain = delta.Length();
-		if( remain < 1.0f )
-			break;
+		/* MoveExecute spends the budget in 16-unit chunks. It does not
+		   shorten a chunk to the live ground distance, so the last
+		   chunk can pass the goal's ground point. */
 		step = total;
 		if( step > 16.0f )
 			step = 16.0f;
-		if( step > remain )
-			step = remain;
 		/* SV_StepDirection steps along the ideal_yaw Move() stored.
 		   It does not turn the body. A chase that failed has put
 		   ideal_yaw back on the snapped heading for this chunk. */
