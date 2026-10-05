@@ -858,7 +858,12 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 		}
 		return 2;
 	}
+	/* SV_MoveStep sets FL_ONGROUND on the landing. A step that found
+	   the floor and left the flag clear stopped MoveExecute after
+	   one chunk. */
+	pev->flags |= FL_ONGROUND;
 	pev->flags &= ~FL_PARTIALGROUND;
+	pev->velocity.z = 0.0f;
 	return 1;
 }
 
@@ -1866,10 +1871,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 		{
 			int kind;
+			int flags;
 
 			/* SV_MoveStep accepts the full column or nothing. A wall
 			   closer than this chunk refuses it, and the chase below
 			   sidesteps for this chunk only. */
+			flags = pev->flags;
 			kind = EFW_MoveStep( pev, start, wish, &stepLand );
 			if( kind <= 0 )
 			{
@@ -1894,11 +1901,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				/* SV_StepDirection puts the origin back when angles.y
 				   minus ideal_yaw is still between 45 and 315. The
 				   facing has not caught up, so this chunk does not
-				   move and the chase is not tried. */
+				   move and the chase is not tried. The ground flag
+				   from that discarded landing is put back with it. */
 				if( delta > 45.0f && delta < 315.0f )
 				{
 					static int s_holdYaw;
 
+					pev->flags = flags;
 					if( s_holdYaw < 4 )
 					{
 						const char *tn = STRING( pev->targetname );
