@@ -1759,22 +1759,24 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				}
 				/* Stop() stores the idle ideal and this Move returns.
 				   TaskFail ("Failed to move") runs when m_moveWaitTime
-				   is already set, or when a block landed inside 0.2s of
-				   the previous wait (bits_MEMORY_MOVE_FAILED). That
-				   schedule idles for two seconds. The first block, with
-				   the bit clear, rebuilds the route and waits 0.1s. */
+				   is 0, or when bits_MEMORY_MOVE_FAILED is already set.
+				   That schedule idles for two seconds. A positive wait
+				   with the bit clear rebuilds the route and waits 0.1s.
+				   A miss inside 0.2s of that wait remembers the bit.
+				   MoveToTarget(ACT_WALK, 2) at 0x10005df5 is the path
+				   walk. A chase pushes 0. */
 				else if( pMon && cn && ( !strcmp( cn, "monster_patrol_guard" )
 					|| !strcmp( cn, "monster_efw_guard" )
 					|| !strcmp( cn, "monster_barney" ) ) )
 				{
-					int giveUp;
+					int retry;
 					float now;
 
 					pMon->Stop();
 					now = EFW_HostClock();
-					giveUp = ( pMon->m_moveWaitTime > 0.0f )
-						|| ( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED );
-					if( giveUp )
+					retry = ( pMon->m_moveWaitTime > 0.0f )
+						&& !( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED );
+					if( !retry )
 					{
 						pMon->SetActivity( ACT_IDLE );
 						pMon->m_movementActivity = ACT_IDLE;
@@ -1785,9 +1787,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 							if( s_pfail < 4 )
 							{
 								s_pfail++;
-								EFW_DebugPrint( "path fail %s act=%d",
+								EFW_DebugPrint( "path fail %s act=%d wait=%.0f",
 									( tn && tn[0] ) ? tn : "?",
-									(int)pMon->m_Activity );
+									(int)pMon->m_Activity,
+									pMon->m_moveWaitTime );
 							}
 						}
 					}
@@ -1802,10 +1805,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 							if( s_retry < 6 )
 							{
 								s_retry++;
-								EFW_DebugPrint( "move retry %s mem=%d act=%d",
+								EFW_DebugPrint( "move retry %s mem=%d act=%d wait=%.0f",
 									( tn && tn[0] ) ? tn : "?",
 									( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED ) ? 1 : 0,
-									(int)pMon->m_Activity );
+									(int)pMon->m_Activity,
+									pMon->m_moveWaitTime );
 							}
 						}
 					}
@@ -3298,7 +3302,10 @@ void CPatrolGuard::PatrolThink( void )
 			cornerDist = delta.Length();
 			moved = 0;
 			/* Move faces this corner, then ShouldAdvanceRoute. The leftover
-			   budget stays that distance and is spent along that facing. */
+			   budget stays that distance and is spent along that facing.
+			   StartTask at 0x10005df5 stores MoveToTarget(ACT_WALK, 2)
+			   before that walk, so a blocked step still retries. */
+			m_moveWaitTime = 2.0f;
 			if( m_Activity != ACT_WALK )
 				SetActivity( ACT_WALK );
 			{
@@ -3629,9 +3636,11 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 			pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
 	}
 	/* The corner within 8 is still this think's goal. AdvanceRoute runs
-	   after the leftover step, so SetActivity stays on the walk he is in. */
+	   after the leftover step, so SetActivity stays on the walk he is in.
+	   StartTask at 0x10005df5 stores MoveToTarget(ACT_WALK, 2). */
 	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
 	{
+		pMon->m_moveWaitTime = 2.0f;
 		if( pMon->m_Activity != ACT_WALK )
 			pMon->SetActivity( ACT_WALK );
 	}
