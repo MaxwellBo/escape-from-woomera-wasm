@@ -1170,14 +1170,20 @@ static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &e
 	return 0;
 }
 
-/* InsertWaypoint stores the apex at the current route index. The next
-   Move() faces that point until ShouldAdvanceRoute (8 units). A detour
-   is not a pure targetent route, so the lookahead target stays clear. */
+/* InsertWaypoint stores the apex, then RouteSimplify (0x1005d5a0)
+   rewrites that waypoint before the walk. Two points are enough to
+   run: a clear trace from here to the next point drops the apex, a
+   clear trace to the midpoint of the apex and that point stores the
+   midpoint, and a clear trace between the two midpoints stores both.
+   The constant at 0x100dd614 is 0.5. Fewer than two points returns
+   at 0x1005d5de. A detour is not a pure targetent route, so the
+   lookahead target stays clear until the chain is done. */
 struct EFW_DetourSlot
 {
 	entvars_t *pev;
-	Vector apex;
-	int on;
+	Vector pt[2];
+	int n;
+	int i;
 };
 
 static EFW_DetourSlot s_detour[8];
@@ -1192,9 +1198,9 @@ static EFW_DetourSlot *EFW_DetourSlotFor( entvars_t *pev, int create )
 		return NULL;
 	for( i = 0; i < 8; i++ )
 	{
-		if( s_detour[i].on && s_detour[i].pev == pev )
+		if( s_detour[i].n > 0 && s_detour[i].pev == pev )
 			return &s_detour[i];
-		if( freeSlot < 0 && !s_detour[i].on )
+		if( freeSlot < 0 && s_detour[i].n <= 0 )
 			freeSlot = i;
 	}
 	if( !create )
@@ -1202,7 +1208,8 @@ static EFW_DetourSlot *EFW_DetourSlotFor( entvars_t *pev, int create )
 	if( freeSlot < 0 )
 		freeSlot = 0;
 	s_detour[freeSlot].pev = pev;
-	s_detour[freeSlot].on = 0;
+	s_detour[freeSlot].n = 0;
+	s_detour[freeSlot].i = 0;
 	return &s_detour[freeSlot];
 }
 
@@ -1212,7 +1219,65 @@ static void EFW_ClearDetour( entvars_t *pev )
 
 	slot = EFW_DetourSlotFor( pev, 0 );
 	if( slot )
-		slot->on = 0;
+		slot->n = 0;
+}
+
+/* The apex and the point Move was walking are the two-waypoint route.
+   outN is 0 when the apex is dropped. */
+static int EFW_SimplifyDetour( entvars_t *pev, const Vector &apex, const Vector &next, edict_t *pTarget, Vector *out0, Vector *out1 )
+{
+	Vector cut;
+	Vector split;
+	const char *tn;
+	static int s_log;
+
+	if( !pev || !out0 || !out1 )
+		return 0;
+	tn = STRING( pev->targetname );
+	if( EFW_LocalMove( pev, pev->origin, next, NULL, pTarget, NULL ) == 2 )
+	{
+		if( s_log < 4 )
+		{
+			s_log++;
+			EFW_DebugPrint( "simplify drop %s next=%.0f %.0f",
+				( tn && tn[0] ) ? tn : "?", next.x, next.y );
+		}
+		return 0;
+	}
+	cut = ( next + apex ) * 0.5f;
+	split = ( apex + pev->origin ) * 0.5f;
+	if( EFW_LocalMove( pev, pev->origin, cut, NULL, pTarget, NULL ) == 2 )
+	{
+		*out0 = cut;
+		if( s_log < 4 )
+		{
+			s_log++;
+			EFW_DebugPrint( "simplify cut %s raw=%.0f %.0f cut=%.0f %.0f",
+				( tn && tn[0] ) ? tn : "?", apex.x, apex.y, cut.x, cut.y );
+		}
+		return 1;
+	}
+	if( EFW_LocalMove( pev, split, cut, NULL, pTarget, NULL ) == 2 )
+	{
+		*out0 = split;
+		*out1 = cut;
+		if( s_log < 4 )
+		{
+			s_log++;
+			EFW_DebugPrint( "simplify split %s raw=%.0f %.0f split=%.0f %.0f cut=%.0f %.0f",
+				( tn && tn[0] ) ? tn : "?", apex.x, apex.y,
+				split.x, split.y, cut.x, cut.y );
+		}
+		return 2;
+	}
+	*out0 = apex;
+	if( s_log < 4 )
+	{
+		s_log++;
+		EFW_DebugPrint( "simplify keep %s apex=%.0f %.0f",
+			( tn && tn[0] ) ? tn : "?", apex.x, apex.y );
+	}
+	return 1;
 }
 
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL )
@@ -1251,29 +1316,51 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	{
 		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
 
-		if( slot && slot->on )
+		if( slot && slot->n > 0 )
 		{
-			Vector ad = slot->apex - pev->origin;
+			Vector ad;
 			float away;
+			const char *tn = STRING( pev->targetname );
 
+			if( slot->i < 0 || slot->i >= slot->n )
+				slot->i = 0;
+			ad = slot->pt[slot->i] - pev->origin;
 			ad.z = 0.0f;
 			away = ad.Length();
 			if( away <= 8.0f )
 			{
-				const char *tn = STRING( pev->targetname );
 				static int s_arrive;
 
-				slot->on = 0;
-				if( s_arrive < 3 )
+				slot->i++;
+				if( slot->i >= slot->n )
 				{
-					s_arrive++;
-					EFW_DebugPrint( "detour arrive %s dist=%.1f",
-						( tn && tn[0] ) ? tn : "?", away );
+					slot->n = 0;
+					if( s_arrive < 3 )
+					{
+						s_arrive++;
+						EFW_DebugPrint( "detour arrive %s dist=%.1f",
+							( tn && tn[0] ) ? tn : "?", away );
+					}
+				}
+				else
+				{
+					static int s_next;
+
+					moveGoal = slot->pt[slot->i];
+					onDetour = 1;
+					pTarget = NULL;
+					if( s_next < 3 )
+					{
+						s_next++;
+						EFW_DebugPrint( "detour next %s dist=%.1f at=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", away,
+							moveGoal.x, moveGoal.y );
+					}
 				}
 			}
 			else
 			{
-				moveGoal = slot->apex;
+				moveGoal = slot->pt[slot->i];
 				onDetour = 1;
 				pTarget = NULL;
 			}
@@ -1428,17 +1515,44 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				EFW_DetourSlot *keep = EFW_DetourSlotFor( pev, 1 );
 				static int s_detour;
+				Vector cut0;
+				Vector cut1;
+				int simplified;
 
-				if( keep )
-				{
-					keep->apex = apex;
-					keep->on = 1;
-				}
 				if( s_detour < 4 )
 				{
 					s_detour++;
 					EFW_DebugPrint( "local detour %s apex=%.0f %.0f reached=%.0f",
 						( tn && tn[0] ) ? tn : "?", apex.x, apex.y, reached );
+				}
+				/* A chain already in progress keeps the raw apex in front.
+				   The first insert is the two-point route RouteSimplify sees. */
+				simplified = 0;
+				if( keep && !onDetour )
+					simplified = EFW_SimplifyDetour( pev, apex, moveGoal, pTarget, &cut0, &cut1 );
+				if( keep && !onDetour && simplified > 0 )
+				{
+					keep->pt[0] = cut0;
+					keep->i = 0;
+					keep->n = 1;
+					if( simplified > 1 )
+					{
+						keep->pt[1] = cut1;
+						keep->n = 2;
+					}
+					chaseGoal = cut0;
+				}
+				else if( keep && !onDetour )
+				{
+					keep->n = 0;
+					chaseGoal = moveGoal;
+				}
+				else if( keep )
+				{
+					keep->pt[0] = apex;
+					keep->i = 0;
+					keep->n = 1;
+					chaseGoal = apex;
 				}
 			}
 		}
