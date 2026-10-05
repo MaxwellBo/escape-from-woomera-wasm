@@ -2669,12 +2669,22 @@ void CRefugee::IdleThink( void )
 			speed = m_flGroundSpeed * pev->framerate;
 			if( speed < 1.0f && m_Activity != ACT_IDLE )
 				speed = 64.0f;
-			dt = EFW_HostInterval();
+			/* SetActivity just stored animtime = now. StepNpc would push
+			   that stamp forward and the advance below would play the new
+			   sequence on this same think. MoveExecute's interval is 0, so
+			   this pulse does not step. */
 			if( posed )
+			{
 				dt = 0.0f;
-			else if( dt < 0.001f )
-				dt = 0.05f;
-			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
+				moved = 0;
+			}
+			else
+			{
+				dt = EFW_HostInterval();
+				if( dt < 0.001f )
+					dt = 0.05f;
+				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
+			}
 			if( s_follow < 8 )
 			{
 				s_follow++;
