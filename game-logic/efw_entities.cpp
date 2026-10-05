@@ -1411,6 +1411,40 @@ static void EFW_EngineChangeYaw( entvars_t *pev )
 	pev->angles.y = UTIL_AngleMod( current + move );
 }
 
+/* AdvanceNpcAnim leaves animtime 0.25s ahead of sv.time so the client,
+   which leads by that much, draws this frame. A pump whose clock lands
+   on that stamp looks like ResetSequenceInfo (animtime == now) and the
+   step returns before it walks. The stamp is remembered per edict so
+   that catch-up still spends the pump. A real reset stores now and
+   does not match the stamp. */
+static float s_animLead[1200];
+
+static int EFW_AnimLeadCaught( entvars_t *pev )
+{
+	int slot;
+
+	if( !pev )
+		return 0;
+	slot = ENTINDEX( ENT( pev ) );
+	if( slot <= 0 || slot >= 1200 )
+		return 0;
+	if( s_animLead[slot] <= 0.0f )
+		return 0;
+	return fabsf( pev->animtime - s_animLead[slot] ) <= 0.001f;
+}
+
+static void EFW_AnimLeadStamp( entvars_t *pev )
+{
+	int slot;
+
+	if( !pev )
+		return;
+	slot = ENTINDEX( ENT( pev ) );
+	if( slot <= 0 || slot >= 1200 )
+		return;
+	s_animLead[slot] = pev->animtime;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL, const Vector *pStepToward = NULL )
 {
 	Vector delta;
@@ -1541,13 +1575,32 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	   is not another hold. dt is the interval StudioFrameAdvance returned. */
 	{
 		float skew = pev->animtime - gpGlobals->time;
+		int lead;
 		if( skew < 0.0f )
 			skew = -skew;
-		if( dt < 0.001f || skew <= 0.001f )
+		/* A caught-up client stamp is still this pump's step. A fresh
+		   ResetSequenceInfo does not match the stamp, and a zero
+		   interval from StudioFrameAdvance still holds the feet. */
+		lead = EFW_AnimLeadCaught( pev );
+		if( dt < 0.001f || ( skew <= 0.001f && !lead ) )
 		{
-			if( skew <= 0.001f )
+			if( skew <= 0.001f && !lead )
 				pev->animtime = gpGlobals->time + 0.25f;
 			return 0;
+		}
+		if( lead && skew <= 0.001f )
+		{
+			static int s_leadStep;
+
+			if( s_leadStep < 4 )
+			{
+				const char *tn = STRING( pev->targetname );
+
+				s_leadStep++;
+				EFW_DebugPrint( "anim lead %s iv=%.3f origin=%.0f %.0f",
+					( tn && tn[0] ) ? tn : "?", dt,
+					pev->origin.x, pev->origin.y );
+			}
 		}
 	}
 	total = speed * dt;
@@ -2152,7 +2205,26 @@ static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 	skew = pev->animtime - gpGlobals->time;
 	if( skew < 0.0f )
 		skew = -skew;
-	if( skew <= 0.001f )
+	/* Time landing on the +0.25 client stamp is not a sequence reset.
+	   That think still advances by the pump. ResetSequenceInfo stores
+	   now, which misses the stamp, and keeps interval 0. */
+	if( EFW_AnimLeadCaught( pev ) )
+	{
+		flInterval = EFW_HostInterval();
+		if( skew <= 0.001f )
+		{
+			static int s_leadAnim;
+
+			if( s_leadAnim < 4 )
+			{
+				s_leadAnim++;
+				EFW_DebugPrint( "anim lead %s iv=%.3f origin=%.0f %.0f",
+					( name && name[0] ) ? name : "?", flInterval,
+					pev->origin.x, pev->origin.y );
+			}
+		}
+	}
+	else if( skew <= 0.001f )
 		flInterval = 0.0f;
 	else
 		flInterval = EFW_HostInterval();
@@ -2206,6 +2278,7 @@ static float EFW_AdvanceNpcAnim( CBaseMonster *pMon, const char *name )
 	   Leave it 0.25s ahead so the next pump is not another hold and the
 	   client does not add a second of sequence on top of this frame. */
 	pev->animtime = gpGlobals->time + 0.25f;
+	EFW_AnimLeadStamp( pev );
 	return flInterval;
 }
 
