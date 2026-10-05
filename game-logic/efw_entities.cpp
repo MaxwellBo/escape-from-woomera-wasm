@@ -1979,6 +1979,26 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 			if( !room )
 			{
+			/* MoveExecute (0x1005f704) copies the movement activity
+			   back onto the ideal before it spends the corner. Stop
+			   had stored idle. Leaving that idle made the next think
+			   stand. A failed triangle returns above this copy. */
+			if( pSelfMon && cn && !strcmp( cn, "monster_refugee" ) )
+			{
+				pSelfMon->m_IdealActivity = pSelfMon->m_movementActivity;
+				if( tn && !strcmp( tn, "Amir" ) )
+				{
+					static int s_resume;
+
+					if( s_resume < 4 )
+					{
+						s_resume++;
+						EFW_DebugPrint( "walk resume Amir ideal=%d origin=%.0f %.0f",
+							(int)pSelfMon->m_IdealActivity,
+							pev->origin.x, pev->origin.y );
+					}
+				}
+			}
 			chaseGoal = apex;
 			{
 				EFW_DetourSlot *keep = EFW_DetourSlotFor( pev, 1 );
@@ -2952,9 +2972,9 @@ void CRefugee::IdleThink( void )
 						tn, moved, pev->sequence, (int)m_Activity, speed, dt );
 				}
 			}
-			/* Stop() at 0x1005f453 stored ACT_IDLE. RunAI plays that on
-			   the next think and Move() then spends a zero ground
-			   speed. Putting the walk ideal back kept him walking. */
+			/* A failed triangle returned with the idle ideal Stop stored.
+			   MoveExecute already copied the walk back when the corner
+			   was kept, so that walk is left alone here. */
 			if( m_IdealActivity != ACT_IDLE && m_IdealActivity != m_movementActivity )
 				m_IdealActivity = m_movementActivity;
 			if( tn && !strcmp( tn, "Amir" ) && m_IdealActivity == ACT_IDLE )
