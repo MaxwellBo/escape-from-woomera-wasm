@@ -3222,9 +3222,8 @@ void CPatrolGuard::PatrolThink( void )
 	/* FUN_1005d160 calls RunAI (vtable+0x120) before the anim.
 	   That syncs m_Activity to m_IdealActivity. MoveExecute has
 	   not copied the new movement activity yet, so this is the
-	   previous think's pose. Alert 2/3 is the same sync. */
-	if( ( m_iAlert == 2 || m_iAlert == 3 || m_iAlert == 4 )
-		&& m_Activity != m_IdealActivity )
+	   previous think's pose. A path start is the same sync. */
+	if( m_Activity != m_IdealActivity )
 	{
 		SetActivity( m_IdealActivity );
 		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
@@ -3240,7 +3239,7 @@ void CPatrolGuard::PatrolThink( void )
 						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
 				}
 			}
-			else
+			else if( m_iAlert == 2 || m_iAlert == 3 )
 			{
 				static int s_ipose;
 
@@ -3248,6 +3247,17 @@ void CPatrolGuard::PatrolThink( void )
 				{
 					s_ipose++;
 					EFW_DebugPrint( "investigate pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+				}
+			}
+			else
+			{
+				static int s_ppose;
+
+				if( s_ppose < 4 )
+				{
+					s_ppose++;
+					EFW_DebugPrint( "path pose %s seq=%d act=%d gs=%.0f frame=%.1f",
 						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
 				}
 			}
@@ -3425,11 +3435,23 @@ void CPatrolGuard::PatrolThink( void )
 			moved = 0;
 			/* Move faces this corner, then ShouldAdvanceRoute. The leftover
 			   budget stays that distance and is spent along that facing.
-			   StartTask at 0x10005df5 stores MoveToTarget(ACT_WALK, 2)
-			   before that walk, so a blocked step still retries. */
+			   0x10005df5 pushes wait 2 and ACT_WALK, then MoveToTarget
+			   (0x1005d500). That stores the movement activity and does
+			   not SetActivity, so a blocked step still retries and this
+			   step keeps the sequence already playing. */
 			m_moveWaitTime = 2.0f;
-			if( m_Activity != ACT_WALK )
-				SetActivity( ACT_WALK );
+			m_movementActivity = ACT_WALK;
+			if( tn && !strcmp( tn, "Patrol_Guard_2" ) && m_Activity != ACT_WALK )
+			{
+				static int s_pstore;
+
+				if( s_pstore < 4 )
+				{
+					s_pstore++;
+					EFW_DebugPrint( "path store %s seq=%d act=%d gs=%.0f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
+				}
+			}
 			{
 				CBaseEntity *next = NULL;
 				Vector faceAt = m_pGoalEnt->pev->origin;
@@ -3445,9 +3467,13 @@ void CPatrolGuard::PatrolThink( void )
 						haveNext = 1;
 					}
 				}
-			if( m_Activity == ACT_WALK && cornerDist > 1.0f )
+			if( cornerDist > 1.0f )
 			{
-				speed = EFW_NpcGroundSpeed( this );
+				/* MoveExecute uses the sequence ground speed. An idle
+				   sequence is 0, and that step does not slide. */
+				speed = m_flGroundSpeed * pev->framerate;
+				if( speed < 1.0f && m_Activity != ACT_IDLE )
+					speed = 64.0f;
 				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
 					haveNext ? &nextAt : NULL );
 				{
@@ -3459,6 +3485,30 @@ void CPatrolGuard::PatrolThink( void )
 							( tn && tn[0] ) ? tn : "?", moved, pev->sequence, speed,
 							pev->origin.x, pev->origin.y );
 					}
+				}
+				if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
+				{
+					static int s_pstep;
+
+					if( s_pstep < 6 )
+					{
+						s_pstep++;
+						EFW_DebugPrint( "path step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
+							tn, moved, pev->sequence, (int)m_Activity, speed, flInterval );
+					}
+				}
+			}
+			/* MoveExecute copies the stored walk into ideal after the step. */
+			if( m_IdealActivity != m_movementActivity )
+			{
+				static int s_pideal;
+
+				m_IdealActivity = m_movementActivity;
+				if( tn && !strcmp( tn, "Patrol_Guard_2" ) && s_pideal < 4 )
+				{
+					s_pideal++;
+					EFW_DebugPrint( "path ideal %s seq=%d act=%d gs=%.0f",
+						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
 				}
 			}
 			if( haveNext )
