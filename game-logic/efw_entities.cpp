@@ -1375,6 +1375,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	float moved;
 	int chunks;
 	int onDetour;
+	int cutCorner;
+	float cutDist;
 	Vector chaseGoal;
 
 	if( !pev || s_npcStep )
@@ -1391,10 +1393,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( support == 0 )
 			return 0;
 	}
-	/* A stored apex is the current waypoint. Within 8 units the route
-	   advances and this think walks the caller's goal again. */
+	/* A stored apex is the current waypoint. Within 8 units this think
+	   still faces that point. ShouldAdvanceRoute runs after the local
+	   move, so the slot advances only once that probe has not failed. */
 	moveGoal = goal;
 	onDetour = 0;
+	cutCorner = 0;
+	cutDist = 0.0f;
 	{
 		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
 
@@ -1402,68 +1407,44 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		{
 			Vector ad;
 			float away;
-			const char *tn = STRING( pev->targetname );
 
 			if( slot->i < 0 || slot->i >= slot->n )
 				slot->i = 0;
 			ad = slot->pt[slot->i] - pev->origin;
 			ad.z = 0.0f;
 			away = ad.Length();
+			moveGoal = slot->pt[slot->i];
+			onDetour = 1;
+			pTarget = NULL;
 			if( away <= 8.0f )
 			{
-				static int s_arrive;
-
-				slot->i++;
-				if( slot->i >= slot->n )
-				{
-					slot->n = 0;
-					if( s_arrive < 3 )
-					{
-						s_arrive++;
-						EFW_DebugPrint( "detour arrive %s dist=%.1f",
-							( tn && tn[0] ) ? tn : "?", away );
-					}
-				}
-				else
-				{
-					static int s_next;
-
-					moveGoal = slot->pt[slot->i];
-					onDetour = 1;
-					pTarget = NULL;
-					if( s_next < 3 )
-					{
-						s_next++;
-						EFW_DebugPrint( "detour next %s dist=%.1f at=%.0f %.0f",
-							( tn && tn[0] ) ? tn : "?", away,
-							moveGoal.x, moveGoal.y );
-					}
-				}
-			}
-			else
-			{
-				moveGoal = slot->pt[slot->i];
-				onDetour = 1;
-				pTarget = NULL;
+				cutCorner = 1;
+				cutDist = away;
 			}
 		}
 	}
 	/* Move() normalizes the 3D delta for the facing vector, then
 	   stores Length2D. The step budget is that ground distance,
 	   capped at 200. A goal above the hull keeps the same horizontal
-	   budget as a goal on the floor, so the walk ends on that point. */
+	   budget as a goal on the floor, so the walk ends on that point.
+	   A corner within 8 keeps that leftover as the budget. */
 	delta = moveGoal - pev->origin;
 	len3 = delta.Length();
 	delta.z = 0.0f;
 	len = delta.Length();
-	if( len < 1.0f )
+	if( len < 1.0f && !cutCorner )
 		return 0;
-	cap = len;
+	if( cutCorner )
+		cap = cutDist;
+	else
+		cap = len;
 	if( cap > 200.0f )
 		cap = 200.0f;
 	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
 	   once, before the 16-unit chunks, including the think whose
-	   StudioFrameAdvance interval is 0. */
+	   StudioFrameAdvance interval is 0. A leftover under 1 unit has
+	   no direction to normalize; the previous think already faced it. */
+	if( len >= 1.0f )
 	{
 		CBaseEntity *pEnt = CBaseEntity::Instance( ENT( pev ) );
 		CBaseMonster *pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
@@ -1512,7 +1493,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	total = speed * dt;
 	if( total > cap )
 		total = cap;
-	if( total < 0.001f )
+	/* A corner with no leftover still advances below. Any other
+	   zero wish returns before the probe. */
+	if( total < 0.001f && !cutCorner )
 		return 0;
 	{
 		const char *tn = STRING( pev->targetname );
@@ -1717,6 +1700,52 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 		}
 	}
+	/* ShouldAdvanceRoute (0x1005f6e0) runs after a clear local move or
+	   a finished triangulate. The facing and the budget stay on the
+	   point this think already aimed at. The chase goal becomes the
+	   route point AdvanceRoute just stored. The last point clears the
+	   slot the way MovementComplete does, and this think still spends
+	   only the leftover. */
+	if( cutCorner )
+	{
+		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
+		const char *tn = STRING( pev->targetname );
+
+		if( slot && slot->n > 0 )
+		{
+			slot->i++;
+			if( slot->i >= slot->n )
+			{
+				static int s_arrive;
+
+				slot->n = 0;
+				if( s_arrive < 4 )
+				{
+					s_arrive++;
+					EFW_DebugPrint( "detour arrive %s dist=%.1f wish=%.1f",
+						( tn && tn[0] ) ? tn : "?", cutDist, total );
+				}
+			}
+			else
+			{
+				static int s_remain;
+
+				chaseGoal = slot->pt[slot->i];
+				if( s_remain < 4 )
+				{
+					s_remain++;
+					EFW_DebugPrint( "detour remain %s dist=%.1f wish=%.1f next=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", cutDist, total,
+						chaseGoal.x, chaseGoal.y );
+				}
+			}
+		}
+		if( total < 0.001f )
+		{
+			s_npcStep = 0;
+			return 0;
+		}
+	}
 	start = pev->origin;
 	landed = start;
 	moved = 0.0f;
@@ -1835,7 +1864,10 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
 		   instead of stopping on the wall. ideal_yaw stays, so the next
 		   chunk tries that heading again. */
-		if( stepLen < 0.5f )
+		/* A leftover under half a unit is still the chunk that was
+		   asked for. Chase only when the landing is also under half
+		   of that request. */
+		if( stepLen < 0.5f && stepLen < step * 0.5f )
 		{
 			Vector chased;
 			int chase;
@@ -1852,14 +1884,14 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 			stepLand = chased;
 			stepLen = ( stepLand - start ).Length();
-			if( stepLen < 0.5f )
+			if( stepLen < 0.5f && stepLen < step * 0.5f )
 				break;
 		}
 		/* The air step already cleared FL_ONGROUND. Another chunk would
 		   be MoveToOrigin with that flag clear, which does not move. */
 		if( !( pev->flags & FL_ONGROUND ) )
 		{
-			if( stepLen >= 0.5f )
+			if( stepLen >= 0.5f || stepLen >= step * 0.5f )
 			{
 				landed = stepLand;
 				start = stepLand;
