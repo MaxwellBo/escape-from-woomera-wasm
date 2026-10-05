@@ -1361,6 +1361,70 @@ static void EFW_ClearDetour( entvars_t *pev )
 		slot->n = 0;
 }
 
+static int EFW_RouteSimplify( entvars_t *pev, const Vector *inRoute, int count, edict_t *pTarget, Vector *outRoute );
+
+/* BuildRoute (0x1005e720) copies the target, then the local move.
+   A blocked line triangulates. The apex is the first waypoint, and
+   Move() on the start think faces that point. A clear line keeps
+   the target. The probe must not leave the hull where it walked. */
+static void EFW_SeedBlockedRoute( entvars_t *pev, const Vector &goal, edict_t *pTarget )
+{
+	float reached;
+	Vector apex;
+	Vector saved;
+	int flags;
+	int local;
+
+	if( !pev )
+		return;
+	EFW_ClearDetour( pev );
+	saved = pev->origin;
+	flags = pev->flags;
+	reached = 0.0f;
+	local = EFW_LocalMove( pev, saved, goal, &reached, pTarget );
+	pev->origin = saved;
+	pev->flags = flags;
+	if( local != 0 )
+		return;
+	if( !EFW_Triangulate( pev, saved, goal, reached, &apex, pTarget ) )
+		return;
+	{
+		Vector inRoute[2];
+		Vector outRoute[16];
+		EFW_DetourSlot *slot;
+		int outCount;
+		int ncopy;
+		int k;
+
+		inRoute[0] = apex;
+		inRoute[1] = goal;
+		outCount = EFW_RouteSimplify( pev, inRoute, 2, pTarget, outRoute );
+		if( outCount <= 1 )
+			return;
+		slot = EFW_DetourSlotFor( pev, 1 );
+		if( !slot )
+			return;
+		ncopy = outCount;
+		if( ncopy > 8 )
+			ncopy = 8;
+		for( k = 0; k < ncopy; k++ )
+			slot->pt[k] = outRoute[k];
+		slot->i = 0;
+		slot->n = ncopy;
+		{
+			const char *tn = STRING( pev->targetname );
+			static int s_bend;
+
+			if( tn && !strcmp( tn, "Amir" ) && s_bend < 4 )
+			{
+				s_bend++;
+				EFW_DebugPrint( "walk bend Amir apex=%.0f %.0f goal=%.0f %.0f reached=%.0f",
+					slot->pt[0].x, slot->pt[0].y, goal.x, goal.y, reached );
+			}
+		}
+	}
+}
+
 /* RouteSimplify over the points InsertWaypoint just wrote. The last
    point is always kept. outCount is 1 when every earlier point was cut. */
 static int EFW_RouteSimplify( entvars_t *pev, const Vector *inRoute, int count, edict_t *pTarget, Vector *outRoute )
@@ -2625,6 +2689,10 @@ void CRefugee::IdleThink( void )
 			   300 gates still use the live player. */
 			m_vecMoveGoal = pPlayer->pev->origin;
 			m_moveWaitTime = 0.0f;
+			/* The route is this spot. A wall on the way stores the
+			   corner in front of it, the way BuildRoute does before
+			   the first Move(). */
+			EFW_SeedBlockedRoute( pev, m_vecMoveGoal, pPlayer->edict() );
 			EFW_DebugPrint( "now walking %s seq=%d act=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity, dist );
 			if( tn && !strcmp( tn, "Amir" ) )
@@ -2934,7 +3002,16 @@ void CRefugee::IdleThink( void )
 
 		if( yawSpeed < 1 )
 			yawSpeed = 70;
-		MakeIdealYaw( pPlayer->pev->origin );
+		{
+			/* Move() faces the first route point. A blocked build
+			   stored the corner there. A clear build stored the spot. */
+			Vector faceAt = m_vecMoveGoal;
+			EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
+
+			if( slot && slot->n > 0 && slot->i >= 0 && slot->i < slot->n )
+				faceAt = slot->pt[slot->i];
+			MakeIdealYaw( faceAt );
+		}
 		EFW_PeChangeYaw( this, yawSpeed );
 		if( tn && !strcmp( tn, "Amir" ) )
 		{
