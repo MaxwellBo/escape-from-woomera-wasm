@@ -2621,14 +2621,17 @@ void CRefugee::IdleThink( void )
 		}
 		else if( m_movementGoal == MOVEGOAL_TARGETENT
 			&& m_movementActivity == ACT_WALK
-			&& dist > 100.0f && dist < 300.0f )
+			&& dist > 100.0f )
 		{
-			/* FUN_1005d160 calls RunAI before StudioFrameAdvance, then
-			   vtable+0x154 (0x1005f200) while the goal is still the
-			   player. A close left the ideal at ACT_WALK, so this pulse
-			   plays that walk and the advance interval is 0. The step
-			   uses the sequence already playing. An idle sequence is 0
-			   and does not slide. */
+			/* 0x100c65bd gates the start on dist < 300. After that,
+			   FUN_1005d160 still calls Move() until dist < 100 sets
+			   idle. Backing past 300 was leaving him on the walk with
+			   no step. FUN_1005d160 calls RunAI before
+			   StudioFrameAdvance, then vtable+0x154 (0x1005f200) while
+			   the goal is still the player. A close left the ideal at
+			   ACT_WALK, so this pulse plays that walk and the advance
+			   interval is 0. The step uses the sequence already playing.
+			   An idle sequence is 0 and does not slide. */
 			int posed = 0;
 			float speed;
 			float dt;
@@ -2700,6 +2703,17 @@ void CRefugee::IdleThink( void )
 				s_startArm = 2;
 				EFW_DebugPrint( "refugee start step %s moved=%d seq=%d act=%d frame=%.1f iv=%.3f",
 					tn, moved, pev->sequence, (int)m_Activity, pev->frame, dt );
+			}
+			if( tn && !strcmp( tn, "Amir" ) && dist >= 300.0f )
+			{
+				static int s_far;
+
+				if( s_far < 6 )
+				{
+					s_far++;
+					EFW_DebugPrint( "refugee far %s moved=%d dist=%.0f origin=%.0f %.0f",
+						tn, moved, dist, pev->origin.x, pev->origin.y );
+				}
 			}
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
