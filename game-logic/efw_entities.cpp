@@ -2928,32 +2928,18 @@ void CPatrolGuard::PatrolThink( void )
 		if( m_pGoalEnt )
 		{
 			Vector delta = m_pGoalEnt->pev->origin - pev->origin;
+			float cornerDist;
 			float speed;
 			int moved;
 			delta.z = 0;
-			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
-			if( delta.Length() <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
+			cornerDist = delta.Length();
+			moved = 0;
+			/* Same leftover as Move: face this corner, spend at most that
+			   distance, then AdvanceRoute. The next corner is the next think. */
+			if( m_Activity != ACT_WALK )
+				SetActivity( ACT_WALK );
+			if( m_Activity == ACT_WALK && cornerDist > 1.0f )
 			{
-				{
-					static int s_corner;
-					if( s_corner < 4 )
-					{
-						s_corner++;
-						EFW_DebugPrint( "corner advance %s dist=%.1f",
-							( tn && tn[0] ) ? tn : "?", delta.Length() );
-					}
-				}
-				m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
-				if( m_pGoalEnt )
-				{
-					delta = m_pGoalEnt->pev->origin - pev->origin;
-					delta.z = 0;
-				}
-			}
-			if( m_pGoalEnt && delta.Length() > 8.0f )
-			{
-				if( m_Activity != ACT_WALK )
-					SetActivity( ACT_WALK );
 				speed = EFW_NpcGroundSpeed( this );
 				moved = EFW_StepNpc( pev, m_pGoalEnt->pev->origin, speed, flInterval );
 				{
@@ -2965,6 +2951,26 @@ void CPatrolGuard::PatrolThink( void )
 							( tn && tn[0] ) ? tn : "?", moved, pev->sequence, speed,
 							pev->origin.x, pev->origin.y );
 					}
+				}
+			}
+			if( cornerDist <= 8.0f && !FStringNull( m_pGoalEnt->pev->target ) )
+			{
+				CBaseEntity *next;
+
+				next = UTIL_FindEntityByTargetname( NULL, STRING( m_pGoalEnt->pev->target ) );
+				if( next )
+				{
+					static int s_hold;
+
+					if( s_hold < 4 )
+					{
+						s_hold++;
+						EFW_DebugPrint( "corner hold %s dist=%.1f moved=%d origin=%.0f %.0f next=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", cornerDist, moved,
+							pev->origin.x, pev->origin.y,
+							next->pev->origin.x, next->pev->origin.y );
+					}
+					m_pGoalEnt = next;
 				}
 			}
 		}
@@ -3220,31 +3226,12 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 	{
 		if( !pMon->m_pGoalEnt )
 			pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
-		if( pMon->m_pGoalEnt )
-		{
-			Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
-			delta.z = 0;
-			/* FUN_1005f6e0 ShouldAdvanceRoute: waypoint dist <= 8. */
-			if( delta.Length() <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
-			{
-				{
-					static int s_corner;
-					if( s_corner < 4 )
-					{
-						s_corner++;
-						EFW_DebugPrint( "corner advance %s dist=%.1f",
-							tn, delta.Length() );
-					}
-				}
-				pMon->m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
-			}
-		}
 	}
+	/* The corner within 8 is still this think's goal. AdvanceRoute runs
+	   after the leftover step, so SetActivity stays on the walk he is in. */
 	if( pMon->m_pGoalEnt && !FStringNull( pev->target ) )
 	{
-		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
-		delta.z = 0;
-		if( delta.Length() > 8.0f && pMon->m_Activity != ACT_WALK )
+		if( pMon->m_Activity != ACT_WALK )
 			pMon->SetActivity( ACT_WALK );
 	}
 	else if( pMon->m_Activity == ACT_RESET || pMon->m_Activity == ACT_WALK )
@@ -3266,10 +3253,15 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 	if( pMon->m_pGoalEnt && pMon->m_Activity == ACT_WALK )
 	{
 		Vector delta = pMon->m_pGoalEnt->pev->origin - pev->origin;
+		float cornerDist;
 		float speed;
 		int moved;
 		delta.z = 0;
-		if( delta.Length() > 8.0f )
+		cornerDist = delta.Length();
+		moved = 0;
+		/* ShouldAdvanceRoute uses the distance from the start of Move.
+		   A corner inside 8 spends that leftover, then the route moves on. */
+		if( cornerDist > 1.0f )
 		{
 			speed = EFW_NpcGroundSpeed( pMon );
 			moved = EFW_StepNpc( pev, pMon->m_pGoalEnt->pev->origin, speed, flInterval );
@@ -3281,6 +3273,26 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 					EFW_DebugPrint( "officer step %s moved=%d seq=%d spd=%.0f origin=%.0f %.0f",
 						tn, moved, pev->sequence, speed, pev->origin.x, pev->origin.y );
 				}
+			}
+		}
+		if( cornerDist <= 8.0f && !FStringNull( pMon->m_pGoalEnt->pev->target ) )
+		{
+			CBaseEntity *next;
+
+			next = UTIL_FindEntityByTargetname( NULL, STRING( pMon->m_pGoalEnt->pev->target ) );
+			if( next )
+			{
+				static int s_hold;
+
+				if( s_hold < 4 )
+				{
+					s_hold++;
+					EFW_DebugPrint( "corner hold %s dist=%.1f moved=%d origin=%.0f %.0f next=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", cornerDist, moved,
+						pev->origin.x, pev->origin.y,
+						next->pev->origin.x, next->pev->origin.y );
+				}
+				pMon->m_pGoalEnt = next;
 			}
 		}
 	}
