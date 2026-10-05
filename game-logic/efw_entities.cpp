@@ -1778,8 +1778,15 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 						&& !( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED );
 					if( !retry )
 					{
+						/* The fail schedule starts at TASK_STOP_MOVING.
+						   That is RouteClear (0x1005d290): goal none,
+						   idle, and the move-failed bit cleared, so the
+						   walk that starts after the two seconds can
+						   retry. */
 						pMon->SetActivity( ACT_IDLE );
 						pMon->m_movementActivity = ACT_IDLE;
+						pMon->m_movementGoal = MOVEGOAL_NONE;
+						pMon->Forget( bits_MEMORY_MOVE_FAILED );
 						pMon->m_flMoveWaitFinished = now + 2.0f;
 						{
 							static int s_pfail;
@@ -1787,10 +1794,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 							if( s_pfail < 4 )
 							{
 								s_pfail++;
-								EFW_DebugPrint( "path fail %s act=%d wait=%.0f",
+								EFW_DebugPrint( "path fail %s act=%d wait=%.0f mem=%d",
 									( tn && tn[0] ) ? tn : "?",
 									(int)pMon->m_Activity,
-									pMon->m_moveWaitTime );
+									pMon->m_moveWaitTime,
+									( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED ) ? 1 : 0 );
 							}
 						}
 					}
