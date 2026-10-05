@@ -1049,17 +1049,17 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( support == 0 )
 			return 0;
 	}
-	/* Move() measures the waypoint in 3D, then shrinks this think so
-	   groundSpeed * interval stays inside min(that distance, 200).
-	   The step itself stays horizontal. A goal above the hull still
-	   spends that budget past the goal's ground point. */
+	/* Move() normalizes the 3D delta for the facing vector, then
+	   stores Length2D. The step budget is that ground distance,
+	   capped at 200. A goal above the hull keeps the same horizontal
+	   budget as a goal on the floor, so the walk ends on that point. */
 	delta = goal - pev->origin;
 	len3 = delta.Length();
-	cap = len3;
 	delta.z = 0.0f;
 	len = delta.Length();
 	if( len < 1.0f )
 		return 0;
+	cap = len;
 	if( cap > 200.0f )
 		cap = 200.0f;
 	/* Move() faces the goal with MakeIdealYaw + ChangeYaw(yaw_speed)
@@ -1119,7 +1119,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		const char *tn = STRING( pev->targetname );
 		static int s_budget;
 
-		if( s_budget < 4 && cap > len + 0.5f )
+		if( s_budget < 4 && len3 > len + 0.5f )
 		{
 			s_budget++;
 			EFW_DebugPrint( "step budget %s dist2=%.0f dist3=%.0f wish=%.1f",
@@ -1142,9 +1142,8 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		float step;
 		float stepLen;
 
-		/* MoveExecute spends the budget in 16-unit chunks. It does not
-		   shorten a chunk to the live ground distance, so the last
-		   chunk can pass the goal's ground point. */
+		/* MoveExecute spends the Length2D budget in 16-unit chunks.
+		   The last chunk is the remainder of that ground distance. */
 		step = total;
 		if( step > 16.0f )
 			step = 16.0f;
