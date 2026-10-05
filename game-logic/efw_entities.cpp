@@ -1170,17 +1170,64 @@ static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &e
 	return 0;
 }
 
+/* InsertWaypoint stores the apex at the current route index. The next
+   Move() faces that point until ShouldAdvanceRoute (8 units). A detour
+   is not a pure targetent route, so the lookahead target stays clear. */
+struct EFW_DetourSlot
+{
+	entvars_t *pev;
+	Vector apex;
+	int on;
+};
+
+static EFW_DetourSlot s_detour[8];
+
+static EFW_DetourSlot *EFW_DetourSlotFor( entvars_t *pev, int create )
+{
+	int i;
+	int freeSlot;
+
+	freeSlot = -1;
+	if( !pev )
+		return NULL;
+	for( i = 0; i < 8; i++ )
+	{
+		if( s_detour[i].on && s_detour[i].pev == pev )
+			return &s_detour[i];
+		if( freeSlot < 0 && !s_detour[i].on )
+			freeSlot = i;
+	}
+	if( !create )
+		return NULL;
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	s_detour[freeSlot].pev = pev;
+	s_detour[freeSlot].on = 0;
+	return &s_detour[freeSlot];
+}
+
+static void EFW_ClearDetour( entvars_t *pev )
+{
+	EFW_DetourSlot *slot;
+
+	slot = EFW_DetourSlotFor( pev, 0 );
+	if( slot )
+		slot->on = 0;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL )
 {
 	Vector delta;
 	Vector start;
 	Vector landed;
+	Vector moveGoal;
 	float len;
 	float len3;
 	float cap;
 	float total;
 	float moved;
 	int chunks;
+	int onDetour;
 	Vector chaseGoal;
 
 	if( !pev || s_npcStep )
@@ -1197,11 +1244,46 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		if( support == 0 )
 			return 0;
 	}
+	/* A stored apex is the current waypoint. Within 8 units the route
+	   advances and this think walks the caller's goal again. */
+	moveGoal = goal;
+	onDetour = 0;
+	{
+		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
+
+		if( slot && slot->on )
+		{
+			Vector ad = slot->apex - pev->origin;
+			float away;
+
+			ad.z = 0.0f;
+			away = ad.Length();
+			if( away <= 8.0f )
+			{
+				const char *tn = STRING( pev->targetname );
+				static int s_arrive;
+
+				slot->on = 0;
+				if( s_arrive < 3 )
+				{
+					s_arrive++;
+					EFW_DebugPrint( "detour arrive %s dist=%.1f",
+						( tn && tn[0] ) ? tn : "?", away );
+				}
+			}
+			else
+			{
+				moveGoal = slot->apex;
+				onDetour = 1;
+				pTarget = NULL;
+			}
+		}
+	}
 	/* Move() normalizes the 3D delta for the facing vector, then
 	   stores Length2D. The step budget is that ground distance,
 	   capped at 200. A goal above the hull keeps the same horizontal
 	   budget as a goal on the floor, so the walk ends on that point. */
-	delta = goal - pev->origin;
+	delta = moveGoal - pev->origin;
 	len3 = delta.Length();
 	delta.z = 0.0f;
 	len = delta.Length();
@@ -1225,7 +1307,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			if( yawSpeed < 1 )
 				yawSpeed = 70;
 			before = pev->angles.y;
-			pMon->MakeIdealYaw( goal );
+			pMon->MakeIdealYaw( moveGoal );
 			EFW_PeChangeYaw( pMon, yawSpeed );
 			{
 				static entvars_t *s_yawWho;
@@ -1275,12 +1357,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		}
 	}
 	s_npcStep = 1;
-	chaseGoal = goal;
+	chaseGoal = moveGoal;
 	/* Move() traces origin + normalize(3D delta) * flCheckDist before
 	   MoveExecute. A miss tries a detour. No detour means this think
 	   does not spend the step. */
 	{
-		Vector dir = goal - pev->origin;
+		Vector dir = moveGoal - pev->origin;
 		float dirLen = dir.Length();
 		Vector checkEnd;
 		float reached;
@@ -1305,6 +1387,18 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				EFW_DebugPrint( "local target %s cap=%.0f",
 					( tn && tn[0] ) ? tn : "?", cap );
 			}
+			else if( onDetour )
+			{
+				static int s_keep;
+
+				if( s_keep < 4 )
+				{
+					s_keep++;
+					EFW_DebugPrint( "detour keep %s dist=%.0f at=%.0f %.0f apex=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?", len,
+						pev->origin.x, pev->origin.y, moveGoal.x, moveGoal.y );
+				}
+			}
 			else if( s_clear < 2 && tn && !strcmp( tn, "efw_electrician" ) )
 			{
 				s_clear++;
@@ -1315,10 +1409,12 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		{
 			Vector apex;
 
-			if( !EFW_Triangulate( pev, pev->origin, goal, reached, &apex, pTarget ) )
+			if( !EFW_Triangulate( pev, pev->origin, moveGoal, reached, &apex, pTarget ) )
 			{
 				static int s_block;
 
+				if( onDetour )
+					EFW_ClearDetour( pev );
 				if( s_block < 4 )
 				{
 					s_block++;
@@ -1330,8 +1426,14 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			}
 			chaseGoal = apex;
 			{
+				EFW_DetourSlot *keep = EFW_DetourSlotFor( pev, 1 );
 				static int s_detour;
 
+				if( keep )
+				{
+					keep->apex = apex;
+					keep->on = 1;
+				}
 				if( s_detour < 4 )
 				{
 					s_detour++;
@@ -1843,6 +1945,7 @@ void CRefugee::IdleThink( void )
 			   is that zero step. The next IdleThink entry restores it. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
+			EFW_ClearDetour( pev );
 			{
 				static int s_close;
 				static float s_yaw;
@@ -2842,6 +2945,7 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 	{
 		if( pMon->m_Activity != ACT_IDLE )
 			pMon->SetActivity( ACT_IDLE );
+		EFW_ClearDetour( pev );
 	}
 	float flInterval = EFW_AdvanceNpcAnim( pMon, tn );
 	{
