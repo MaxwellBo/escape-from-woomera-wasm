@@ -1363,7 +1363,7 @@ static int EFW_Near2D( const Vector &a, const Vector &b )
 }
 
 /* Engine CHANGE_YAW inside SV_StepDirection. This chunk turns at most
-   yaw_speed degrees. Move() already applied yaw_speed * frametime * 10
+   yaw_speed degrees. Move() already applied yaw_speed * one frame * 10
    once, before these chunks. */
 static void EFW_EngineChangeYaw( entvars_t *pev )
 {
@@ -1508,9 +1508,18 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			{
 				static entvars_t *s_yawWho;
 				static int s_yawLog;
+				static int s_elecYaw;
+				const char *tn = STRING( pev->targetname );
+
 				if( !s_yawWho )
 					s_yawWho = pev;
-				if( pev == s_yawWho && s_yawLog < 6 )
+				if( tn && !strcmp( tn, "efw_electrician" ) && s_elecYaw < 6 )
+				{
+					s_elecYaw++;
+					EFW_DebugPrint( "npc yaw ideal=%.0f before=%.0f ang=%.0f spd=%d",
+						pev->ideal_yaw, before, pev->angles.y, yawSpeed );
+				}
+				else if( pev == s_yawWho && s_yawLog < 4 )
 				{
 					s_yawLog++;
 					EFW_DebugPrint( "npc yaw ideal=%.0f before=%.0f ang=%.0f spd=%d",
@@ -2033,18 +2042,42 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 /* PE ChangeYaw 0x100603b0: speed = yawSpeed * frametime * 10.
    monsteryawspeedfix is the later SDK path (yawSpeed * delta * 2) and
    sv.time does not move between thinks, so that path never sees a
-   frame. The host pump is the frametime this call would have had. */
+   frame. MoveExecute spends the pump. This call sees one server frame.
+   A pump used as that frame finished the heading, and the 45-degree
+   step hold never saw a wide turn. */
+static float EFW_YawFrame( void )
+{
+	float frame;
+
+	frame = gpGlobals->frametime;
+	/* A stuck clock is 0. A pump gap is the think, not the frame. */
+	if( frame < 0.001f || frame > ( 1.0f / 30.0f ) )
+		frame = 1.0f / 60.0f;
+	return frame;
+}
+
 static void EFW_PeChangeYaw( CBaseMonster *pMon, int yawSpeed )
 {
 	float savedFix;
 	float savedFrame;
+	float frame;
 
 	if( !pMon )
 		return;
 	savedFix = monsteryawspeedfix.value;
 	savedFrame = gpGlobals->frametime;
+	frame = EFW_YawFrame();
+	{
+		static int s_frame;
+
+		if( !s_frame )
+		{
+			s_frame = 1;
+			EFW_DebugPrint( "yaw frame engine=%.4f used=%.4f", savedFrame, frame );
+		}
+	}
 	monsteryawspeedfix.value = 0.0f;
-	gpGlobals->frametime = EFW_HostInterval();
+	gpGlobals->frametime = frame;
 	pMon->ChangeYaw( yawSpeed );
 	monsteryawspeedfix.value = savedFix;
 	gpGlobals->frametime = savedFrame;
