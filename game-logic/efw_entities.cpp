@@ -850,12 +850,11 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 
 /* SV_MoveToOrigin MOVE_NORMAL steps along ideal_yaw. When that step cannot
    be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
-   the other 45-degree headings. This is that search with the hull trace,
-   not WALK_MOVE. */
-static void EFW_EngineChangeYaw( entvars_t *pev );
-static int EFW_YawHoldsStep( entvars_t *pev );
-/* Set when every chase probe fails and ideal_yaw is restored. The next
-   chunk of this MoveExecute turns back toward that heading. */
+   the other 45-degree headings. A probe that moves does not replace
+   ideal_yaw, so the next chunk tries the same heading. This is that
+   search with the hull trace, not WALK_MOVE. */
+/* Set when every chase probe fails and ideal_yaw is restored to the
+   snapped heading. The next chunk of this MoveExecute steps along it. */
 static int s_chaseRestored;
 
 static int EFW_TryChunk( entvars_t *pev, const Vector &start, const Vector &dir, float step, Vector *out )
@@ -913,7 +912,7 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 		if( dirx == 0.0f )
 			diag = ( diry == 90.0f ) ? 45.0f : 315.0f;
 		else
-			diag = ( diry == 90.0f ) ? 135.0f : 225.0f;
+			diag = ( diry == 90.0f ) ? 135.0f : 215.0f;
 		tryYaw[ntry++] = diag;
 	}
 	if( fabsf( deltay ) > fabsf( deltax ) )
@@ -957,24 +956,21 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 		dir.x = cosf( yaw * 0.01745329252f );
 		dir.y = sinf( yaw * 0.01745329252f );
 		dir.z = 0.0f;
-		/* SV_StepDirection sets ideal_yaw to this probe and turns before
-		   the move. A failed probe keeps that turn. A clear probe returns
-		   even when the facing test restores the origin. */
-		pev->ideal_yaw = yaw;
-		EFW_EngineChangeYaw( pev );
+		/* SV_StepDirection walks this yaw and leaves ideal_yaw on the
+		   heading Move() already stored. The next chunk tries that
+		   heading again. */
 		if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
 			continue;
 		{
-			int held = EFW_YawHoldsStep( pev );
 			const char *tn = STRING( pev->targetname );
 			static int s_chase;
 			static int s_elikaChase;
 
-			if( tn && !strcmp( tn, "Elika" ) && s_elikaChase < 4 )
+			if( tn && !strcmp( tn, "Elika" ) && s_elikaChase < 6 )
 			{
 				s_elikaChase++;
-				EFW_DebugPrint( "chase turn Elika ang=%.0f ideal=%.0f held=%d at %.0f %.0f -> %.0f %.0f",
-					pev->angles.y, pev->ideal_yaw, held,
+				EFW_DebugPrint( "chase step Elika ideal=%.0f probe=%.0f at %.0f %.0f -> %.0f %.0f",
+					pev->ideal_yaw, yaw,
 					start.x, start.y, landed.x, landed.y );
 			}
 			else if( s_chase < 6 )
@@ -983,8 +979,6 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 				EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
 					yaw, start.x, start.y, landed.x, landed.y );
 			}
-			if( held )
-				return 2;
 		}
 		*out = landed;
 		return 1;
@@ -1026,79 +1020,6 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 			}
 		}
 	}
-	return 0;
-}
-
-/* Engine CHANGE_YAW inside SV_StepDirection. The turn is yaw_speed
-   degrees for this step. Move() already applied yaw_speed * frametime * 10
-   once, before the chunks. Calling that path again would multiply it. */
-static void EFW_EngineChangeYaw( entvars_t *pev )
-{
-	float current;
-	float ideal;
-	float move;
-	float speed;
-	float before;
-	const char *tn;
-
-	if( !pev )
-		return;
-	current = UTIL_AngleMod( pev->angles.y );
-	ideal = pev->ideal_yaw;
-	speed = pev->yaw_speed;
-	if( speed < 0.0f )
-		speed = 0.0f;
-	if( current == ideal )
-		return;
-	move = ideal - current;
-	if( ideal > current )
-	{
-		if( move >= 180.0f )
-			move = move - 360.0f;
-	}
-	else
-	{
-		if( move <= -180.0f )
-			move = move + 360.0f;
-	}
-	if( move > 0.0f )
-	{
-		if( move > speed )
-			move = speed;
-	}
-	else
-	{
-		if( move < -speed )
-			move = -speed;
-	}
-	before = current;
-	pev->angles.y = UTIL_AngleMod( current + move );
-	tn = STRING( pev->targetname );
-	if( tn && !strcmp( tn, "Elika" ) )
-	{
-		static int s_engYaw;
-
-		if( s_engYaw < 4 )
-		{
-			s_engYaw++;
-			EFW_DebugPrint( "engine yaw Elika before=%.0f ang=%.0f ideal=%.0f spd=%.0f",
-				before, pev->angles.y, ideal, speed );
-		}
-	}
-}
-
-/* SV_StepDirection undoes a step when angles.y - ideal_yaw is still
-   between 45 and 315. The facing has not caught up, so the origin
-   stays and the chase is not tried. */
-static int EFW_YawHoldsStep( entvars_t *pev )
-{
-	float delta;
-
-	if( !pev )
-		return 0;
-	delta = pev->angles.y - pev->ideal_yaw;
-	if( delta > 45.0f && delta < 315.0f )
-		return 1;
 	return 0;
 }
 
@@ -1211,10 +1132,9 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			step = 16.0f;
 		if( step > remain )
 			step = remain;
-		/* SV_StepDirection turns, then steps along ideal_yaw. The
-		   goal vector is only the chase target. A held origin still
-		   returns, so the next chunk turns again. */
-		EFW_EngineChangeYaw( pev );
+		/* SV_StepDirection steps along the ideal_yaw Move() stored.
+		   It does not turn the body. A chase that failed has put
+		   ideal_yaw back on the snapped heading for this chunk. */
 		if( s_chaseRestored )
 		{
 			const char *tn = STRING( pev->targetname );
@@ -1244,7 +1164,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 
 			/* SV_MoveStep accepts the full column or nothing. A wall
 			   closer than this chunk refuses it, and the chase below
-			   turns along that face instead of sliding into it. */
+			   sidesteps for this chunk only. */
 			kind = EFW_MoveStep( pev, start, wish, &stepLand );
 			if( kind <= 0 )
 			{
@@ -1290,53 +1210,36 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					}
 				}
 				stepLen = ( stepLand - start ).Length();
-			}
-		}
-		/* SV_StepDirection keeps the origin when the body has not turned
-		   to within that band of ideal_yaw. A blocked step still chases. */
-		if( stepLen >= 0.5f && EFW_YawHoldsStep( pev ) )
-		{
-			static int s_yawHold;
-			static int s_elikaHold;
-			const char *tn = STRING( pev->targetname );
-			int elika = ( tn && !strcmp( tn, "Elika" ) ) ? 1 : 0;
+				{
+					const char *tn = STRING( pev->targetname );
 
-			if( ( elika && s_elikaHold < 6 ) || ( !elika && s_yawHold < 4 ) )
-			{
-				if( elika )
-					s_elikaHold++;
-				else
-					s_yawHold++;
-				EFW_DebugPrint( "yaw hold %s ang=%.0f ideal=%.0f at %.0f %.0f",
-					( tn && tn[0] ) ? tn : "?",
-					pev->angles.y, pev->ideal_yaw, start.x, start.y );
+					if( tn && !strcmp( tn, "Elika" ) )
+					{
+						static int s_took;
+
+						if( s_took < 6 )
+						{
+							s_took++;
+							EFW_DebugPrint( "step take Elika ideal=%.0f at %.0f %.0f -> %.0f %.0f",
+								pev->ideal_yaw, start.x, start.y, stepLand.x, stepLand.y );
+						}
+					}
+				}
 			}
-			total -= step;
-			if( !( pev->flags & FL_ONGROUND ) )
-				break;
-			continue;
 		}
 		/* SV_MoveToOrigin: a blocked ideal_yaw step calls SV_NewChaseDir2
-		   instead of stopping on the wall. */
+		   instead of stopping on the wall. ideal_yaw stays, so the next
+		   chunk tries that heading again. */
 		if( stepLen < 0.5f )
 		{
 			Vector chased;
 			int chase;
 
 			chase = EFW_ChaseChunk( pev, start, goal, step, &chased );
-			/* Facing test restored the origin. ideal_yaw stays on
-			   that probe, and the next chunk steps along it. */
-			if( chase == 2 )
-			{
-				total -= step;
-				if( !( pev->flags & FL_ONGROUND ) )
-					break;
-				continue;
-			}
 			if( !chase )
 			{
 				/* ideal_yaw is the snapped heading again. Spend this
-				   chunk and let the next one turn back toward it. */
+				   chunk and let the next one step along it. */
 				total -= step;
 				if( !( pev->flags & FL_ONGROUND ) )
 					break;
