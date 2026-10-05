@@ -1820,6 +1820,14 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			CBaseEntity *pSelf = CBaseEntity::Instance( ENT( pev ) );
 			CBaseMonster *pSelfMon = pSelf ? pSelf->MyMonsterPointer() : NULL;
 			CBaseEntity *pBlocker = NULL;
+			const char *cn = STRING( pev->classname );
+
+			/* Move() at 0x1005f453 calls Stop() before the yield or the
+			   triangle. Stop stores ACT_IDLE as the ideal. This think
+			   still has the walk sequence, so a corner it finds is
+			   spent. The next think plays that idle and does not step. */
+			if( pSelfMon && cn && !strcmp( cn, "monster_refugee" ) )
+				pSelfMon->m_IdealActivity = ACT_IDLE;
 
 			/* Move() at 0x1005f453 stops, then 0x1005f4b5 keeps the
 			   detour for a blocker that is moving and is not the
@@ -1874,8 +1882,6 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 				static int s_block;
 				CBaseEntity *pEnt;
 				CBaseMonster *pMon;
-				const char *cn;
-
 				if( onDetour )
 					EFW_ClearDetour( pev );
 				/* Move() at 0x1005f5ac calls Stop(). Refugee IdleThink
@@ -2946,8 +2952,29 @@ void CRefugee::IdleThink( void )
 						tn, moved, pev->sequence, (int)m_Activity, speed, dt );
 				}
 			}
-			if( m_IdealActivity != m_movementActivity )
+			/* Stop() at 0x1005f453 stored ACT_IDLE. RunAI plays that on
+			   the next think and Move() then spends a zero ground
+			   speed. Putting the walk ideal back kept him walking. */
+			if( m_IdealActivity != ACT_IDLE && m_IdealActivity != m_movementActivity )
 				m_IdealActivity = m_movementActivity;
+			if( tn && !strcmp( tn, "Amir" ) && m_IdealActivity == ACT_IDLE )
+			{
+				static int s_brake;
+				static int s_stood;
+
+				if( m_Activity == ACT_WALK && moved && s_brake < 4 )
+				{
+					s_brake++;
+					EFW_DebugPrint( "walk brake Amir moved=%d origin=%.0f %.0f",
+						moved, pev->origin.x, pev->origin.y );
+				}
+				else if( m_Activity == ACT_IDLE && s_stood < 4 )
+				{
+					s_stood++;
+					EFW_DebugPrint( "walk stood Amir act=%d origin=%.0f %.0f",
+						(int)m_Activity, pev->origin.x, pev->origin.y );
+				}
+			}
 			if( tn && !strcmp( tn, "Amir" ) && s_startArm == 1 && !posed )
 			{
 				s_startArm = 2;
