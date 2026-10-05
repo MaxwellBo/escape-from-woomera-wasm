@@ -763,7 +763,7 @@ static int EFW_CheckBottom( entvars_t *pev, const Vector &pos )
 /* SV_MoveStep. The hull column at the full wish is the only landing.
    A wall in that column refuses the step, so the chase can turn along
    the face. A fraction of the wish is not a move. */
-static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move, Vector *out )
+static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move, Vector *out, edict_t **ppHit = NULL )
 {
 	Vector top;
 	Vector bot;
@@ -772,6 +772,8 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 	int partial;
 	const char *tn;
 
+	if( ppHit )
+		*ppHit = NULL;
 	if( !pev || !out )
 		return 0;
 	partial = ( pev->flags & FL_PARTIALGROUND ) ? 1 : 0;
@@ -781,13 +783,21 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 	bot.z -= step * 2.0f;
 	EFW_TraceFeetHull( pev, top, bot, &tr, dont_ignore_monsters );
 	if( tr.fAllSolid )
+	{
+		if( ppHit )
+			*ppHit = tr.pHit;
 		return 0;
+	}
 	if( tr.fStartSolid )
 	{
 		top.z -= step;
 		EFW_TraceFeetHull( pev, top, bot, &tr, dont_ignore_monsters );
 		if( tr.fAllSolid || tr.fStartSolid )
+		{
+			if( ppHit )
+				*ppHit = tr.pHit;
 			return 0;
+		}
 	}
 	tn = STRING( pev->targetname );
 	if( tr.flFraction >= 1.0f )
@@ -823,7 +833,11 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 		return 3;
 	}
 	if( EFW_TraceHitBody( pev, &tr ) )
+	{
+		if( ppHit )
+			*ppHit = tr.pHit;
 		return 0;
+	}
 	*out = tr.vecEndPos;
 	if( !EFW_CheckBottom( pev, *out ) )
 	{
@@ -1025,9 +1039,12 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 
 /* CheckLocalMove walks the lookahead in 16-unit steps and stops one unit
    short. WALK_MOVE and DROP_TO_FLOOR stall the frame, so this is that
-   walk with the same hull step MoveExecute uses. A landing more than 64
-   below the check point is a miss. Flags from the probe are put back. */
-static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end, float *pflDist )
+   walk with the same hull step MoveExecute uses. A step whose hull hits
+   the movement target is a clear walk: the original compares trace_ent
+   with that entity and returns LOCALMOVE_VALID. A landing more than 64
+   below the check point is a miss, unless that target is in the air.
+   Flags from the probe are put back. */
+static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end, float *pflDist, edict_t *pTarget = NULL, int *pOnTarget = NULL )
 {
 	float yaw;
 	float dist;
@@ -1037,6 +1054,8 @@ static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end
 
 	if( pflDist )
 		*pflDist = 0.0f;
+	if( pOnTarget )
+		*pOnTarget = 0;
 	if( !pev )
 		return 0;
 	yaw = UTIL_VecToYaw( end - start );
@@ -1061,7 +1080,19 @@ static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end
 		wish.x = cosf( yawRad ) * stepSize;
 		wish.y = sinf( yawRad ) * stepSize;
 		wish.z = 0.0f;
-		kind = EFW_MoveStep( pev, pos, wish, &landed );
+		{
+			edict_t *hit = NULL;
+
+			kind = EFW_MoveStep( pev, pos, wish, &landed, &hit );
+			/* 0x1005e408: a failed step whose trace_ent is the target
+			   is LOCALMOVE_VALID. The probe stops there. */
+			if( kind == 0 && pTarget && hit == pTarget )
+			{
+				if( pOnTarget )
+					*pOnTarget = 1;
+				break;
+			}
+		}
 		if( kind <= 0 )
 		{
 			pev->flags = flags;
@@ -1073,15 +1104,24 @@ static int EFW_LocalMove( entvars_t *pev, const Vector &start, const Vector &end
 		traveled += 16.0f;
 	}
 	pev->flags = flags;
-	if( fabsf( end.z - pos.z ) > 64.0f )
-		return 1;
+	/* The z test runs for a clear walk and for a walk accepted because
+	   it met the target. An airborne target skips it. */
+	if( !( pev->flags & ( FL_FLY | FL_SWIM ) ) )
+	{
+		int checkZ = 1;
+
+		if( pTarget && !( pTarget->v.flags & FL_ONGROUND ) )
+			checkZ = 0;
+		if( checkZ && fabsf( end.z - pos.z ) > 64.0f )
+			return 1;
+	}
 	return 2;
 }
 
 /* FTriangulate. The apex steps out from the blockage by the hull width.
    Both legs have to be a clear local move. The far leg is the route
    goal, so a goal inside a wall does not become a detour. */
-static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &end, float flDist, Vector *apex )
+static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &end, float flDist, Vector *apex, edict_t *pTarget )
 {
 	Vector delta;
 	Vector forward;
@@ -1112,14 +1152,14 @@ static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &e
 	side = side * ( sizeX * 2.0f );
 	for( i = 0; i < 8; i++ )
 	{
-		if( EFW_LocalMove( pev, start, right, NULL ) == 2
-			&& EFW_LocalMove( pev, right, end, NULL ) == 2 )
+		if( EFW_LocalMove( pev, start, right, NULL, pTarget, NULL ) == 2
+			&& EFW_LocalMove( pev, right, end, NULL, pTarget, NULL ) == 2 )
 		{
 			*apex = right;
 			return 1;
 		}
-		if( EFW_LocalMove( pev, start, left, NULL ) == 2
-			&& EFW_LocalMove( pev, left, end, NULL ) == 2 )
+		if( EFW_LocalMove( pev, start, left, NULL, pTarget, NULL ) == 2
+			&& EFW_LocalMove( pev, left, end, NULL, pTarget, NULL ) == 2 )
 		{
 			*apex = left;
 			return 1;
@@ -1130,7 +1170,7 @@ static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &e
 	return 0;
 }
 
-static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt )
+static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL )
 {
 	Vector delta;
 	Vector start;
@@ -1245,18 +1285,27 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		Vector checkEnd;
 		float reached;
 		int local;
+		int onTarget;
 		const char *tn = STRING( pev->targetname );
 
 		if( dirLen > 0.001f )
 			checkEnd = pev->origin + dir * ( cap / dirLen );
 		else
 			checkEnd = pev->origin;
-		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached );
+		onTarget = 0;
+		local = EFW_LocalMove( pev, pev->origin, checkEnd, &reached, pTarget, &onTarget );
 		if( local == 2 )
 		{
 			static int s_clear;
+			static int s_target;
 
-			if( s_clear < 2 && tn && !strcmp( tn, "efw_electrician" ) )
+			if( onTarget && s_target < 4 )
+			{
+				s_target++;
+				EFW_DebugPrint( "local target %s cap=%.0f",
+					( tn && tn[0] ) ? tn : "?", cap );
+			}
+			else if( s_clear < 2 && tn && !strcmp( tn, "efw_electrician" ) )
 			{
 				s_clear++;
 				EFW_DebugPrint( "local clear %s cap=%.0f", tn, cap );
@@ -1266,7 +1315,7 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 		{
 			Vector apex;
 
-			if( !EFW_Triangulate( pev, pev->origin, goal, reached, &apex ) )
+			if( !EFW_Triangulate( pev, pev->origin, goal, reached, &apex, pTarget ) )
 			{
 				static int s_block;
 
@@ -1775,7 +1824,7 @@ void CRefugee::IdleThink( void )
 
 				if( dt < 0.001f )
 					dt = 0.05f;
-				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+				moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
 				if( s_peMove < 6 )
 				{
 					s_peMove++;
@@ -1838,7 +1887,7 @@ void CRefugee::IdleThink( void )
 
 			if( dt < 0.001f )
 				dt = 0.05f;
-			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt );
+			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
 			if( s_follow < 8 )
 			{
 				s_follow++;
@@ -2413,7 +2462,7 @@ void CPatrolGuard::PatrolThink( void )
 	if( m_movementGoal == MOVEGOAL_TARGETENT && pPlayer && Dist2D( pPlayer ) > 8.0f )
 	{
 		float speed = EFW_NpcGroundSpeed( this );
-		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval );
+		int moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval, pPlayer->edict() );
 		{
 			static int s_chaseLog;
 			if( s_chaseLog < 6 )
