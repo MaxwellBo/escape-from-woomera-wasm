@@ -1242,18 +1242,19 @@ static int EFW_Triangulate( entvars_t *pev, const Vector &start, const Vector &e
 	return 0;
 }
 
-/* InsertWaypoint stores the apex, then RouteSimplify (0x1005d5a0)
-   rewrites that waypoint before the walk. Two points are enough to
-   run: a clear trace from here to the next point drops the apex, a
-   clear trace to the midpoint of the apex and that point stores the
-   midpoint, and a clear trace between the two midpoints stores both.
-   The constant at 0x100dd614 is 0.5. Fewer than two points returns
-   at 0x1005d5de. A detour is not a pure targetent route, so the
-   lookahead target stays clear until the chain is done. */
+/* InsertWaypoint (0x1005e890) pushes the apex in front of the current
+   waypoint, then RouteSimplify (0x1005d5a0) rewrites the chain. A clear
+   trace to the next point drops the apex. A clear trace to the midpoint
+   of this point and the next stores that midpoint. A clear trace between
+   the two midpoints stores both. The constant at 0x100dd614 is 0.5.
+   Fewer than two points returns at 0x1005d5de. A later block inserts
+   again and simplifies against the points still ahead, so the tail of
+   the route stays in the walk. A detour is not a pure targetent route,
+   so the lookahead target stays clear until the chain is done. */
 struct EFW_DetourSlot
 {
 	entvars_t *pev;
-	Vector pt[2];
+	Vector pt[8];
 	int n;
 	int i;
 };
@@ -1294,62 +1295,71 @@ static void EFW_ClearDetour( entvars_t *pev )
 		slot->n = 0;
 }
 
-/* The apex and the point Move was walking are the two-waypoint route.
-   outN is 0 when the apex is dropped. */
-static int EFW_SimplifyDetour( entvars_t *pev, const Vector &apex, const Vector &next, edict_t *pTarget, Vector *out0, Vector *out1 )
+/* RouteSimplify over the points InsertWaypoint just wrote. The last
+   point is always kept. outCount is 1 when every earlier point was cut. */
+static int EFW_RouteSimplify( entvars_t *pev, const Vector *inRoute, int count, edict_t *pTarget, Vector *outRoute )
 {
-	Vector cut;
-	Vector split;
-	const char *tn;
-	static int s_log;
+	Vector vecStart;
+	int i;
+	int outCount;
 
-	if( !pev || !out0 || !out1 )
+	if( !pev || !inRoute || !outRoute || count <= 0 )
 		return 0;
-	tn = STRING( pev->targetname );
-	if( EFW_LocalMove( pev, pev->origin, next, NULL, pTarget, NULL ) == 2 )
+	if( count < 2 )
 	{
-		if( s_log < 4 )
-		{
-			s_log++;
-			EFW_DebugPrint( "simplify drop %s next=%.0f %.0f",
-				( tn && tn[0] ) ? tn : "?", next.x, next.y );
-		}
-		return 0;
-	}
-	cut = ( next + apex ) * 0.5f;
-	split = ( apex + pev->origin ) * 0.5f;
-	if( EFW_LocalMove( pev, pev->origin, cut, NULL, pTarget, NULL ) == 2 )
-	{
-		*out0 = cut;
-		if( s_log < 4 )
-		{
-			s_log++;
-			EFW_DebugPrint( "simplify cut %s raw=%.0f %.0f cut=%.0f %.0f",
-				( tn && tn[0] ) ? tn : "?", apex.x, apex.y, cut.x, cut.y );
-		}
+		outRoute[0] = inRoute[0];
 		return 1;
 	}
-	if( EFW_LocalMove( pev, split, cut, NULL, pTarget, NULL ) == 2 )
+	if( count > 8 )
+		count = 8;
+	vecStart = pev->origin;
+	outCount = 0;
+	for( i = 0; i < count - 1; i++ )
 	{
-		*out0 = split;
-		*out1 = cut;
-		if( s_log < 4 )
+		Vector next;
+		Vector here;
+		Vector vecTest;
+		Vector vecSplit;
+
+		next = inRoute[i + 1];
+		here = inRoute[i];
+		if( EFW_LocalMove( pev, vecStart, next, NULL, pTarget, NULL ) == 2 )
+			continue;
+		vecTest = ( next + here ) * 0.5f;
+		vecSplit = ( here + vecStart ) * 0.5f;
+		if( EFW_LocalMove( pev, vecStart, vecTest, NULL, pTarget, NULL ) == 2 )
+			outRoute[outCount] = vecTest;
+		else if( EFW_LocalMove( pev, vecSplit, vecTest, NULL, pTarget, NULL ) == 2 )
 		{
-			s_log++;
-			EFW_DebugPrint( "simplify split %s raw=%.0f %.0f split=%.0f %.0f cut=%.0f %.0f",
-				( tn && tn[0] ) ? tn : "?", apex.x, apex.y,
-				split.x, split.y, cut.x, cut.y );
+			if( outCount < 14 )
+			{
+				outRoute[outCount] = vecSplit;
+				outCount++;
+			}
+			outRoute[outCount] = vecTest;
 		}
-		return 2;
+		else
+			outRoute[outCount] = here;
+		vecStart = outRoute[outCount];
+		outCount++;
+		if( outCount >= 15 )
+			break;
 	}
-	*out0 = apex;
-	if( s_log < 4 )
+	if( outCount < 16 )
 	{
-		s_log++;
-		EFW_DebugPrint( "simplify keep %s apex=%.0f %.0f",
-			( tn && tn[0] ) ? tn : "?", apex.x, apex.y );
+		outRoute[outCount] = inRoute[count - 1];
+		outCount++;
 	}
-	return 1;
+	return outCount;
+}
+
+static int EFW_Near2D( const Vector &a, const Vector &b )
+{
+	Vector d;
+
+	d = a - b;
+	d.z = 0.0f;
+	return d.Length() < 8.0f;
 }
 
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL )
@@ -1586,10 +1596,13 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 			chaseGoal = apex;
 			{
 				EFW_DetourSlot *keep = EFW_DetourSlotFor( pev, 1 );
+				Vector inRoute[8];
+				Vector outRoute[16];
+				int inCount;
+				int outCount;
+				int k;
+				int ncopy;
 				static int s_detour;
-				Vector cut0;
-				Vector cut1;
-				int simplified;
 
 				if( s_detour < 4 )
 				{
@@ -1597,34 +1610,85 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					EFW_DebugPrint( "local detour %s apex=%.0f %.0f reached=%.0f",
 						( tn && tn[0] ) ? tn : "?", apex.x, apex.y, reached );
 				}
-				/* A chain already in progress keeps the raw apex in front.
-				   The first insert is the two-point route RouteSimplify sees. */
-				simplified = 0;
-				if( keep && !onDetour )
-					simplified = EFW_SimplifyDetour( pev, apex, moveGoal, pTarget, &cut0, &cut1 );
-				if( keep && !onDetour && simplified > 0 )
+				/* InsertWaypoint puts the apex at the current index and
+				   shifts the points still ahead. The first insert's tail
+				   is the goal Move was walking. */
+				inRoute[0] = apex;
+				inCount = 1;
+				if( onDetour && keep && keep->n > keep->i )
 				{
-					keep->pt[0] = cut0;
-					keep->i = 0;
-					keep->n = 1;
-					if( simplified > 1 )
-					{
-						keep->pt[1] = cut1;
-						keep->n = 2;
-					}
-					chaseGoal = cut0;
+					for( k = keep->i; k < keep->n && inCount < 8; k++ )
+						inRoute[inCount++] = keep->pt[k];
 				}
-				else if( keep && !onDetour )
+				else
+					inRoute[inCount++] = moveGoal;
+				outCount = EFW_RouteSimplify( pev, inRoute, inCount, onDetour ? NULL : pTarget, outRoute );
+				if( keep && outCount <= 1 && !onDetour )
 				{
+					static int s_drop;
+
 					keep->n = 0;
 					chaseGoal = moveGoal;
+					if( s_drop < 4 )
+					{
+						s_drop++;
+						EFW_DebugPrint( "simplify drop %s next=%.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", moveGoal.x, moveGoal.y );
+					}
 				}
-				else if( keep )
+				else if( keep && outCount > 0 )
 				{
-					keep->pt[0] = apex;
+					ncopy = outCount;
+					if( ncopy > 8 )
+						ncopy = 8;
+					for( k = 0; k < ncopy; k++ )
+						keep->pt[k] = outRoute[k];
+					if( outCount > 8 )
+						keep->pt[7] = outRoute[outCount - 1];
 					keep->i = 0;
-					keep->n = 1;
-					chaseGoal = apex;
+					keep->n = ncopy;
+					chaseGoal = keep->pt[0];
+					if( !onDetour )
+					{
+						Vector mid;
+						Vector split;
+						static int s_log;
+
+						mid = ( moveGoal + apex ) * 0.5f;
+						split = ( apex + pev->origin ) * 0.5f;
+						if( s_log < 4 )
+						{
+							s_log++;
+							if( EFW_Near2D( chaseGoal, mid ) )
+								EFW_DebugPrint( "simplify cut %s raw=%.0f %.0f cut=%.0f %.0f",
+									( tn && tn[0] ) ? tn : "?", apex.x, apex.y,
+									chaseGoal.x, chaseGoal.y );
+							else if( EFW_Near2D( chaseGoal, split ) && ncopy > 1 )
+								EFW_DebugPrint( "simplify split %s raw=%.0f %.0f split=%.0f %.0f cut=%.0f %.0f",
+									( tn && tn[0] ) ? tn : "?", apex.x, apex.y,
+									chaseGoal.x, chaseGoal.y, keep->pt[1].x, keep->pt[1].y );
+							else
+								EFW_DebugPrint( "simplify keep %s apex=%.0f %.0f",
+									( tn && tn[0] ) ? tn : "?", apex.x, apex.y );
+						}
+					}
+					else if( !EFW_Near2D( chaseGoal, apex ) )
+					{
+						static int s_chain;
+						Vector tail;
+
+						if( keep->n > 1 )
+							tail = keep->pt[1];
+						else
+							tail = chaseGoal;
+						if( s_chain < 4 )
+						{
+							s_chain++;
+							EFW_DebugPrint( "simplify chain %s apex=%.0f %.0f walk=%.0f %.0f tail=%.0f %.0f",
+								( tn && tn[0] ) ? tn : "?", apex.x, apex.y,
+								chaseGoal.x, chaseGoal.y, tail.x, tail.y );
+						}
+					}
 				}
 			}
 		}
