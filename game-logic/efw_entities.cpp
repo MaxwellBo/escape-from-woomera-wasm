@@ -1743,13 +1743,11 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 
 				if( onDetour )
 					EFW_ClearDetour( pev );
-				/* Move() at 0x1005f5ac calls Stop(), then TaskFail when
-				   m_moveWaitTime is 0. Stop stores ACT_IDLE and that Move
-				   returns. Refugee IdleThink calls Move again only while
-				   the walk goal is still stored. Drop the goal and the
-				   detour. The next 0x52 gate is MoveToTarget, which would
-				   have rebuilt the route. Patrol and officer thinks store
-				   their own goal again, so this give-up is the refugee. */
+				/* Move() at 0x1005f5ac calls Stop(). Refugee IdleThink
+				   calls Move again only while the walk goal is still
+				   stored. Drop the goal and the detour. The next 0x52
+				   gate is MoveToTarget, which would have rebuilt the
+				   route. */
 				pEnt = CBaseEntity::Instance( ENT( pev ) );
 				pMon = pEnt ? pEnt->MyMonsterPointer() : NULL;
 				cn = STRING( pev->classname );
@@ -1759,26 +1757,56 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 					pMon->m_movementActivity = ACT_IDLE;
 					pMon->m_movementGoal = MOVEGOAL_NONE;
 				}
-				/* Move() calls Stop(), then TaskFail when m_moveWaitTime
-				   is 0. The fail schedule is idle, then a 2 second wait.
-				   A blocked path kept the walk cycle and stepped again
-				   on the next think. */
+				/* Stop() stores the idle ideal and this Move returns.
+				   TaskFail ("Failed to move") runs when m_moveWaitTime
+				   is already set, or when a block landed inside 0.2s of
+				   the previous wait (bits_MEMORY_MOVE_FAILED). That
+				   schedule idles for two seconds. The first block, with
+				   the bit clear, rebuilds the route and waits 0.1s. */
 				else if( pMon && cn && ( !strcmp( cn, "monster_patrol_guard" )
 					|| !strcmp( cn, "monster_efw_guard" )
 					|| !strcmp( cn, "monster_barney" ) ) )
 				{
-					pMon->SetActivity( ACT_IDLE );
-					pMon->m_movementActivity = ACT_IDLE;
-					pMon->m_flMoveWaitFinished = EFW_HostClock() + 2.0f;
-					{
-						static int s_pfail;
+					int giveUp;
+					float now;
 
-						if( s_pfail < 4 )
+					pMon->Stop();
+					now = EFW_HostClock();
+					giveUp = ( pMon->m_moveWaitTime > 0.0f )
+						|| ( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED );
+					if( giveUp )
+					{
+						pMon->SetActivity( ACT_IDLE );
+						pMon->m_movementActivity = ACT_IDLE;
+						pMon->m_flMoveWaitFinished = now + 2.0f;
 						{
-							s_pfail++;
-							EFW_DebugPrint( "path fail %s act=%d",
-								( tn && tn[0] ) ? tn : "?",
-								(int)pMon->m_Activity );
+							static int s_pfail;
+
+							if( s_pfail < 4 )
+							{
+								s_pfail++;
+								EFW_DebugPrint( "path fail %s act=%d",
+									( tn && tn[0] ) ? tn : "?",
+									(int)pMon->m_Activity );
+							}
+						}
+					}
+					else
+					{
+						if( ( now - pMon->m_flMoveWaitFinished ) < 0.2f )
+							pMon->Remember( bits_MEMORY_MOVE_FAILED );
+						pMon->m_flMoveWaitFinished = now + 0.1f;
+						{
+							static int s_retry;
+
+							if( s_retry < 6 )
+							{
+								s_retry++;
+								EFW_DebugPrint( "move retry %s mem=%d act=%d",
+									( tn && tn[0] ) ? tn : "?",
+									( pMon->m_afMemory & bits_MEMORY_MOVE_FAILED ) ? 1 : 0,
+									(int)pMon->m_Activity );
+							}
 						}
 					}
 				}
