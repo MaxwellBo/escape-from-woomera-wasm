@@ -863,10 +863,12 @@ static int EFW_MoveStep( entvars_t *pev, const Vector &start, const Vector &move
 }
 
 /* SV_MoveToOrigin MOVE_NORMAL steps along ideal_yaw. When that step cannot
-   be taken, SV_NewChaseDir2 tries the diagonal, the two cardinals, then
-   the other 45-degree headings. A probe that moves does not replace
-   ideal_yaw, so the next chunk tries the same heading. This is that
-   search with the hull trace, not WALK_MOVE. */
+   be taken, SV_NewChaseDir2 tries the diagonal, then the two cardinals.
+   RandomLong(0, 1) swaps those cardinals when the east-west gap is at
+   least the north-south gap. A second RandomLong, only after those
+   probes miss, picks the 45-degree sweep. A probe that moves does not
+   replace ideal_yaw, so the next chunk tries the same heading. This is
+   that search with the hull trace, not WALK_MOVE. */
 /* Set when every chase probe fails and ideal_yaw is restored to the
    snapped heading. The next chunk of this MoveExecute steps along it. */
 static int s_chaseRestored;
@@ -898,6 +900,56 @@ static float EFW_NormYaw360( float yaw )
 	return yaw;
 }
 
+/* One SV_StepDirection probe. Turnaround is held until the last call.
+   A yaw already probed is not walked again. ideal_yaw stays put. */
+static int EFW_ChaseProbe( entvars_t *pev, const Vector &start, float yaw, float turnaround, int last, float step, float *tried, int *ntried, Vector *out )
+{
+	float ny;
+	int j;
+	Vector dir;
+	Vector landed;
+
+	ny = EFW_NormYaw360( yaw );
+	if( fabsf( ny - turnaround ) < 0.5f && !last )
+		return 0;
+	for( j = 0; j < *ntried; j++ )
+	{
+		if( fabsf( tried[j] - ny ) < 0.5f )
+			return 0;
+	}
+	if( *ntried < 16 )
+		tried[( *ntried )++] = ny;
+	dir.x = cosf( ny * 0.01745329252f );
+	dir.y = sinf( ny * 0.01745329252f );
+	dir.z = 0.0f;
+	/* SV_StepDirection walks this yaw and leaves ideal_yaw on the
+	   heading Move() already stored. The next chunk tries that
+	   heading again. */
+	if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
+		return 0;
+	{
+		const char *tn = STRING( pev->targetname );
+		static int s_chase;
+		static int s_elikaChase;
+
+		if( tn && !strcmp( tn, "Elika" ) && s_elikaChase < 6 )
+		{
+			s_elikaChase++;
+			EFW_DebugPrint( "chase step Elika ideal=%.0f probe=%.0f at %.0f %.0f -> %.0f %.0f",
+				pev->ideal_yaw, ny,
+				start.x, start.y, landed.x, landed.y );
+		}
+		else if( s_chase < 6 )
+		{
+			s_chase++;
+			EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
+				ny, start.x, start.y, landed.x, landed.y );
+		}
+	}
+	*out = landed;
+	return 1;
+}
+
 static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &goal, float step, Vector *out )
 {
 	float deltax;
@@ -906,10 +958,12 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	float diry;
 	float olddir;
 	float turnaround;
-	float tryYaw[16];
-	int ntry;
+	float tried[16];
+	float cardinal[2];
+	int ntried;
 	int i;
-	Vector landed;
+	int roll;
+	int yFirst;
 
 	deltax = goal.x - start.x;
 	deltay = goal.y - start.y;
@@ -918,7 +972,7 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 	/* SV_NewChaseDir snaps the heading it will restore if every probe fails. */
 	olddir = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f );
 	turnaround = EFW_NormYaw360( olddir - 180.0f );
-	ntry = 0;
+	ntried = 0;
 	if( dirx >= 0.0f && diry >= 0.0f )
 	{
 		float diag;
@@ -927,76 +981,94 @@ static int EFW_ChaseChunk( entvars_t *pev, const Vector &start, const Vector &go
 			diag = ( diry == 90.0f ) ? 45.0f : 315.0f;
 		else
 			diag = ( diry == 90.0f ) ? 135.0f : 215.0f;
-		tryYaw[ntry++] = diag;
+		if( EFW_ChaseProbe( pev, start, diag, turnaround, 0, step, tried, &ntried, out ) )
+			return 1;
 	}
-	if( fabsf( deltay ) > fabsf( deltax ) )
+	/* RandomLong(0, 1) runs only after the diagonal misses. When it is
+	   set, or the north-south gap is larger, the Y cardinal is first. */
+	roll = RANDOM_LONG( 0, 1 );
+	yFirst = roll || ( fabsf( deltay ) > fabsf( deltax ) );
+	if( yFirst )
 	{
-		if( diry >= 0.0f )
-			tryYaw[ntry++] = diry;
-		if( dirx >= 0.0f )
-			tryYaw[ntry++] = dirx;
+		cardinal[0] = diry;
+		cardinal[1] = dirx;
 	}
 	else
 	{
-		if( dirx >= 0.0f )
-			tryYaw[ntry++] = dirx;
-		if( diry >= 0.0f )
-			tryYaw[ntry++] = diry;
+		cardinal[0] = dirx;
+		cardinal[1] = diry;
 	}
-	tryYaw[ntry++] = EFW_NormYaw360( ( (int)( pev->ideal_yaw / 45.0f ) ) * 45.0f );
-	for( i = 0; i < 8; i++ )
-		tryYaw[ntry++] = (float)( i * 45 );
-	tryYaw[ntry++] = turnaround;
-	for( i = 0; i < ntry; i++ )
+	for( i = 0; i < 2; i++ )
 	{
-		float yaw = EFW_NormYaw360( tryYaw[i] );
-		Vector dir;
-		int seen;
-		int j;
-
-		if( fabsf( yaw - turnaround ) < 0.5f && i + 1 != ntry )
+		if( cardinal[i] < 0.0f )
 			continue;
-		seen = 0;
-		for( j = 0; j < i; j++ )
-		{
-			if( fabsf( EFW_NormYaw360( tryYaw[j] ) - yaw ) < 0.5f )
-			{
-				seen = 1;
-				break;
-			}
-		}
-		if( seen )
-			continue;
-		dir.x = cosf( yaw * 0.01745329252f );
-		dir.y = sinf( yaw * 0.01745329252f );
-		dir.z = 0.0f;
-		/* SV_StepDirection walks this yaw and leaves ideal_yaw on the
-		   heading Move() already stored. The next chunk tries that
-		   heading again. */
-		if( !EFW_TryChunk( pev, start, dir, step, &landed ) )
+		if( !EFW_ChaseProbe( pev, start, cardinal[i], turnaround, 0, step, tried, &ntried, out ) )
 			continue;
 		{
-			const char *tn = STRING( pev->targetname );
-			static int s_chase;
-			static int s_elikaChase;
+			static int s_order;
+			static int s_swap;
+			float pick = EFW_NormYaw360( cardinal[i] );
 
-			if( tn && !strcmp( tn, "Elika" ) && s_elikaChase < 6 )
+			/* roll 1 with the east-west gap at least as large is the
+			   swap. The longer axis would have been first otherwise. */
+			if( roll && fabsf( deltay ) <= fabsf( deltax ) && s_swap < 4 )
 			{
-				s_elikaChase++;
-				EFW_DebugPrint( "chase step Elika ideal=%.0f probe=%.0f at %.0f %.0f -> %.0f %.0f",
-					pev->ideal_yaw, yaw,
-					start.x, start.y, landed.x, landed.y );
+				s_swap++;
+				EFW_DebugPrint( "chase swap roll=1 pick=%.0f dx=%.0f dy=%.0f",
+					pick, deltax, deltay );
 			}
-			else if( s_chase < 6 )
+			else if( s_order < 4 )
 			{
-				s_chase++;
-				EFW_DebugPrint( "chase dir yaw=%.0f origin=%.0f %.0f -> %.0f %.0f",
-					yaw, start.x, start.y, landed.x, landed.y );
+				s_order++;
+				EFW_DebugPrint( "chase order roll=%d yfirst=%d pick=%.0f dx=%.0f dy=%.0f",
+					roll, yFirst, pick, deltax, deltay );
 			}
 		}
-		*out = landed;
 		return 1;
 	}
+	if( EFW_ChaseProbe( pev, start, olddir, turnaround, 0, step, tried, &ntried, out ) )
+		return 1;
+	/* The sweep roll is reached only when the cardinals and the snapped
+	   heading missed. 1 walks 0 through 315. 0 walks 315 through 0. */
+	roll = RANDOM_LONG( 0, 1 );
+	if( roll )
+	{
+		for( i = 0; i < 8; i++ )
+		{
+			if( EFW_ChaseProbe( pev, start, (float)( i * 45 ), turnaround, 0, step, tried, &ntried, out ) )
+			{
+				static int s_sweep;
+
+				if( s_sweep < 3 )
+				{
+					s_sweep++;
+					EFW_DebugPrint( "chase sweep roll=1 pick=%.0f dx=%.0f dy=%.0f",
+						(float)( i * 45 ), deltax, deltay );
+				}
+				return 1;
+			}
+		}
+	}
+	else
+	{
+		for( i = 7; i >= 0; i-- )
+		{
+			if( EFW_ChaseProbe( pev, start, (float)( i * 45 ), turnaround, 0, step, tried, &ntried, out ) )
+			{
+				static int s_sweep;
+
+				if( s_sweep < 3 )
+				{
+					s_sweep++;
+					EFW_DebugPrint( "chase sweep roll=0 pick=%.0f dx=%.0f dy=%.0f",
+						(float)( i * 45 ), deltax, deltay );
+				}
+				return 1;
+			}
+		}
+	}
+	if( EFW_ChaseProbe( pev, start, turnaround, turnaround, 1, step, tried, &ntried, out ) )
+		return 1;
 	/* Every probe failed. Put ideal_yaw back on the snapped heading.
 	   A hull that is already off a full floor gets FL_PARTIALGROUND,
 	   and the next chunk may step anyway. */
