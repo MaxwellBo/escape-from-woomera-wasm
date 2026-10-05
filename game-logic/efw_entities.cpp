@@ -2580,9 +2580,28 @@ void CRefugee::IdleThink( void )
 			   vtable+0x1a8(ACT_IDLE). Move() at 0x1005d500 runs only in the
 			   100..300 band. ResetSequenceInfo sets animtime to now, so the
 			   host-interval advance must not play that sequence; framerate 0
-			   is that zero step. The next IdleThink entry restores it. */
+			   is that zero step. The next IdleThink entry restores it.
+			   AnimMoveThink still calls Move(). MoveExecute copies the
+			   movement activity into the ideal and the idle sequence's
+			   ground speed is 0, so this think does not slide. The next
+			   pulse's RunAI plays that walk before it steps. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
+			if( m_IdealActivity != m_movementActivity )
+			{
+				m_IdealActivity = m_movementActivity;
+				if( tn && !strcmp( tn, "Amir" ) )
+				{
+					static int s_rideal;
+
+					if( s_rideal < 4 )
+					{
+						s_rideal++;
+						EFW_DebugPrint( "refugee ideal %s seq=%d act=%d gs=%.0f",
+							tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
+					}
+				}
+			}
 			EFW_ClearDetour( pev );
 			{
 				static int s_close;
@@ -2617,16 +2636,43 @@ void CRefugee::IdleThink( void )
 			&& m_movementActivity == ACT_WALK
 			&& dist > 100.0f && dist < 300.0f )
 		{
-			/* FUN_1005d160 calls vtable+0x154 (0x1005f200) on every think
-			   once the modulo branch has stored the target goal. That is
-			   the rest of the walk. Move() itself stalls, so one hull
-			   step is that call. */
-			float speed = EFW_NpcGroundSpeed( this );
-			float dt = EFW_HostInterval();
+			/* FUN_1005d160 calls RunAI before StudioFrameAdvance, then
+			   vtable+0x154 (0x1005f200) while the goal is still the
+			   player. A close left the ideal at ACT_WALK, so this pulse
+			   plays that walk and the advance interval is 0. The step
+			   uses the sequence already playing. An idle sequence is 0
+			   and does not slide. */
+			int posed = 0;
+			float speed;
+			float dt;
 			int moved;
 			static int s_follow;
+			static int s_afterPose;
 
-			if( dt < 0.001f )
+			if( m_Activity != m_IdealActivity )
+			{
+				SetActivity( m_IdealActivity );
+				posed = 1;
+				if( tn && !strcmp( tn, "Amir" ) )
+				{
+					static int s_rpose;
+
+					if( s_rpose < 4 )
+					{
+						s_rpose++;
+						EFW_DebugPrint( "refugee pose %s seq=%d act=%d gs=%.0f frame=%.1f",
+							tn, pev->sequence, (int)m_Activity,
+							m_flGroundSpeed, pev->frame );
+					}
+				}
+			}
+			speed = m_flGroundSpeed * pev->framerate;
+			if( speed < 1.0f && m_Activity != ACT_IDLE )
+				speed = 64.0f;
+			dt = EFW_HostInterval();
+			if( posed )
+				dt = 0.0f;
+			else if( dt < 0.001f )
 				dt = 0.05f;
 			moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, dt, pPlayer->edict() );
 			if( s_follow < 8 )
@@ -2636,6 +2682,22 @@ void CRefugee::IdleThink( void )
 					( tn && tn[0] ) ? tn : "?", moved, dist,
 					pev->origin.x, pev->origin.y );
 			}
+			if( tn && !strcmp( tn, "Amir" ) && ( posed || s_afterPose > 0 ) )
+			{
+				static int s_rstep;
+
+				if( posed )
+					s_afterPose = 4;
+				if( s_rstep < 8 )
+				{
+					s_rstep++;
+					s_afterPose--;
+					EFW_DebugPrint( "refugee step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
+						tn, moved, pev->sequence, (int)m_Activity, speed, dt );
+				}
+			}
+			if( m_IdealActivity != m_movementActivity )
+				m_IdealActivity = m_movementActivity;
 		}
 		/* FUN_100c6440 writes movetype 4 (MOVETYPE_STEP) every think. */
 		pev->movetype = MOVETYPE_STEP;
