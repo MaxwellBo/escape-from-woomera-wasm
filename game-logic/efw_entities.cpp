@@ -2393,6 +2393,22 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	}
 	s_npcStep = 0;
 	EFW_QueueOrigin( pev, landed );
+	{
+		EFW_DetourSlot *slot = EFW_DetourSlotFor( pev, 0 );
+		const char *tn = STRING( pev->targetname );
+
+		if( slot && slot->n > 0 && tn && !strcmp( tn, "Amir" ) )
+		{
+			static int s_on;
+
+			if( s_on < 6 )
+			{
+				s_on++;
+				EFW_DebugPrint( "walk on Amir origin=%.0f %.0f",
+					landed.x, landed.y );
+			}
+		}
+	}
 	return 1;
 }
 
