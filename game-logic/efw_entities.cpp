@@ -3738,6 +3738,23 @@ void CPatrolGuard::PatrolThink( void )
 			m_movementActivity = ACT_WALK;
 			m_movementGoal = MOVEGOAL_LOCATION;
 			m_vecMoveGoal = m_vecLastSeen;
+			/* 0x100c5941 writes this origin's z over the last-seen
+			   point before MoveToLocation (0x1005d4b0). The probe
+			   stays on the floor. The head still uses the real point. */
+			m_vecMoveGoal.z = pev->origin.z;
+			if( tn && ( !strcmp( tn, "Patrolling_Guard_1" ) || !strcmp( tn, "Patrol_Guard_2" ) ) )
+			{
+				static int s_flat;
+
+				if( s_flat < 6 )
+				{
+					s_flat++;
+					EFW_DebugPrint( "investigate flat %s goalz=%.0f z=%.0f playerz=%.0f origin=%.0f %.0f",
+						tn, m_vecMoveGoal.z, pev->origin.z,
+						pPlayer ? pPlayer->pev->origin.z : 0.0f,
+						pev->origin.x, pev->origin.y );
+				}
+			}
 			if( tn && !strcmp( tn, "Patrol_Guard_2" ) && m_Activity != m_movementActivity )
 			{
 				static int s_istore;
