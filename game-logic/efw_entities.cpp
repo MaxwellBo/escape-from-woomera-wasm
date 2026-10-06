@@ -2802,8 +2802,8 @@ void CRefugee::IdleThink( void )
 			   sets animtime to now, so the host-interval advance must not
 			   play that sequence; framerate 0 is that zero step. The idle
 			   sequence's ground speed is 0, so this think turns and does
-			   not step. The next pulse's RunAI plays that walk before it
-			   steps once he is outside this band again. */
+			   not step. SetActivity leaves the ideal idle. Outside this
+			   band the next pulse keeps that idle until the 0x52 gate. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
 			{
@@ -2841,19 +2841,20 @@ void CRefugee::IdleThink( void )
 					}
 				}
 			}
-			if( m_IdealActivity != m_movementActivity )
+			/* SetActivity(ACT_IDLE) stored idle on the ideal (0x1005e18c).
+			   IdleThink does not copy the walk back over it. Outside
+			   this band the next pulse keeps that idle, so the feet
+			   stay until the 0x52 gate calls SetActivity(ACT_WALK). */
+			if( tn && !strcmp( tn, "Amir" ) )
 			{
-				m_IdealActivity = m_movementActivity;
-				if( tn && !strcmp( tn, "Amir" ) )
-				{
-					static int s_rideal;
+				static int s_rideal;
 
-					if( s_rideal < 4 )
-					{
-						s_rideal++;
-						EFW_DebugPrint( "refugee ideal %s seq=%d act=%d gs=%.0f",
-							tn, pev->sequence, (int)m_Activity, m_flGroundSpeed );
-					}
+				if( s_rideal < 4 )
+				{
+					s_rideal++;
+					EFW_DebugPrint( "close ideal Amir act=%d ideal=%d origin=%.0f %.0f",
+						(int)m_Activity, (int)m_IdealActivity,
+						pev->origin.x, pev->origin.y );
 				}
 			}
 			EFW_ClearDetour( pev );
@@ -2896,9 +2897,9 @@ void CRefugee::IdleThink( void )
 			   no step. FUN_1005d160 calls RunAI before
 			   StudioFrameAdvance, then vtable+0x154 (0x1005f200) while
 			   the goal is still the player. A close left the ideal at
-			   ACT_WALK, so this pulse plays that walk and the advance
-			   interval is 0. The step uses the sequence already playing.
-			   An idle sequence is 0 and does not slide. */
+			   ACT_IDLE, so this pulse keeps that idle. The idle
+			   sequence's ground speed is 0, and that step does not
+			   slide. The 0x52 gate is the next SetActivity(ACT_WALK). */
 			int posed = 0;
 			float speed;
 			float dt;
@@ -3004,11 +3005,23 @@ void CRefugee::IdleThink( void )
 					EFW_DebugPrint( "walk brake Amir moved=%d origin=%.0f %.0f",
 						moved, pev->origin.x, pev->origin.y );
 				}
-				else if( m_Activity == ACT_IDLE && s_stood < 4 )
+				else if( m_Activity == ACT_IDLE && m_movementGoal == MOVEGOAL_NONE && s_stood < 4 )
 				{
 					s_stood++;
 					EFW_DebugPrint( "walk stood Amir act=%d origin=%.0f %.0f",
 						(int)m_Activity, pev->origin.x, pev->origin.y );
+				}
+				else if( m_Activity == ACT_IDLE && m_movementGoal != MOVEGOAL_NONE )
+				{
+					static int s_cstill;
+
+					if( s_cstill < 6 )
+					{
+						s_cstill++;
+						EFW_DebugPrint( "close still Amir act=%d ideal=%d origin=%.0f %.0f",
+							(int)m_Activity, (int)m_IdealActivity,
+							pev->origin.x, pev->origin.y );
+					}
 				}
 			}
 			if( tn && !strcmp( tn, "Amir" ) && s_startArm == 1 && !posed )
