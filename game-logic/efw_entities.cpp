@@ -2802,8 +2802,8 @@ void CRefugee::IdleThink( void )
 			   sets animtime to now, so the host-interval advance must not
 			   play that sequence; framerate 0 is that zero step. The idle
 			   sequence's ground speed is 0, so this think turns and does
-			   not step. SetActivity leaves the ideal idle. Outside this
-			   band the next pulse keeps that idle until the 0x52 gate. */
+			   not step. MoveExecute then copies the walk back onto the
+			   ideal. The next pulse's RunAI plays that walk. */
 			SetActivity( ACT_IDLE );
 			pev->framerate = 0.0f;
 			{
@@ -2842,9 +2842,12 @@ void CRefugee::IdleThink( void )
 				}
 			}
 			/* SetActivity(ACT_IDLE) stored idle on the ideal (0x1005e18c).
-			   IdleThink does not copy the walk back over it. Outside
-			   this band the next pulse keeps that idle, so the feet
-			   stay until the 0x52 gate calls SetActivity(ACT_WALK). */
+			   MoveExecute (0x1005f704) copies the movement activity
+			   back onto that ideal before it looks at ground speed.
+			   The idle sequence's speed stays 0, so this think does
+			   not step. Outside this band the next pulse's RunAI
+			   plays the walk. */
+			m_IdealActivity = m_movementActivity;
 			if( tn && !strcmp( tn, "Amir" ) )
 			{
 				static int s_rideal;
@@ -2897,9 +2900,8 @@ void CRefugee::IdleThink( void )
 			   no step. FUN_1005d160 calls RunAI before
 			   StudioFrameAdvance, then vtable+0x154 (0x1005f200) while
 			   the goal is still the player. A close left the ideal at
-			   ACT_IDLE, so this pulse keeps that idle. The idle
-			   sequence's ground speed is 0, and that step does not
-			   slide. The 0x52 gate is the next SetActivity(ACT_WALK). */
+			   the walk. RunAI plays that walk on this pulse, and the
+			   frame advance is 0, so the step is the pulse after. */
 			int posed = 0;
 			float speed;
 			float dt;
