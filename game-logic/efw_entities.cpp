@@ -3762,16 +3762,16 @@ void CPatrolGuard::PatrolThink( void )
 	   That syncs m_Activity to m_IdealActivity. MoveExecute has
 	   not copied the new movement activity yet, so this is the
 	   previous think's pose. A path start is the same sync. */
-	if( m_Activity != m_IdealActivity )
+		if( m_Activity != m_IdealActivity )
 	{
 		SetActivity( m_IdealActivity );
-		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
+		if( tn && ( !strcmp( tn, "Patrol_Guard_2" ) || !strcmp( tn, "Patrolling_Guard_1" ) ) )
 		{
 			if( m_iAlert == 4 )
 			{
 				static int s_pose;
 
-				if( s_pose < 4 )
+				if( s_pose < 4 && !strcmp( tn, "Patrol_Guard_2" ) )
 				{
 					s_pose++;
 					EFW_DebugPrint( "chase pose %s seq=%d act=%d gs=%.0f frame=%.1f",
@@ -3782,11 +3782,25 @@ void CPatrolGuard::PatrolThink( void )
 			{
 				static int s_ipose;
 
-				if( s_ipose < 4 )
+				if( s_ipose < 4 && !strcmp( tn, "Patrol_Guard_2" ) )
 				{
 					s_ipose++;
 					EFW_DebugPrint( "investigate pose %s seq=%d act=%d gs=%.0f frame=%.1f",
 						tn, pev->sequence, (int)m_Activity, m_flGroundSpeed, pev->frame );
+				}
+				/* Stop() stored the idle ideal and left the walk
+				   sequence up. This pulse is RunAI. */
+				if( m_Activity == ACT_IDLE )
+				{
+					static int s_landPose;
+
+					if( s_landPose < 4 )
+					{
+						s_landPose++;
+						EFW_DebugPrint( "investigate pose %s act=%d ideal=%d seq=%d origin=%.0f %.0f",
+							tn, (int)m_Activity, (int)m_IdealActivity, pev->sequence,
+							pev->origin.x, pev->origin.y );
+					}
 				}
 			}
 			else
@@ -3939,7 +3953,14 @@ void CPatrolGuard::PatrolThink( void )
 			}
 		}
 		/* A zero-interval SetActivity think has not spent the
-		   leftover. Keep the goal so the next pump still walks it. */
+		   leftover. Keep the goal so the next pump still walks it.
+		   ShouldAdvanceRoute is true within 8, and AdvanceRoute calls
+		   MovementComplete, which clears the goal. MoveExecute spends
+		   the leftover while the walk is still playing. Stop()
+		   (0x10003260) stores the idle ideal. RouteClear (0x1005d290)
+		   stores the idle movement activity and clears the move-failed
+		   bit. Neither calls SetActivity, so this think stays on the
+		   walk. The next pulse's RunAI plays the idle. */
 		if( remain <= 8.0f && ( moved || remain <= 1.0f ) )
 		{
 			Vector left = m_vecMoveGoal - pev->origin;
@@ -3955,8 +3976,21 @@ void CPatrolGuard::PatrolThink( void )
 					( tn && tn[0] ) ? tn : "?", leftDist, moved );
 			}
 			m_movementGoal = MOVEGOAL_NONE;
-			if( m_Activity != ACT_IDLE )
-				SetActivity( ACT_IDLE );
+			m_movementActivity = ACT_IDLE;
+			Forget( bits_MEMORY_MOVE_FAILED );
+			m_IdealActivity = ACT_IDLE;
+			if( tn && ( !strcmp( tn, "Patrolling_Guard_1" ) || !strcmp( tn, "Patrol_Guard_2" ) ) )
+			{
+				static int s_land;
+
+				if( s_land < 4 )
+				{
+					s_land++;
+					EFW_DebugPrint( "investigate land %s act=%d ideal=%d seq=%d origin=%.0f %.0f",
+						tn, (int)m_Activity, (int)m_IdealActivity, pev->sequence,
+						pev->origin.x, pev->origin.y );
+				}
+			}
 		}
 	}
 	else if( ( m_iAlert == 0 || m_iAlert == 1 ) && !FStringNull( pev->target ) )
