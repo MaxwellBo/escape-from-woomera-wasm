@@ -2721,6 +2721,31 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "SetActivity IDLE %s after seq=%d act=%d",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, (int)m_Activity );
 		}
+		/* Stop() on the finished walk stored the idle ideal and left
+		   the walk sequence up. RouteClear stored the idle movement
+		   activity. This pulse is RunAI: the activities differ, so
+		   the idle plays now. A 0x52 restart is MoveToTarget and
+		   replaces that idle. */
+		if( !( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
+			&& m_movementGoal == MOVEGOAL_NONE
+			&& m_movementActivity == ACT_IDLE
+			&& m_Activity == ACT_WALK
+			&& m_IdealActivity == ACT_IDLE )
+		{
+			SetActivity( ACT_IDLE );
+			if( tn && !strcmp( tn, "Amir" ) )
+			{
+				static int s_wpose;
+
+				if( s_wpose < 4 )
+				{
+					s_wpose++;
+					EFW_DebugPrint( "walk pose Amir act=%d ideal=%d seq=%d origin=%.0f %.0f",
+						(int)m_Activity, (int)m_IdealActivity, pev->sequence,
+						pev->origin.x, pev->origin.y );
+				}
+			}
+		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
 			/* vtable+0x1a8(3), FUN_1005d290, then FUN_1005d500(this, ACT_WALK, 0)
@@ -3044,17 +3069,20 @@ void CRefugee::IdleThink( void )
 				}
 			}
 			/* ShouldAdvanceRoute (0x1005f6e0) is true once the route
-			   point is within 8. The last point clears the goal.
-			   MoveExecute spends that leftover, then Stop() stores the
-			   idle ideal and RouteClear (0x1005d290) stores ACT_IDLE.
-			   A zero interval has not spent it. */
+			   point is within 8. AdvanceRoute calls MovementComplete
+			   when that distance is under ground speed * 0.2, which
+			   clears the goal. MoveExecute spends the leftover while
+			   the walk sequence is still playing. Stop() (0x10003260)
+			   then stores the idle ideal. RouteClear (0x1005d290)
+			   stores the idle movement activity. Neither calls
+			   SetActivity, so this think stays on the walk. The next
+			   pulse's RunAI plays the idle. A zero interval has not
+			   spent the leftover. */
 			if( !posed && remain <= 8.0f && ( moved || remain <= 1.0f ) )
 			{
 				m_movementGoal = MOVEGOAL_NONE;
 				m_movementActivity = ACT_IDLE;
 				Forget( bits_MEMORY_MOVE_FAILED );
-				if( m_Activity != ACT_IDLE )
-					SetActivity( ACT_IDLE );
 				m_IdealActivity = ACT_IDLE;
 				s_spotDone = 1;
 				if( tn && !strcmp( tn, "Amir" ) )
@@ -3064,9 +3092,9 @@ void CRefugee::IdleThink( void )
 					if( s_done < 4 )
 					{
 						s_done++;
-						EFW_DebugPrint( "walk done Amir act=%d goal=%d origin=%.0f %.0f remain=%.1f",
-							(int)m_Activity, m_movementGoal,
-							pev->origin.x, pev->origin.y, remain );
+						EFW_DebugPrint( "walk land Amir act=%d ideal=%d seq=%d origin=%.0f %.0f",
+							(int)m_Activity, (int)m_IdealActivity, pev->sequence,
+							pev->origin.x, pev->origin.y );
 					}
 				}
 			}
