@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll428`;
+    return `${url}?v=efw-dll429`;
   return url;
 }
 
@@ -2131,8 +2131,12 @@ async function boot() {
       '1',
       '-game',
       GAME_DIR,
+      // Single-player CL_IsInGame() is key_dest == key_game. The boot
+      // console keeps that false, so SV_Physics never runs and PM_Move
+      // is handed a zeroed usercmd. maxclients > 1 is in-game even with
+      // the console up. deathmatch stays 0, so the rules stay single-player.
       '+maxplayers',
-      '1',
+      '2',
       '+mp_allowmonsters',
       '1',
       '+deathmatch',

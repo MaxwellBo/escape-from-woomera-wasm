@@ -362,6 +362,53 @@ static float s_hopeWall; /* wall-clock seconds the pump has not spent yet */
 static float s_hostInterval; /* this pump's gap, read by MoveExecute */
 static float s_hostClock; /* sum of those gaps; Squark's 1s gate reads this */
 static float s_moveBudget; /* real pump gap for the player's 10ms PM slices */
+/* SV_Physics advances gpGlobals->time only while the listen server is
+   simulating. Once that clock moves, PM_Move and DispatchThink are the
+   frame. The console pump must not step the hull a second time. */
+static int s_engineSim;
+static int s_simHave;
+static float s_simTime;
+
+static void EFW_LogLine( const char *line );
+
+static void EFW_NoteSimClock( void )
+{
+	float now;
+	float dt;
+	char line[96];
+
+	if( !gpGlobals )
+		return;
+	now = gpGlobals->time;
+	if( !s_simHave )
+	{
+		s_simHave = 1;
+		s_simTime = now;
+		return;
+	}
+	if( now + 0.5f < s_simTime )
+	{
+		s_simHave = 0;
+		s_engineSim = 0;
+		s_simTime = now;
+		return;
+	}
+	if( now <= s_simTime + 0.001f )
+		return;
+	dt = now - s_simTime;
+	s_simTime = now;
+	/* Map start and changelevel jump the clock. A frame does not. */
+	if( dt >= 1.0f )
+		return;
+	s_hostInterval = dt;
+	s_hostClock += dt;
+	s_hopeWall += dt;
+	if( s_engineSim )
+		return;
+	s_engineSim = 1;
+	snprintf( line, sizeof( line ), "efw: sim t=%.2f dt=%.3f\n", now, dt );
+	EFW_LogLine( line );
+}
 
 float EFW_HostClock( void )
 {
@@ -1986,6 +2033,10 @@ static void EFW_HostPump( void )
 	CBasePlayer *pPlayer;
 	char line[80];
 
+	/* Engine StartFrame is already spending this clock. A second pump
+	   would walk the hull again on top of PM_Move. */
+	if( s_engineSim )
+		return;
 	n++;
 	{
 		float wall = ( CMD_ARGC() > 1 ) ? (float)atof( CMD_ARGV( 1 ) ) : 0.12f;
@@ -2590,7 +2641,7 @@ static int EFW_BindOneDetainee( void )
 
 /* Libmenu leaves the listen server paused, so engine DispatchThink never
    runs CRefugee::IdleThink. Pulse the same function from StartFrame. */
-static void EFW_PulseRefugeeThinks( void )
+static void EFW_PulseRefugeeThinks( int officersOnly )
 {
 	int i;
 	int n = 0;
@@ -2616,11 +2667,13 @@ static void EFW_PulseRefugeeThinks( void )
 			continue;
 		if( !strcmp( cn, "monster_barney" ) )
 		{
+			/* No think pointer: StartMonster's WALK_MOVE is the stall.
+			   The officer step stays on this pulse. */
 			CBaseMonster *pMon = pEnt->MyMonsterPointer();
 			if( pMon )
 				EFW_OfficerThink( pMon );
 		}
-		else
+		else if( !officersOnly )
 			pEnt->Think();
 		n++;
 	}
@@ -5156,6 +5209,10 @@ void EFW_StartFrame( void )
 {
 	if( !s_mapLive )
 		return;
+	/* gpGlobals->time moves only inside SV_Physics. That is the signal
+	   that PM_Move and DispatchThink are running, so this frame must not
+	   also integrate the hull or pulse the same thinks. */
+	EFW_NoteSimClock();
 	/* SET_MODEL of detainee studios stalls the WASM loop. Wait until the
 	   listen-server pawn exists so signon frames can run first. */
 	if( !EFW_Player() )
@@ -5199,8 +5256,16 @@ void EFW_StartFrame( void )
 		EFW_PollMenuKeys();
 		if( !s_bindDone && !EFW_BindOneDetainee() )
 			s_bindDone = 1;
-		EFW_PulseRefugeeThinks();
-		EFW_PulseWorld( pLive );
+		/* DispatchThink runs refugee and guard thinks once sv.time moves.
+		   Officers have no think pointer, so they stay on this pulse.
+		   Trigger touch is the engine's once the hull is MOVETYPE_WALK. */
+		if( !s_engineSim )
+		{
+			EFW_PulseRefugeeThinks( 0 );
+			EFW_PulseWorld( pLive );
+		}
+		else
+			EFW_PulseRefugeeThinks( 1 );
 	}
 	/* After HUD_Redraw has proven ca_active, DROP_TO_FLOOR then WALK.
 	   dll119 kept noclip forever because dropping it at live>=45 without a
@@ -5252,13 +5317,23 @@ void EFW_StartFrame( void )
 				pPlayer->pev->movetype = MOVETYPE_NOCLIP;
 			if( s_walkOn )
 			{
-				EFW_ApplyLatchedMove( pPlayer );
-				EFW_ApplyUsercmdAir( pPlayer );
-				EFW_UpdateStepSound( pPlayer );
+				/* PM_Move owns the hull once the server is simulating.
+				   The latch was the stand-in for a zeroed usercmd. */
+				if( !s_engineSim )
+				{
+					EFW_ApplyLatchedMove( pPlayer );
+					EFW_ApplyUsercmdAir( pPlayer );
+					EFW_UpdateStepSound( pPlayer );
+				}
 				EFW_ForceWorldPresent( pPlayer );
 			}
 		}
+		/* Non-EFW monster thinks call WALK_MOVE. Those stay frozen.
+		   Zeroing every other nextthink is what kept SV_Physics from
+		   running the thinks it had just become able to run. */
 		EFW_FreezeNpcPhysics();
+		if( !s_engineSim )
+		{
 		for( j = 1; j < EFW_MaxEnts(); j++ )
 		{
 			edict_t *e = INDEXENT( j );
@@ -5296,6 +5371,7 @@ void EFW_StartFrame( void )
 				snprintf( line, sizeof( line ), "efw: StartFrame done live=%d walk=%d bind=%d\n",
 					s_liveTicks, s_walkOn, s_bindDone );
 			EFW_LogLine( line );
+		}
 		}
 	}
 	/* After the pulse. Linking inside the think re-entered it until the
@@ -5530,6 +5606,9 @@ void EFW_OnServerDeactivate( void )
 	s_moveSide = 0;
 	s_speedKey = 0;
 	s_useHeld = 0;
+	s_engineSim = 0;
+	s_simHave = 0;
+	s_simTime = 0.0f;
 	s_precacheMap[0] = 0;
 	s_precacheSeenN = 0;
 	memset( s_precacheSeen, 0, sizeof( s_precacheSeen ) );
