@@ -3344,6 +3344,9 @@ public:
 	float m_flAlertTime; /* this+0x3a8 */
 	float m_flStateTime; /* this+0x3ac */
 	int m_iCaught;
+	/* Set while a last-seen walk is stored. MonsterThink (0x1005d179)
+	   starts the path from pev->target once that goal is clear. */
+	int m_iPathHome;
 };
 
 LINK_ENTITY_TO_CLASS( monster_patrol_guard, CPatrolGuard )
@@ -3525,6 +3528,7 @@ void CPatrolGuard::PatrolThink( void )
 	const char *tn = STRING( pev->targetname );
 	int see = 0;
 	int hear = 0;
+	static int s_pathHomeSteps;
 	/* FUN_100c5b60 reads gpGlobals->time. The listen server stays paused,
 	   so that clock never reaches the 0.7s notice or the later 1s and 5s
 	   waits. The pump clock is those seconds. nextthink stays on sv.time;
@@ -3742,6 +3746,9 @@ void CPatrolGuard::PatrolThink( void )
 			   point before MoveToLocation (0x1005d4b0). The probe
 			   stays on the floor. The head still uses the real point. */
 			m_vecMoveGoal.z = pev->origin.z;
+			/* The location goal replaces the path. When it clears,
+			   MonsterThink starts again at pev->target. */
+			m_iPathHome = 1;
 			if( tn && ( !strcmp( tn, "Patrolling_Guard_1" ) || !strcmp( tn, "Patrol_Guard_2" ) ) )
 			{
 				static int s_flat;
@@ -4012,6 +4019,36 @@ void CPatrolGuard::PatrolThink( void )
 	}
 	else if( ( m_iAlert == 0 || m_iAlert == 1 ) && !FStringNull( pev->target ) )
 	{
+		/* MonsterThink (0x1005d179) calls 0x1005f8e0 when the movement
+		   goal is clear and pev->target is set. That stores the first
+		   path_corner. A last-seen walk leaves the goal clear, so the
+		   corner he had reached is not the one he walks next. */
+		if( m_iPathHome )
+		{
+			CBaseEntity *home;
+
+			m_iPathHome = 0;
+			home = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
+			if( home )
+				m_pGoalEnt = home;
+			s_pathHomeSteps = 8;
+			{
+				static int s_home;
+				const char *cn = ( m_pGoalEnt && m_pGoalEnt->pev->targetname )
+					? STRING( m_pGoalEnt->pev->targetname ) : "";
+
+				if( s_home < 4 )
+				{
+					s_home++;
+					EFW_DebugPrint( "path home %s corner=%s goal=%.0f %.0f origin=%.0f %.0f",
+						( tn && tn[0] ) ? tn : "?",
+						( cn && cn[0] ) ? cn : "?",
+						m_pGoalEnt ? m_pGoalEnt->pev->origin.x : 0.0f,
+						m_pGoalEnt ? m_pGoalEnt->pev->origin.y : 0.0f,
+						pev->origin.x, pev->origin.y );
+				}
+			}
+		}
 		if( !m_pGoalEnt )
 			m_pGoalEnt = UTIL_FindEntityByTargetname( NULL, STRING( pev->target ) );
 		if( m_pGoalEnt )
@@ -4075,6 +4112,12 @@ void CPatrolGuard::PatrolThink( void )
 							( tn && tn[0] ) ? tn : "?", moved, pev->sequence, speed,
 							pev->origin.x, pev->origin.y );
 					}
+				}
+				if( s_pathHomeSteps > 0 && tn && !strcmp( tn, "Patrolling_Guard_1" ) )
+				{
+					s_pathHomeSteps--;
+					EFW_DebugPrint( "path home step %s origin=%.0f %.0f goal=%.0f %.0f",
+						tn, pev->origin.x, pev->origin.y, faceAt.x, faceAt.y );
 				}
 				if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
 				{
@@ -4157,6 +4200,7 @@ void CPatrolGuard::Spawn( void )
 	m_flAlertTime = 0;
 	m_flStateTime = 0;
 	m_iCaught = 0;
+	m_iPathHome = 0;
 	SetUse( &CPatrolGuard::TalkUse );
 	{
 		static int s_pt;
