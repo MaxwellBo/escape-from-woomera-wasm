@@ -60,5 +60,9 @@ rm -rf "$DEST"
 cp -f "$SDL_ROOT/i686-w64-mingw32/bin/SDL2.dll" "$DEST/"
 cp -f "$MINGW_RUNTIME/libgcc_s_dw2-1.dll" "$MINGW_RUNTIME/libstdc++-6.dll" "$DEST/"
 
+# waf's vgui.dll is the MinGW ABI. client.dll needs the MSVC one.
+XASH_SRC="$SRC" VGUI_DLL="$DEST/vgui.dll" "$ROOT/scripts/build-vgui-msvc.sh"
+"$ROOT/scripts/build-psapi-shim.sh"
+
 python3 "$ROOT/scripts/pack-wine.py" --engine "$DEST" --mingw-runtime "$MINGW_RUNTIME"
 echo "Windows build installed at $DEST"

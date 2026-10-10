@@ -14,10 +14,15 @@ Project page that inspired this: https://julianoliver.com/projects/escape-from-w
   cross-origin isolation headers) plus the Wine 6.0 root filesystem
   shipped in that build (`wine6.zip`). Wine 11's web filesystem omits
   API-set DLLs, so `wineboot` never finishes and `xash.dll` cannot load.
+  Wine 6's `psapi.dll` is a placeholder with no builtin, so
+  `scripts/build-psapi-shim.sh` replaces it with a small PE that exports
+  the three symbols `xash.dll` imports.
 - `public/boxedwine/woomera.zip` — the Windows game Boxedwine mounts as
   `C:\files`:
-  - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, `vgui.dll`, SDL2 and
-    the MinGW runtime
+  - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, SDL2 and the MinGW
+    runtime. `vgui.dll` is freevgui rebuilt for the MSVC i386 C++ ABI
+    (`scripts/build-vgui-msvc.sh`), because `client.dll` imports the
+    original MSVC-mangled methods and the MinGW build does not export them.
   - `woomera/` from the vendored mod, **including**
     `dlls/EscapeFromWoomera.dll` and `cl_dlls/client.dll`
   - `valve/` from the Half-Life: Uplink demo, plus SDK `delta.lst`
