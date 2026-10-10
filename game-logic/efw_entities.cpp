@@ -3334,9 +3334,9 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "idle leave %s", ( tn && tn[0] ) ? tn : "?" );
 		}
 	}
-	/* MaintainSchedule overwrites nextthink. MonsterThink arms the
-	   next 0.1s think after that, which is what keeps IdleThink alive. */
-	pev->nextthink = gpGlobals->time + 0.1f;
+	/* The pulse in StartFrame is the think. nextthink stays clear so
+	   SV_RunThink does not run this function a second time. */
+	pev->nextthink = 0.0f;
 }
 
 void CRefugee::Precache( void )

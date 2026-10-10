@@ -5287,7 +5287,7 @@ void EFW_StartFrame( void )
 			EFW_PulseWorld( pLive );
 		}
 		else
-			EFW_PulseRefugeeThinks( 1 );
+			EFW_PulseRefugeeThinks( 0 );
 	}
 	/* After HUD_Redraw has proven ca_active, DROP_TO_FLOOR then WALK.
 	   dll119 kept noclip forever because dropping it at live>=45 without a
