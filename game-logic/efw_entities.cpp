@@ -1585,6 +1585,54 @@ static void EFW_AnimLeadStamp( entvars_t *pev )
 static int s_amirWalk;
 static int s_yieldArmed;
 
+/* FUN_1005d500 MoveExecute. The displacement is the engine's pfnWalkMove,
+   in sv_stepsize chunks, along the yaw ChangeYaw already stored. The trace
+   stand-in below is not that call. */
+static int EFW_EngineWalk( entvars_t *pev, float dist )
+{
+	Vector start;
+	float yaw;
+	float left;
+	int steps;
+	int moved;
+	int ret;
+
+	if( !pev || dist < 0.001f || !g_engfuncs.pfnWalkMove )
+		return 0;
+	yaw = pev->angles.y;
+	start = pev->origin;
+	left = dist;
+	steps = 0;
+	moved = 0;
+	ret = 0;
+	while( left > 0.001f && steps < 13 )
+	{
+		float step = left;
+
+		if( step > 16.0f )
+			step = 16.0f;
+		ret = g_engfuncs.pfnWalkMove( ENT( pev ), yaw, step, WALKMOVE_NORMAL );
+		steps++;
+		left -= step;
+		if( !ret )
+			break;
+		moved = 1;
+	}
+	{
+		static int s_log;
+		const char *tn = STRING( pev->targetname );
+
+		if( s_log < 8 )
+		{
+			s_log++;
+			EFW_DebugPrint( "walkmove %s ret=%d steps=%d %.0f %.0f -> %.0f %.0f",
+				( tn && tn[0] ) ? tn : "?", ret, steps,
+				start.x, start.y, pev->origin.x, pev->origin.y );
+		}
+	}
+	return moved;
+}
+
 static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float dt, edict_t *pTarget = NULL, const Vector *pStepToward = NULL )
 {
 	Vector delta;
@@ -1763,6 +1811,18 @@ static int EFW_StepNpc( entvars_t *pev, const Vector &goal, float speed, float d
 	}
 	s_npcStep = 1;
 	chaseGoal = moveGoal;
+	/* The engine walk is MoveExecute. One boot that prints walkmove and
+	   keeps PreThink is the check that this call returns. */
+	{
+		float wish = total;
+		int walked;
+
+		if( wish < 0.001f )
+			wish = cap;
+		walked = EFW_EngineWalk( pev, wish );
+		s_npcStep = 0;
+		return walked;
+	}
 	/* Move() traces origin + normalize(3D delta) * flCheckDist before
 	   MoveExecute. A miss tries a detour. No detour means this think
 	   does not spend the step. */
