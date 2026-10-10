@@ -82,6 +82,7 @@ launchStatus.textContent = 'booting Wine';
 engineStatus.textContent = 'loading';
 
 const params = new URLSearchParams({
+  root: 'wine6',
   app: 'woomera',
   p: 'run.bat',
   resolution: '800x600',

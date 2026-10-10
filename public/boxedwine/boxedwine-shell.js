@@ -17,7 +17,7 @@
         Config.locateAppBaseUrl = "";
         Config.locateOverlayBaseUrl = "";
         Config.urlParams = "";
-        // Memory, not IndexedDB: a cached filesystem would keep a stale game zip.
+        // Memory, not IndexedDB: a cached filesystem would keep a stale Wine or game zip.
         Config.storageMode = STORAGE_MEMORY;
         Config.persist_d_drive = true;
         Config.showUploadDownload = false;

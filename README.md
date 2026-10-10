@@ -11,8 +11,9 @@ Project page that inspired this: https://julianoliver.com/projects/escape-from-w
 ## How it works
 
 - `public/boxedwine/` — Boxedwine 26R1 single-threaded web build (no
-  cross-origin isolation headers) plus a Wine 11 root filesystem
-  (`boxedwine.zip`).
+  cross-origin isolation headers) plus the Wine 6.0 root filesystem
+  shipped in that build (`wine6.zip`). Wine 11's web filesystem omits
+  API-set DLLs, so `wineboot` never finishes and `xash.dll` cannot load.
 - `public/boxedwine/woomera.zip` — the Windows game Boxedwine mounts as
   `C:\files`:
   - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, `vgui.dll`, SDL2 and
@@ -73,7 +74,8 @@ npm run pack:wine
   commit `51353ff8d65e58300eeb2bd014867673f1f367c6`, MinGW i686
 - SDL2 2.32.10 MinGW development package
 - Wine host: [Boxedwine 26R1](https://github.com/danoon2/Boxedwine/releases/tag/26R1.0)
-  `Boxedwine26R1Web.zip`, single-threaded emulator, `Wine11/boxedwine.zip` (GPL)
+  `Boxedwine26R1Web.zip`, single-threaded emulator and its Wine 6.0
+  filesystem, copied here as `wine6.zip` (GPL)
 - Base game: Half-Life: Uplink demo `valve/` from
   https://archive.org/download/Half-lifeUplink/hluplink.exe
   (Valve/Sierra, 1999, freely distributed demo)
