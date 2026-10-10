@@ -2665,8 +2665,15 @@ void CRefugee::IdleThink( void )
 	static int s_startArm;
 	static int s_spotDone;
 	static int s_routeMiss;
+	static int s_inIdle;
 	int walkStart = 0;
 	int peThink = 0;
+
+	/* SET_ORIGIN inside Move re-enters this think. The nested call must
+	   return or the frame never comes back. */
+	if( s_inIdle )
+		return;
+	s_inIdle = 1;
 
 	// CRefugee::IdleThink 0x100c6440
 	{
@@ -2686,9 +2693,15 @@ void CRefugee::IdleThink( void )
 	   earlier +3. Frozen sv.time never reaches it, so the pulse is the think. */
 	pev->nextthink = gpGlobals->time;
 	if( !pev->modelindex )
+	{
+		s_inIdle = 0;
 		return;
+	}
 	if( pev->health == 2.0f )
+	{
+		s_inIdle = 0;
 		return;
+	}
 	{
 		static int s_calls;
 		s_calls++;
@@ -2696,23 +2709,13 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "idle calls %d", s_calls );
 	}
 	tn = STRING( pev->targetname );
-	/* Stock StartMonster is the WALK_MOVE(0) stuck check plus the
-	   path-corner route. Link from inside the think re-enters this
-	   function, so the state is stored before the call. */
+	/* StartMonster installs CallMonsterThink, so the pulse's later
+	   Think() never came back here. The original IdleThink does not
+	   call it. IDLE is enough for RunAI's Look/Listen. */
+	if( m_MonsterState == MONSTERSTATE_NONE )
 	{
-		static int s_inAi;
-		if( !s_inAi && m_MonsterState == MONSTERSTATE_NONE )
-		{
-			s_inAi = 1;
-			m_MonsterState = MONSTERSTATE_IDLE;
-			EFW_DebugPrint( "startmonster enter %s tgt=%s",
-				( tn && tn[0] ) ? tn : "?",
-				FStringNull( pev->target ) ? "-" : STRING( pev->target ) );
-			StartMonster();
-			EFW_DebugPrint( "startmonster back %s state=%d",
-				( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
-			s_inAi = 0;
-		}
+		m_MonsterState = MONSTERSTATE_IDLE;
+		m_IdealMonsterState = MONSTERSTATE_IDLE;
 	}
 	{
 		static int s_cont;
@@ -2804,31 +2807,6 @@ void CRefugee::IdleThink( void )
 			}
 		}
 		s_walkTick++;
-		{
-			static int s_runai;
-			static int s_inRun;
-
-			if( !s_inRun )
-			{
-				s_inRun = 1;
-				if( s_runai < 40 )
-					EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
-				if( m_flDistLook < 1.0f )
-					m_flDistLook = 2048.0f;
-				Look( m_flDistLook );
-				if( s_runai < 40 )
-					EFW_DebugPrint( "runai look %s", ( tn && tn[0] ) ? tn : "?" );
-				Listen();
-				if( s_runai < 40 )
-					EFW_DebugPrint( "runai listen %s", ( tn && tn[0] ) ? tn : "?" );
-				MaintainSchedule();
-				if( s_runai < 40 )
-					EFW_DebugPrint( "runai back %s state=%d",
-						( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
-				s_runai++;
-				s_inRun = 0;
-			}
-		}
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
 		if( ( s_idleLog <= 2 ) || ( ( s_walkTick % 0x52 ) == 0 ) )
@@ -3349,9 +3327,44 @@ void CRefugee::IdleThink( void )
 			EFW_DebugPrint( "idle leave %s", ( tn && tn[0] ) ? tn : "?" );
 		}
 	}
-	/* The pulse in StartFrame is the think. nextthink stays clear so
-	   SV_RunThink does not run this function a second time. */
+	/* FUN_1005d160 is MonsterThink: RunAI, then Move while a goal is set.
+	   It writes nextthink = time+0.1. The pulse is the scheduler, so
+	   that stamp is cleared and SV_RunThink does not run a second copy. */
+	{
+		static int s_mt;
+		static int s_step;
+		float ox = pev->origin.x;
+		float oy = pev->origin.y;
+
+		if( m_flDistLook < 1.0f )
+			m_flDistLook = 2048.0f;
+		if( s_mt < 4 )
+			EFW_DebugPrint( "sdk think enter %s goal=%d",
+				( tn && tn[0] ) ? tn : "?", m_movementGoal );
+		MonsterThink();
+		if( s_mt < 8 )
+		{
+			s_mt++;
+			EFW_DebugPrint( "sdk think back %s %.0f %.0f -> %.0f %.0f goal=%d",
+				( tn && tn[0] ) ? tn : "?",
+				ox, oy, pev->origin.x, pev->origin.y, m_movementGoal );
+		}
+		else if( s_step < 6 )
+		{
+			float dx = pev->origin.x - ox;
+			float dy = pev->origin.y - oy;
+
+			if( dx * dx + dy * dy > 1.0f )
+			{
+				s_step++;
+				EFW_DebugPrint( "sdk think step %s %.0f %.0f -> %.0f %.0f",
+					( tn && tn[0] ) ? tn : "?",
+					ox, oy, pev->origin.x, pev->origin.y );
+			}
+		}
+	}
 	pev->nextthink = 0.0f;
+	s_inIdle = 0;
 }
 
 void CRefugee::Precache( void )
