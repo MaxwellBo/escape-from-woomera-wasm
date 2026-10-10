@@ -2697,19 +2697,14 @@ void CRefugee::IdleThink( void )
 		static int s_inAi;
 		if( !s_inAi && m_MonsterState == MONSTERSTATE_NONE )
 		{
-			static int s_startMon;
-
 			s_inAi = 1;
 			m_MonsterState = MONSTERSTATE_IDLE;
-			if( s_startMon < 4 )
-				EFW_DebugPrint( "startmonster enter %s", ( tn && tn[0] ) ? tn : "?" );
+			EFW_DebugPrint( "startmonster enter %s tgt=%s",
+				( tn && tn[0] ) ? tn : "?",
+				FStringNull( pev->target ) ? "-" : STRING( pev->target ) );
 			StartMonster();
-			if( s_startMon < 4 )
-			{
-				s_startMon++;
-				EFW_DebugPrint( "startmonster back %s state=%d",
-					( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
-			}
+			EFW_DebugPrint( "startmonster back %s state=%d",
+				( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
 			s_inAi = 0;
 		}
 	}
