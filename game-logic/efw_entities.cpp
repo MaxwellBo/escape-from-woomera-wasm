@@ -2690,6 +2690,23 @@ void CRefugee::IdleThink( void )
 	if( pev->health == 2.0f )
 		return;
 	tn = STRING( pev->targetname );
+	/* Stock StartMonster is the WALK_MOVE(0) stuck check plus the
+	   path-corner route. The first think is that call; later thinks
+	   are RunAI, which MaintainSchedule drives. */
+	if( m_MonsterState == MONSTERSTATE_NONE )
+	{
+		static int s_startMon;
+
+		if( s_startMon < 4 )
+			EFW_DebugPrint( "startmonster enter %s", ( tn && tn[0] ) ? tn : "?" );
+		StartMonster();
+		if( s_startMon < 4 )
+		{
+			s_startMon++;
+			EFW_DebugPrint( "startmonster back %s state=%d",
+				( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+		}
+	}
 	if( s_idleLog < 1 )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
@@ -2763,6 +2780,19 @@ void CRefugee::IdleThink( void )
 			}
 		}
 		s_walkTick++;
+		{
+			static int s_runai;
+
+			if( s_runai < 4 )
+				EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
+			RunAI();
+			if( s_runai < 4 )
+			{
+				s_runai++;
+				EFW_DebugPrint( "runai back %s state=%d",
+					( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+			}
+		}
 		delta = pPlayer->pev->origin - pev->origin;
 		dist = delta.Length();
 		if( ( s_idleLog <= 2 ) || ( ( s_walkTick % 0x52 ) == 0 ) )
@@ -3589,12 +3619,12 @@ void EFW_PatrolAlertAll( void )
 		   FRefreshRoute stalls, so only the goal fields are stored. */
 		pg->m_hTargetEnt = pPlayer;
 		pg->m_hEnemy = pPlayer;
-		pg->m_moveWaitTime = 0;
-		pg->m_movementActivity = ACT_RUN;
-		pg->m_movementGoal = MOVEGOAL_TARGETENT;
 		pg->m_iAlert = 4;
 		if( pPlayer )
+		{
 			pg->m_vecLastSeen = pPlayer->pev->origin;
+			pg->MoveToTarget( ACT_RUN, 0 );
+		}
 		/* MoveToTarget (0x1005d500) stores ACT_RUN and does not
 		   SetActivity. MoveExecute copies that into ideal after this
 		   think has already stepped, and RunAI applies it next think. */
@@ -3978,7 +4008,12 @@ void CPatrolGuard::PatrolThink( void )
 		   idle sequence is 0, and that step does not slide. */
 		if( speed < 1.0f && m_Activity != ACT_IDLE )
 			speed = 64.0f;
-		moved = EFW_StepNpc( pev, pPlayer->pev->origin, speed, flInterval, pPlayer->edict() );
+		{
+			float ox = pev->origin.x;
+			float oy = pev->origin.y;
+			Move( flInterval );
+			moved = ( fabsf( pev->origin.x - ox ) + fabsf( pev->origin.y - oy ) ) > 0.5f;
+		}
 		if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
 		{
 			static int s_g2;
@@ -4045,8 +4080,12 @@ void CPatrolGuard::PatrolThink( void )
 
 				if( speed < 1.0f && m_Activity != ACT_IDLE )
 					speed = 64.0f;
-				moved = EFW_StepNpc( pev, m_vecMoveGoal, speed, flInterval,
-					pPlayer ? pPlayer->edict() : NULL );
+				{
+					float ox = pev->origin.x;
+					float oy = pev->origin.y;
+					Move( flInterval );
+					moved = ( fabsf( pev->origin.x - ox ) + fabsf( pev->origin.y - oy ) ) > 0.5f;
+				}
 				if( tn && !strcmp( tn, "Patrol_Guard_2" ) )
 				{
 					static int s_istep;
@@ -4180,13 +4219,20 @@ void CPatrolGuard::PatrolThink( void )
 				}
 			if( cornerDist > 1.0f )
 			{
-				/* MoveExecute uses the sequence ground speed. An idle
-				   sequence is 0, and that step does not slide. */
+				float ox = pev->origin.x;
+				float oy = pev->origin.y;
+
 				speed = m_flGroundSpeed * pev->framerate;
 				if( speed < 1.0f && m_Activity != ACT_IDLE )
 					speed = 64.0f;
-				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
-					haveNext ? &nextAt : NULL );
+				if( m_movementGoal == MOVEGOAL_NONE )
+				{
+					m_movementGoal = MOVEGOAL_PATHCORNER;
+					m_movementActivity = ACT_WALK;
+					FRefreshRoute();
+				}
+				Move( flInterval );
+				moved = ( fabsf( pev->origin.x - ox ) + fabsf( pev->origin.y - oy ) ) > 0.5f;
 				{
 					static int s_stepLog;
 					if( s_stepLog < 6 )
@@ -4640,18 +4686,28 @@ void EFW_OfficerThink( CBaseMonster *pMon )
 			}
 			if( cornerDist > 1.0f )
 			{
+				float ox = pev->origin.x;
+				float oy = pev->origin.y;
+
 				speed = pMon->m_flGroundSpeed * pev->framerate;
 				if( speed < 1.0f && pMon->m_Activity != ACT_IDLE )
 					speed = 64.0f;
-				moved = EFW_StepNpc( pev, faceAt, speed, flInterval, NULL,
-					haveNext ? &nextAt : NULL );
+				if( pMon->m_movementGoal == MOVEGOAL_NONE )
 				{
-					static int s_step;
-					if( s_step < 6 && EFW_FStrEq( tn, "efw_electrician" ) )
+					pMon->m_movementGoal = MOVEGOAL_PATHCORNER;
+					pMon->m_movementActivity = ACT_WALK;
+					pMon->FRefreshRoute();
+				}
+				pMon->Move( flInterval );
+				moved = ( fabsf( pev->origin.x - ox ) + fabsf( pev->origin.y - oy ) ) > 0.5f;
+				{
+					static int s_omove;
+					if( s_omove < 6 )
 					{
-						s_step++;
-						EFW_DebugPrint( "officer step %s moved=%d seq=%d act=%d spd=%.0f iv=%.3f",
-							tn, moved, pev->sequence, (int)pMon->m_Activity, speed, flInterval );
+						s_omove++;
+						EFW_DebugPrint( "officer move %s moved=%d %.0f %.0f -> %.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", moved,
+							ox, oy, pev->origin.x, pev->origin.y );
 					}
 				}
 			}
