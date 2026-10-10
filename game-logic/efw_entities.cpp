@@ -2691,20 +2691,26 @@ void CRefugee::IdleThink( void )
 		return;
 	tn = STRING( pev->targetname );
 	/* Stock StartMonster is the WALK_MOVE(0) stuck check plus the
-	   path-corner route. The first think is that call; later thinks
-	   are RunAI, which MaintainSchedule drives. */
-	if( m_MonsterState == MONSTERSTATE_NONE )
+	   path-corner route. Link from inside the think re-enters this
+	   function, so the state is stored before the call. */
 	{
-		static int s_startMon;
-
-		if( s_startMon < 4 )
-			EFW_DebugPrint( "startmonster enter %s", ( tn && tn[0] ) ? tn : "?" );
-		StartMonster();
-		if( s_startMon < 4 )
+		static int s_inAi;
+		if( !s_inAi && m_MonsterState == MONSTERSTATE_NONE )
 		{
-			s_startMon++;
-			EFW_DebugPrint( "startmonster back %s state=%d",
-				( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+			static int s_startMon;
+
+			s_inAi = 1;
+			m_MonsterState = MONSTERSTATE_IDLE;
+			if( s_startMon < 4 )
+				EFW_DebugPrint( "startmonster enter %s", ( tn && tn[0] ) ? tn : "?" );
+			StartMonster();
+			if( s_startMon < 4 )
+			{
+				s_startMon++;
+				EFW_DebugPrint( "startmonster back %s state=%d",
+					( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+			}
+			s_inAi = 0;
 		}
 	}
 	if( s_idleLog < 1 )
@@ -2782,15 +2788,21 @@ void CRefugee::IdleThink( void )
 		s_walkTick++;
 		{
 			static int s_runai;
+			static int s_inRun;
 
-			if( s_runai < 4 )
-				EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
-			RunAI();
-			if( s_runai < 4 )
+			if( !s_inRun )
 			{
-				s_runai++;
-				EFW_DebugPrint( "runai back %s state=%d",
-					( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+				s_inRun = 1;
+				if( s_runai < 4 )
+					EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
+				RunAI();
+				if( s_runai < 4 )
+				{
+					s_runai++;
+					EFW_DebugPrint( "runai back %s state=%d",
+						( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
+				}
+				s_inRun = 0;
 			}
 		}
 		delta = pPlayer->pev->origin - pev->origin;
