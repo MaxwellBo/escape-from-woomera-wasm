@@ -2633,6 +2633,28 @@ static int EFW_BindOneDetainee( void )
 		   this frame, outside the think, which is the path that does not
 		   re-enter IdleThink. */
 		EFW_LinkNpcBody( pent );
+		/* One studio, one 16-unit step. "enter" without "ret" means the
+		   call did not return; a later PreThink means the frame lived. */
+		{
+			static int s_walkProbe;
+			if( !s_walkProbe && g_engfuncs.pfnWalkMove )
+			{
+				char line[180];
+				float ox = pent->v.origin.x;
+				float oy = pent->v.origin.y;
+				int ret;
+				s_walkProbe = 1;
+				snprintf( line, sizeof( line ),
+					"efw: walk probe enter edict=%d yaw=%.0f\n",
+					i, pent->v.angles.y );
+				EFW_LogLine( line );
+				ret = g_engfuncs.pfnWalkMove( pent, pent->v.angles.y, 16.0f, WALKMOVE_NORMAL );
+				snprintf( line, sizeof( line ),
+					"efw: walk probe ret=%d %.0f %.0f -> %.0f %.0f\n",
+					ret, ox, oy, pent->v.origin.x, pent->v.origin.y );
+				EFW_LogLine( line );
+			}
+		}
 		EFW_EnableNpcThink( pent );
 		return 1;
 	}
