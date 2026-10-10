@@ -2689,6 +2689,12 @@ void CRefugee::IdleThink( void )
 		return;
 	if( pev->health == 2.0f )
 		return;
+	{
+		static int s_calls;
+		s_calls++;
+		if( ( s_calls % 100 ) == 1 )
+			EFW_DebugPrint( "idle calls %d", s_calls );
+	}
 	tn = STRING( pev->targetname );
 	/* Stock StartMonster is the WALK_MOVE(0) stuck check plus the
 	   path-corner route. Link from inside the think re-enters this
@@ -2764,6 +2770,15 @@ void CRefugee::IdleThink( void )
 				s_peLog++;
 				EFW_DebugPrint( ">>> FUN_1005d160 +0.1 %s t=%.1f",
 					( tn && tn[0] ) ? tn : "?", now );
+			}
+			else
+			{
+				static int s_more;
+				if( s_more < 3 )
+				{
+					s_more++;
+					EFW_DebugPrint( "pe later %s t=%.1f", ( tn && tn[0] ) ? tn : "?", now );
+				}
 			}
 		}
 		if( peThink )
