@@ -968,7 +968,7 @@ function applyPrevQuestion(_text: string): boolean {
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
-  if (/startmonster|runai |idle cont|idle leave|idle calls|pe later|sdk |walk probe|officer move|patrol step|efw: sim |efw: drop |boot:|boot beat|hope /.test(normalized)) {
+  if (/startmonster|runai |idle cont|idle leave|idle calls|pe later|sdk |walk probe|officer move|patrol step|efw:|boot:|boot beat|hope |ERR:/.test(normalized)) {
     fetch('http://127.0.0.1:8799/', { method: 'POST', body: normalized }).catch(() => undefined);
   }
   applyHopeHud(normalized);
@@ -2286,6 +2286,7 @@ async function boot() {
     log('boot: main()');
     logViewMetrics('pre-main');
     engine.main();
+    log('boot: main returned');
     presentCanvasInWrap();
     setTimeout(() => {
       presentCanvasInWrap();
@@ -2604,6 +2605,7 @@ void (async () => {
   /* A stuck WASM frame never answers the debugger. These posts leave
      the page on the beacon until the main thread blocks. */
   {
+    log('boot beat 0');
     let beats = 0;
     const beat = setInterval(() => {
       beats++;
