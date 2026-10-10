@@ -2798,7 +2798,15 @@ void CRefugee::IdleThink( void )
 				s_inRun = 1;
 				if( s_runai < 40 )
 					EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
-				RunAI();
+				if( m_flDistLook < 1.0f )
+					m_flDistLook = 2048.0f;
+				Look( m_flDistLook );
+				if( s_runai < 40 )
+					EFW_DebugPrint( "runai look %s", ( tn && tn[0] ) ? tn : "?" );
+				Listen();
+				if( s_runai < 40 )
+					EFW_DebugPrint( "runai listen %s", ( tn && tn[0] ) ? tn : "?" );
+				MaintainSchedule();
 				if( s_runai < 40 )
 					EFW_DebugPrint( "runai back %s state=%d",
 						( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
