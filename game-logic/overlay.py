@@ -55,6 +55,7 @@ def main() -> None:
             "dlls/world.cpp",
             "dlls/weapons.cpp",
             "dlls/util.cpp",
+            "dlls/monsters.cpp",
             "cl_dll/hud.h",
             "cl_dll/hud.cpp",
             "cl_dll/input.cpp",
@@ -619,6 +620,14 @@ def main() -> None:
         "}\n",
     )
 
+    once(
+        dlls / "monsters.cpp",
+        "\t\tif( pCurrentSound )\n\t\t\tiSound = pCurrentSound->m_iNext;\n\t}",
+        "\t\t/* A zeroed pool keeps m_iNext == 0, so the list never ends. */\n"
+        "\t\tif( !pCurrentSound || pCurrentSound->m_iNext == iSound )\n"
+        "\t\t\tbreak;\n"
+        "\t\tiSound = pCurrentSound->m_iNext;\n\t}",
+    )
     cmake_root = sdk / "CMakeLists.txt"
     # xash3d-fwgs@1.2.2:
     # - SIDE_MODULE=1 keeps dlsym entry points (GiveFnptrsToDll / HUD_*).
