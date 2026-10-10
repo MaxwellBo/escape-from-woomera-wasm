@@ -722,13 +722,25 @@
         }
       };
       Module.setStatus('Downloading...');
-      window.onerror = function() {
+      function reportPageError(kind, detail) {
+        try { parent.postMessage({ source: 'boxedwine', line: kind + ': ' + detail }, '*'); } catch (e) {}
         Module.setStatus('Exception thrown, see JavaScript console');
         spinnerElement.style.display = 'none';
         Module.setStatus = function(text) {
           if (text) Module.printErr('[post-exception status] ' + text);
         };
+      }
+      window.onerror = function(message, source, lineno, colno, error) {
+        var detail = String(message) + ' @ ' + source + ':' + lineno + ':' + colno;
+        if (error && error.stack)
+          detail += '\n' + error.stack;
+        reportPageError('exception', detail);
       };
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var detail = reason && reason.stack ? String(reason.stack) : String(reason);
+        reportPageError('unhandledrejection', detail);
+      });
         function startWithFiles(files) {
             for (let i = 0; i < files.length; i++) {
                 uploadFile(files[i]);
