@@ -2827,6 +2827,27 @@ void CRefugee::IdleThink( void )
 					pev->origin.x, pev->origin.y, pev->origin.z );
 				if( !built )
 				{
+					Vector to = pPlayer->pev->origin - pev->origin;
+					float reach = 0.0f;
+					float len;
+					Vector spot;
+					int local;
+
+					to.z = 0.0f;
+					len = to.Length();
+					if( len > 48.0f )
+						to = to * ( 48.0f / len );
+					spot = pev->origin + to;
+					local = ( len > 1.0f )
+						? CheckLocalMove( pev->origin, spot, NULL, &reach )
+						: LOCALMOVE_INVALID;
+					EFW_DebugPrint( "sdk local %s ret=%d reach=%.0f",
+						( tn && tn[0] ) ? tn : "?", local, reach );
+					if( local == LOCALMOVE_VALID )
+						built = MoveToLocation( ACT_WALK, 2, spot ) ? 1 : 0;
+				}
+				if( !built )
+				{
 					float heldYaw = pev->angles.y;
 
 					m_movementGoal = MOVEGOAL_NONE;
@@ -2965,7 +2986,7 @@ void CRefugee::IdleThink( void )
 				}
 			}
 		}
-		else if( m_movementGoal == MOVEGOAL_TARGETENT
+		else if( ( m_movementGoal == MOVEGOAL_TARGETENT || m_movementGoal == MOVEGOAL_LOCATION )
 			&& m_movementActivity == ACT_WALK
 			&& dist > 100.0f )
 		{
