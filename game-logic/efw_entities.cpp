@@ -2708,6 +2708,14 @@ void CRefugee::IdleThink( void )
 			s_inAi = 0;
 		}
 	}
+	{
+		static int s_cont;
+		if( s_cont < 40 )
+		{
+			s_cont++;
+			EFW_DebugPrint( "idle cont %s", ( tn && tn[0] ) ? tn : "?" );
+		}
+	}
 	if( s_idleLog < 1 )
 		EFW_DebugPrint( "IdleThink enter %s mi=%d",
 			( tn && tn[0] ) ? tn : "?", pev->modelindex );
@@ -2788,15 +2796,13 @@ void CRefugee::IdleThink( void )
 			if( !s_inRun )
 			{
 				s_inRun = 1;
-				if( s_runai < 4 )
+				if( s_runai < 40 )
 					EFW_DebugPrint( "runai enter %s", ( tn && tn[0] ) ? tn : "?" );
 				RunAI();
-				if( s_runai < 4 )
-				{
-					s_runai++;
+				if( s_runai < 40 )
 					EFW_DebugPrint( "runai back %s state=%d",
 						( tn && tn[0] ) ? tn : "?", (int)m_MonsterState );
-				}
+				s_runai++;
 				s_inRun = 0;
 			}
 		}
@@ -3311,6 +3317,14 @@ void CRefugee::IdleThink( void )
 		s_startArm = 0;
 		EFW_DebugPrint( "refugee start frame %s seq=%d frame=%.1f origin=%.0f %.0f",
 			tn, pev->sequence, pev->frame, pev->origin.x, pev->origin.y );
+	}
+	{
+		static int s_leave;
+		if( s_leave < 40 )
+		{
+			s_leave++;
+			EFW_DebugPrint( "idle leave %s", ( tn && tn[0] ) ? tn : "?" );
+		}
 	}
 }
 

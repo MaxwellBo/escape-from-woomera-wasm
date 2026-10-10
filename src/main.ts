@@ -25,7 +25,7 @@ const logCount = document.getElementById('log-count') as HTMLSpanElement;
 function publicAsset(path: string): string {
   const url = `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
   if (/\.wasm$/i.test(path))
-    return `${url}?v=efw-dll436`;
+    return `${url}?v=efw-dll437`;
   return url;
 }
 
@@ -968,7 +968,7 @@ function applyPrevQuestion(_text: string): boolean {
 function log(text: string) {
   const normalized = String(text).replace(/\s+$/, '');
   if (!normalized) return;
-  if (/startmonster|runai |sdk |walk probe|officer move|patrol step|efw: sim |efw: drop /.test(normalized)) {
+  if (/startmonster|runai |idle cont|idle leave|sdk |walk probe|officer move|patrol step|efw: sim |efw: drop /.test(normalized)) {
     fetch('http://127.0.0.1:8799/', { method: 'POST', body: normalized }).catch(() => undefined);
   }
   applyHopeHud(normalized);
