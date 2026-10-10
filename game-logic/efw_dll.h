@@ -64,10 +64,13 @@ struct EfwDllState
 
 	int menuCount;
 	int menuChoices[EFW_MENU_LINES];
+	int talkCursor; /* FUN_100b9990: -1 is the depth-0 menu; else the question just answered */
 	int menuMode; /* 0 none, 1 topics, 2 reply */
 	char menuTitle[80];
 	char menuText[EFW_MENU_LINES][160];
 	char prevQuestion[160]; /* DAT_10134480; FUN_100c69a0 copies the hotkey line */
+	char speech[512]; /* character record+8; FUN_100b9bb9 title while fresh */
+	float speechAt; /* compared with DAT_1011d128 (20s) */
 
 	int items;
 	int mapLevel; /* FUN_100c5b80: 0 level1, 1 level2, 2 level3 */
@@ -89,6 +92,8 @@ void EFW_SetHudInt( int slot, int value ); /* 0x100c81a0 */
 int EFW_GetHudInt( int slot ); /* 0x100c81b0 */
 void EFW_ThinkDt( void ); /* 0x100c6a70 */
 void EFW_ThinkHope( void ); /* 0x100c6ad0 */
+float EFW_HostInterval( void ); /* wall seconds since the previous host pump */
+float EFW_HostClock( void ); /* accumulated pump seconds; sv.time stays put */
 void EFW_SendHudState( void ); /* 0x100c6b60 */
 void EFW_SendEfwData( void ); /* 0x100c6dd0 */
 void EFW_FailOrNarrate( CBasePlayer *pPlayer, int code ); /* 0x100c81d0 */
@@ -105,6 +110,8 @@ void EFW_DebugPrint( const char *fmt, ... ); /* 0x100c80d0 */
 int EFW_FStrEq( const char *a, const char *b ); /* 0x100c8160 */
 void EFW_ShowGoldMenu( CBasePlayer *pPlayer, int bits, int seconds, const char *text );
 void EFW_ShowDllMenu( CBasePlayer *pPlayer, const char *title, const char **lines, int nLines );
+/* FUN_100c6e60 partner label: mapped display name, '_' becomes ' '. */
+const char *EFW_MenuSpeakerName( CBaseEntity *pNpc );
 void EFW_CloseMenu( CBasePlayer *pPlayer );
 void EFW_Print( CBasePlayer *pPlayer, const char *text );
 void EFW_GiveItem( CBasePlayer *pPlayer, int itemBit, const char *weaponName );
@@ -123,10 +130,13 @@ void EFW_LoadAllConversations( void ); /* 0x100b8ff0 */
 void EFW_ThinkConversation( void ); /* 0x100c6c10 */
 void EFW_TalkScan( void ); /* 0x100c7830 */
 void EFW_HtmlVguiSync( void ); /* FUN_10044f70 stand-in: TalkScan → /efwvgui.txt */
+void EFW_SetPromptContext( CBasePlayer *pPlayer, int on ); /* FUN_10046370 / FUN_10048740 */
 void EFW_PollMenuKeys( void ); /* FUN_100c6a60 → FUN_100c69a0 GetAsyncKeyState */
 void EFW_LatchInUse( void ); /* HostFwd +use when usercmds do not flush */
 void EFW_LatchMove( int fwd, int side ); /* HostFwd WASD when usercmds do not flush */
-void EFW_LatchTurn( float yawDelta ); /* HostFwd Q/arrow look when usercmds do not flush */
+void EFW_LatchSpeed( int on ); /* HostFwd +speed; cl_movespeedkey on the wish */
+void EFW_LatchUseHold( int on ); /* HostFwd +use held; maxspeed / 3 on the ground */
+void EFW_LatchTurn( float yawDelta, float pitchDelta = 0.0f ); /* HostFwd look when usercmds do not flush */
 void EFW_LatchMenuKey( int slot ); /* FUN_100c6a50 */
 void EFW_SendCntxt( void ); /* 0x100c7d30 */
 void EFW_Squark( const char *targetname, const char *text = 0, int flags = 0 ); /* 0x100ba040 */
@@ -138,6 +148,8 @@ const char *EFW_ScriptNameForNpc( CBaseEntity *pNpc );
 int EFW_IsTalkNpc( CBaseEntity *pEnt );
 
 int EFW_FireTargets( const char *targetName, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value ); /* 0x100c7da0 */
+void EFW_AdvanceTriggerWaits( void ); /* host clock finishes trigger_multiple wait */
+void EFW_AdvancePushers( void ); /* host clock steps MOVETYPE_PUSH; sv ltime stays put */
 void EFW_PulseWorld( CBasePlayer *pPlayer ); /* trigger AABB + GateFSM while noclip */
 void EFW_HideUnderBuilding( CBasePlayer *pPlayer ); /* ClientCommand 0x1001b969 */
 void EFW_SetPause( int on ); /* 0x100c7510 */
@@ -150,6 +162,8 @@ int EFW_WeaponMask( CBasePlayer *pPlayer ); /* inventory bits for ids 16..31, pa
 void EFW_UseNamed( const char *targetname, CBaseEntity *pActivator, CBaseEntity *pCaller, int useType, float value );
 void EFW_StripWeapon( CBasePlayer *pPlayer, const char *classname, int itemBit );
 CBaseEntity *EFW_PlaceIdTag( CBaseEntity *pTag, CBaseEntity *pMarker ); /* FUN_100c2a20 */
+void EFW_ArmIdTagPickup( edict_t *ed ); /* GetTickCount + 500ms at weapon+0x12c */
+int EFW_IdTagPickupBlocked( edict_t *ed ); /* FUN_100c29f0: deadline still ahead */
 CBaseEntity *EFW_MaterializeIdTag( CBaseEntity *pMarker ); /* FUN_100c27f0 then FUN_100c2a20 */
 CBaseEntity *EFW_PlacePlayerIdTag( CBasePlayer *pPlayer, CBaseEntity *pMarker );
 void EFW_PatrolAlertAll( void ); /* FUN_100c5480: every monster_patrol_guard chases the player */
@@ -163,6 +177,10 @@ void EFW_WPrecache( void ); /* FUN_100b2f80 after HL weapons */
 void EFW_OnServerActivate( void );
 void EFW_OnServerDeactivate( void );
 void EFW_EnableNpcThink( edict_t *pent );
+void EFW_BeginNpcPulse( void ); /* drop a link guard left set by the previous pump */
+void EFW_FlushNpcOrigins( void ); /* link queued hull moves outside the think */
+void EFW_LinkNpcBody( edict_t *pent ); /* queue a standing body for that same link */
+void EFW_OfficerThink( CBaseMonster *pMon ); /* monster_barney: MonsterThink anim + path step, no WALK_MOVE */
 void EFW_InitPA( void ); /* 0x100c5fb0 / 0x100c7670 */
 void EFW_ThinkPA( void ); /* 0x100c7740, from ThinkConversation when maplevel==0 */
 void EFW_PlayCue( const char *sample ); /* 0x100c75e0 */

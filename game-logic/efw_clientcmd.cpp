@@ -32,6 +32,9 @@ static void EFW_TouchTriggers( CBasePlayer *pPlayer, const Vector &pos )
 	CBaseEntity *pScan = NULL;
 	if( !pPlayer )
 		return;
+	/* Same host-clock wait the pulse uses, so a setpos into a brush that
+	   already finished its map wait can Touch on this command. */
+	EFW_AdvanceTriggerWaits();
 	while( ( pScan = UTIL_FindEntityByClassname( pScan, "trigger_multiple" ) ) != NULL )
 	{
 		if( pScan != pPlayer && EFW_PosInBox( pos, pScan ) )
@@ -110,6 +113,30 @@ static Vector EFW_Place( CBaseEntity *pEnt )
 	if( ( pEnt->pev->absmax - pEnt->pev->absmin ).Length() < 1.0f )
 		c = pEnt->pev->origin;
 	return c;
+}
+
+CBaseEntity *EFW_FindNamedNearest( const char *name, CBasePlayer *pPlayer )
+{
+	CBaseEntity *pScan = NULL;
+	CBaseEntity *pBest = NULL;
+	float best = 0.0f;
+	if( !name || !name[0] )
+		return NULL;
+	/* UTIL_FindEntityByTargetname(NULL) is the first edict. Several
+	   refugees share "detainee", and that first one is often across the
+	   compound, so ThinkConversation closes the menu the same frame. */
+	while( ( pScan = UTIL_FindEntityByTargetname( pScan, name ) ) != NULL )
+	{
+		float d = 0.0f;
+		if( pPlayer )
+			d = ( pScan->pev->origin - pPlayer->pev->origin ).Length();
+		if( !pBest || d < best )
+		{
+			best = d;
+			pBest = pScan;
+		}
+	}
+	return pBest;
 }
 
 static CBaseEntity *EFW_NearestTalkNpc( CBasePlayer *pPlayer, float dist )
@@ -620,16 +647,29 @@ static void EFW_ToggleDiary( void )
 
 static void EFW_StepDiary( int dir )
 {
-	int cursor = EFW_GetHudInt( 0 ) + dir;
-	int n = EFW_DiaryCount();
-	if( n <= 0 )
-		return;
-	if( cursor < 0 )
-		cursor = n - 1;
-	if( cursor >= n )
-		cursor = 0;
+	int cursor;
+	int n;
+
+	/* 0x1001b249 next / 0x1001b2b9 prev: force the diary open, then
+	   step hudInt[0]. Next that lands on the count wraps to 1.
+	   Prev that lands on 0 wraps to count-1. Slot 0 is not a stop. */
+	EFW_SetHudInt( 5, 1 );
+	n = EFW_DiaryCount();
+	cursor = EFW_GetHudInt( 0 );
+	if( dir > 0 )
+	{
+		cursor++;
+		if( cursor == n )
+			cursor = 1;
+	}
+	else
+	{
+		cursor--;
+		if( cursor == 0 )
+			cursor = n - 1;
+	}
 	EFW_SetHudInt( 0, cursor );
-	EFW_SendEfwData();
+	EFW_SendHudState();
 }
 
 static const char *EFW_CmdName( int arg0 )
@@ -690,9 +730,9 @@ int EFW_ClientCommand( edict_t *pEntity )
 		const char *who = EFW_CmdName( arg0 );
 		EfwDllState *st = EFW_Dll();
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, pPlayer );
 		if( !pEnt && st->scanCount && st->scan[0].type == 0 && st->scan[0].name[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, st->scan[0].name );
+			pEnt = EFW_FindNamedNearest( st->scan[0].name, pPlayer );
 		if( !pEnt )
 			pEnt = UTIL_FindEntityByTargetname( NULL, "Amir" );
 		if( !pEnt )
@@ -719,7 +759,7 @@ int EFW_ClientCommand( edict_t *pEntity )
 				wep = atoi( a );
 		}
 		if( who && who[0] )
-			pEnt = UTIL_FindEntityByTargetname( NULL, who );
+			pEnt = EFW_FindNamedNearest( who, pPlayer );
 		if( !pEnt )
 			pEnt = EFW_AimEntity( pPlayer, 160.0f );
 		if( !pEnt || !EFW_IsTalkNpc( pEnt ) )
@@ -950,6 +990,11 @@ int EFW_ClientCommand( edict_t *pEntity )
 				pos.y = (float)atof( CMD_ARGV( arg0 + 3 ) );
 				pos.z = (float)atof( CMD_ARGV( arg0 + 4 ) );
 				UTIL_SetOrigin( pEnt->pev, pos );
+				if( CMD_ARGC() > arg0 + 5 )
+				{
+					pEnt->pev->angles.y = (float)atof( CMD_ARGV( arg0 + 5 ) );
+					pEnt->pev->ideal_yaw = pEnt->pev->angles.y;
+				}
 				EFW_DebugPrint( ">>> efw_setpos %s %.0f %.0f %.0f", who, pos.x, pos.y, pos.z );
 				return 1;
 			}
@@ -1061,6 +1106,15 @@ int EFW_ClientCommand( edict_t *pEntity )
 				EFW_DebugPrint( ">>> FUN_100c4700 models/w_pliers.mdl" );
 			}
 		}
+		return 1;
+	}
+	if( FStrEq( pcmd, "efw_context" ) )
+	{
+		int on = 1;
+		if( CMD_ARGC() > arg0 + 1 )
+			on = atoi( CMD_ARGV( arg0 + 1 ) ) != 0;
+		/* FUN_10048710 opens the bar's CommandButtons; FUN_10048740 closes. */
+		EFW_SetPromptContext( pPlayer, on );
 		return 1;
 	}
 	if( FStrEq( pcmd, "efw_pause" ) )

@@ -180,14 +180,14 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 	/* FUN_100c29f0: GetTickCount must pass this+0x12c before FUN_100c46a0. */
 	if( defEarly->itemBit == EFW_ITEM_IDTAG )
 	{
+		int blocked = EFW_IdTagPickupBlocked( edict() );
 		static int s_idGate;
-		if( !s_idGate )
+		if( s_idGate < 6 )
 		{
-			s_idGate = 1;
-			EFW_DebugPrint( ">>> FUN_100c29f0 tick=%s",
-				( pev->dmgtime && gpGlobals->time < pev->dmgtime ) ? "wait" : "ok" );
+			s_idGate++;
+			EFW_DebugPrint( ">>> FUN_100c29f0 tick=%s", blocked ? "wait" : "ok" );
 		}
-		if( pev->dmgtime && gpGlobals->time < pev->dmgtime )
+		if( blocked )
 			return FALSE;
 	}
 #endif
@@ -240,8 +240,19 @@ int CEfwWeapon::AddToPlayer( CBasePlayer *pPlayer )
 
 BOOL CEfwWeapon::Deploy()
 {
-	const EfwWeaponDef *def = EFW_FindDef( STRING( pev->classname ) );
-	return DefaultDeploy( def->vmodel, def->pmodel, 0, "crowbar" );
+	/* 0x100c4630 returns 1. The v_ model is precached and never assigned
+	   to pev->viewmodel, so the hands stay empty. */
+#ifndef CLIENT_DLL
+	{
+		static int s_dep;
+		if( !s_dep )
+		{
+			s_dep = 1;
+			EFW_DebugPrint( ">>> FUN_100c4630" );
+		}
+	}
+#endif
+	return TRUE;
 }
 
 void CEfwWeapon::Holster( int skiplocal )

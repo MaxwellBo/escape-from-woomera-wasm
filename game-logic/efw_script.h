@@ -29,6 +29,7 @@ typedef struct
 	char text[EFW_TEXT_LEN];
 	EfwReply replies[EFW_MAX_REPLIES];
 	int replyCount;
+	int depth; /* FUN_100c1cec hash run; 0 is a top-level Q */
 } EfwQuestion;
 
 typedef struct

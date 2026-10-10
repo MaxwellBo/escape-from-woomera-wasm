@@ -30,26 +30,6 @@ static const char *kConversationFiles[] = {
 };
 
 static void EFW_RegisterDefaults( void );
-static void EFW_SeedScriptTopics( const EfwScript *script );
-
-static void EFW_SeedScriptTopics( const EfwScript *script )
-{
-	int qi;
-	if( !script )
-		return;
-	for( qi = 0; qi < script->questionCount; qi++ )
-	{
-		const char *topic = script->questions[qi].topic;
-		int locked;
-		if( !topic[0] || !strcmp( topic, "UNWANTED_ITEM" ) )
-			continue;
-		/* FUN_100b9990: world-knowledge Qs start unlocked. SUBSEQUENT
-		   greetings and PLIERS_GOT_PLIERS wait for AddTopic. */
-		locked = strstr( topic, "SUBSEQUENT" ) != NULL
-			|| !strcmp( topic, "PLIERS_GOT_PLIERS" );
-		EFW_AddKeyword( topic, locked ? 0 : 1 );
-	}
-}
 
 static EfwScriptCache *EFW_ScriptSlots( void )
 {
@@ -77,7 +57,6 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 	{
 		if( slots[i].loaded && !strcmp( slots[i].name, scriptName ) )
 		{
-			EFW_SeedScriptTopics( &slots[i].script );
 			return &slots[i].script;
 		}
 		if( !slots[i].loaded && !slot )
@@ -115,7 +94,6 @@ static const EfwScript *EFW_ParseFile( const char *scriptName )
 		else
 			EFW_DebugPrint( ">>> ParseFile %s questions=%d", scriptName, slot->script.questionCount );
 	}
-	EFW_SeedScriptTopics( &slot->script );
 	strncpy( slot->name, scriptName, EFW_TOPIC_LEN - 1 );
 	slot->name[EFW_TOPIC_LEN - 1] = '\0';
 	slot->loaded = 1;
@@ -202,18 +180,58 @@ void EFW_LoadAllConversations( void )
 		}
 	}
 	EFW_DebugPrint( "efwConversation::LoadAll %d files", n );
+	/* FUN_100b9391: the only keywords set at load. FUN_100bfea0 hides
+	   any other topic until AddTopic. DeleteTopic stores flag 0. */
 	EFW_AddKeyword( "ESCAPE", 1 );
 	EFW_AddKeyword( "GREET", 1 );
 	EFW_AddKeyword( "GOODBYE", 1 );
 	EFW_RegisterDefaults();
 }
 
+/* FUN_100ba080: bit 8 skips the 1.0s gate at 0x100dd618. The stamp lives
+   on the character record, so a second speaker is not blocked by the first.
+   sv.time does not move here; the pump clock does. force still writes the stamp. */
+static int EFW_SquarkCooling( edict_t *ed, int force )
+{
+	static struct
+	{
+		edict_t *ed;
+		float at;
+	} slot[16];
+	int i;
+	int freeSlot;
+	float now;
+	if( !ed )
+		return 0;
+	now = EFW_HostClock();
+	freeSlot = -1;
+	for( i = 0; i < 16; i++ )
+	{
+		if( slot[i].ed == ed )
+		{
+			/* fcomp 1.0; test ah,0x41; jne return. Equal to 1.0 still holds. */
+			if( !force && ( now - slot[i].at ) <= 1.0f )
+				return 1;
+			slot[i].at = now;
+			return 0;
+		}
+		if( freeSlot < 0 && !slot[i].ed )
+			freeSlot = i;
+	}
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	slot[freeSlot].ed = ed;
+	slot[freeSlot].at = now;
+	return 0;
+}
+
 void EFW_Squark( const char *targetname, const char *text, int flags )
 {
 	CBaseEntity *pEnt;
 	CBasePlayer *pPlayer;
+	EfwDllState *st;
 	char line[512];
-	(void)flags;
+	float range;
 	if( !targetname || !targetname[0] )
 		return;
 	{
@@ -232,6 +250,8 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 	}
 	if( !text || !text[0] )
 		return;
+	if( EFW_SquarkCooling( pEnt->edict(), flags & 8 ) )
+		return;
 	{
 		static int s_show;
 		if( !s_show )
@@ -240,6 +260,29 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 			EFW_DebugPrint( ">>> FUN_100ba080 flags=%d", flags );
 		}
 	}
+	/* 0x100ba164: bit 2 → 1024, bit 4 → 256, else 128. Stored at DAT_1011d130. */
+	if( flags & 2 )
+		range = 1024.0f;
+	else if( flags & 4 )
+		range = 256.0f;
+	else
+		range = 128.0f;
+	{
+		static int s_range;
+		if( s_range < 4 )
+		{
+			s_range++;
+			EFW_DebugPrint( "efw: squark range=%.0f flags=%d", range, flags );
+		}
+	}
+	/* 0x100ba15a closes the previous line, then 0x100c6e60 shows this one
+	   on the speaker so FUN_100c6c10 can hide it past the range. */
+	EFW_CloseTalk();
+	st = EFW_Dll();
+	st->talkNpc = pEnt;
+	st->talkActive = 1;
+	st->menuMode = 0;
+	st->hideDist = range;
 	pPlayer = EFW_Player();
 	snprintf( line, sizeof( line ), "%s: %s", targetname, text );
 	if( pPlayer )
@@ -247,6 +290,7 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 		EFW_Print( pPlayer, line );
 		EFW_ShowDllMenu( pPlayer, text, NULL, 0 );
 	}
+	st->talkStart = EFW_HostClock();
 }
 
 static int EFW_Ieq( const char *a, const char *b )
@@ -293,6 +337,32 @@ static const char *EFW_DisplayName( const char *targetname )
 			return kDisplayNames[i].display;
 	}
 	return targetname;
+}
+
+/* FUN_100b89a0 miss path: the ShowMenu speaker is the display name with
+   underscores turned into spaces. A map hit already has the spaced name. */
+const char *EFW_MenuSpeakerName( CBaseEntity *pNpc )
+{
+	static char buf[64];
+	const char *tn;
+	const char *name;
+	int i;
+	int j;
+
+	buf[0] = '\0';
+	if( !pNpc )
+		return buf;
+	tn = STRING( pNpc->pev->targetname );
+	if( !tn || !tn[0] )
+		return buf;
+	name = EFW_DisplayName( tn );
+	if( !name )
+		return buf;
+	j = 0;
+	for( i = 0; name[i] && j < (int)sizeof( buf ) - 1; i++ )
+		buf[j++] = ( name[i] == '_' ) ? ' ' : name[i];
+	buf[j] = '\0';
+	return buf;
 }
 
 static void EFW_RegisterDefaults( void )
@@ -357,9 +427,16 @@ static int EFW_QuestionVisible( const char *npc, const EfwQuestion *q )
 			EFW_DebugPrint( ">>> FUN_100bdc40 %s %s", npc ? npc : "-", q->topic );
 		}
 	}
-	if( !q->topic[0] || !strcmp( q->topic, "UNWANTED_ITEM" ) )
+	/* A #Q prompt has no topic. FUN_100bdc40 passes an empty flag
+	   range. UNWANTED_ITEM stays off the menu. */
+	if( !strcmp( q->topic, "UNWANTED_ITEM" ) )
 		return 0;
-	if( !EFW_HasKeyword( q->topic ) )
+	if( q->topic[0] )
+	{
+		if( !EFW_HasKeyword( q->topic ) )
+			return 0;
+	}
+	else if( q->depth <= 0 )
 		return 0;
 	seen = EFW_HasSeen( npc, q->topic );
 	if( EfwFlags_Has( q->flags, "FirstTime" ) && seen )
@@ -369,30 +446,30 @@ static int EFW_QuestionVisible( const char *npc, const EfwQuestion *q )
 	return 1;
 }
 
+/* FUN_100b9cd0: every reply whose flags all pass is pushed, then
+   rand() (0x100c84e4) % count indexes that vector. FirstTime fails
+   once the topic is seen; !FirstTime fails before that. No flags pass. */
 static const EfwReply *EFW_PickReply( const char *npc, const EfwQuestion *q )
 {
+	const EfwReply *hits[EFW_MAX_REPLIES];
+	int n = 0;
 	int i;
 	int seen = EFW_HasSeen( npc, q->topic );
-	const EfwReply *fallback = NULL;
-	for( i = 0; i < q->replyCount; i++ )
+	for( i = 0; i < q->replyCount && n < EFW_MAX_REPLIES; i++ )
 	{
 		const EfwReply *r = &q->replies[i];
-		if( EfwFlags_Has( r->flags, "FirstTime" ) )
-		{
-			if( !seen )
-				return r;
+		if( EfwFlags_Has( r->flags, "FirstTime" ) && seen )
 			continue;
-		}
-		if( EfwFlags_Has( r->flags, "!FirstTime" ) )
-		{
-			if( seen )
-				return r;
+		if( EfwFlags_Has( r->flags, "!FirstTime" ) && !seen )
 			continue;
-		}
-		if( !fallback )
-			fallback = r;
+		hits[n++] = r;
 	}
-	return fallback;
+	if( !n )
+		return NULL;
+	i = RANDOM_LONG( 0, n - 1 );
+	if( n > 1 )
+		EFW_DebugPrint( ">>> FUN_100b9cd0 n=%d i=%d", n, i );
+	return hits[i];
 }
 
 void EFW_CloseTalk( void )
@@ -411,8 +488,11 @@ void EFW_CloseTalk( void )
 	st->talkNpc = NULL;
 	st->menuCount = 0;
 	st->menuMode = 0;
+	st->talkCursor = -1;
 	st->talkStart = 0;
 	st->prevQuestion[0] = '\0';
+	st->speech[0] = '\0';
+	st->speechAt = 0;
 	if( pPlayer )
 		EFW_CloseMenu( pPlayer );
 }
@@ -423,7 +503,7 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	const EfwScript *script;
 	const char *npc;
 	const char *lines[EFW_MENU_LINES];
-	char title[48];
+	char title[512];
 	int i;
 	int slot;
 
@@ -443,27 +523,85 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	snprintf( title, sizeof( title ), "Talk to %s",
-		EFW_DisplayName( STRING( pNpc->pev->targetname ) ) );
-	slot = 0;
-	for( i = 0; i < script->questionCount && slot < 6; i++ )
+	/* FUN_100b9bb9: time-speechAt < 20 uses the speech string. Otherwise
+	   the title is the empty global at 0x10121c38. A fresh efw_Talk
+	   clears speech, so the first open has no "Talk to" line. */
+	if( st->speech[0] && gpGlobals->time - st->speechAt < EFW_TALK_TIMEOUT )
 	{
-		const EfwQuestion *q = &script->questions[i];
-		if( !EFW_QuestionVisible( npc, q ) )
-			continue;
-		st->menuChoices[slot] = i;
-		lines[slot] = q->text[0] ? q->text : q->topic;
-		st->menuCount++;
-		slot++;
+		strncpy( title, st->speech, sizeof( title ) - 1 );
+		title[sizeof( title ) - 1] = '\0';
+		EFW_DebugPrint( ">>> FUN_100b9bb9 speech=1" );
+	}
+	else
+	{
+		title[0] = '\0';
+		{
+			static int s_emptyTitle;
+			if( s_emptyTitle < 4 )
+			{
+				s_emptyTitle++;
+				EFW_DebugPrint( "efw: menu title empty" );
+			}
+		}
+	}
+	/* FUN_100b9990: no current question shows depth 0 and skips
+	   deeper lines. After an answer the target is that question's
+	   depth plus one, the walk starts on the next line, a shallower
+	   line ends the walk, and a deeper line is skipped. */
+	{
+		int target = 0;
+		int begin = 0;
+		if( st->talkCursor >= 0 && st->talkCursor < script->questionCount )
+		{
+			target = script->questions[st->talkCursor].depth + 1;
+			begin = st->talkCursor + 1;
+		}
+		slot = 0;
+		for( i = begin; i < script->questionCount && slot < 6; i++ )
+		{
+			const EfwQuestion *q = &script->questions[i];
+			if( q->depth < target )
+				break;
+			if( q->depth != target )
+				continue;
+			if( !EFW_QuestionVisible( npc, q ) )
+				continue;
+			st->menuChoices[slot] = i;
+			lines[slot] = q->text[0] ? q->text : q->topic;
+			st->menuCount++;
+			slot++;
+		}
+		EFW_DebugPrint( ">>> FUN_100b9990 depth=%d n=%d %s | %s",
+			target, slot,
+			slot > 0 ? lines[0] : "",
+			slot > 1 ? lines[1] : "" );
 	}
 	EFW_DebugPrint( "CONVERSATION   (%d messages)", st->menuCount );
 	if( !st->menuCount )
 	{
+		/* FUN_100b9cd0 stores the reply, then FUN_100b9990 walks the next
+		   depth. GREET has no child topics, so that walk is empty. Closing
+		   here dropped the reply: EFW_Print had already sent it to the
+		   console and the HUD never got a title-only menu. A squark with
+		   no choices is that line (menuMode 0, same as FUN_100ba040). */
+		if( title[0] )
+		{
+			EFW_DebugPrint( ">>> FUN_100b9cd0 reply" );
+			EFW_ShowDllMenu( pPlayer, title, NULL, 0 );
+			st->menuMode = 0;
+			st->talkStart = EFW_HostClock();
+			return;
+		}
 		EFW_DebugPrint( "<conversation inactive>" );
 		EFW_CloseTalk();
 		return;
 	}
 	EFW_ShowDllMenu( pPlayer, title, lines, st->menuCount );
+	/* FUN_100c6e60 writes DAT_1013487c from gpGlobals->time. FUN_100c6c10
+	   closes the menu once that clock passes the stamp by 20s. sv.time
+	   stays at the listen-server pause, so stamp the host clock after
+	   ShowDllMenu overwrites the field. */
+	st->talkStart = EFW_HostClock();
 }
 
 void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
@@ -482,6 +620,9 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 	(void)EFW_MapLevel();
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
+	st->speech[0] = '\0';
+	st->speechAt = 0;
+	st->talkCursor = -1;
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
 
@@ -545,11 +686,15 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	int i;
 
 	static float lastPick;
+	float now;
 	if( !pPlayer || slot < 1 || slot > st->menuCount )
 		return;
-	if( gpGlobals->time < lastPick + 0.3f )
+	/* sv.time stays at the listen-server pause, so a gpGlobals->time
+	   gate accepts one menuselect and then drops the rest. */
+	now = EFW_HostClock();
+	if( now < lastPick + 0.3f )
 		return;
-	lastPick = gpGlobals->time;
+	lastPick = now;
 	pNpc = st->talkNpc;
 	if( !pNpc )
 		return;
@@ -568,11 +713,13 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	q = &script->questions[qi];
 	r = EFW_PickReply( npc, q );
 	EFW_MarkSeen( npc, q->topic );
+	/* FUN_100b9a77: the next menu is this question's depth plus one. */
+	st->talkCursor = qi;
 	/* FUN_100c69a0 copies the pressed ShowMenu line into DAT_10134480. */
 	strncpy( st->prevQuestion, q->text[0] ? q->text : q->topic,
 		sizeof( st->prevQuestion ) - 1 );
 	st->prevQuestion[sizeof( st->prevQuestion ) - 1] = '\0';
-	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic );
+	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic[0] ? q->topic : q->text );
 	body[0] = '\0';
 	if( r && r->text[0] )
 	{
@@ -593,13 +740,21 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 			}
 		}
 	}
+	/* FUN_100b9cd0 stores the reply (squark flag 8) then FUN_100b9990
+	   shows the topic lines again. "Continue" is not in the DLL. */
+	if( body[0] )
 	{
-		const char *cont = "Continue";
-		st->menuMode = 2;
-		st->menuCount = 1;
-		st->menuChoices[0] = 0;
-		EFW_ShowDllMenu( pPlayer, body[0] ? body : q->topic, &cont, 1 );
+		strncpy( st->speech, body, sizeof( st->speech ) - 1 );
+		st->speech[sizeof( st->speech ) - 1] = '\0';
+		st->speechAt = gpGlobals->time;
 	}
+	else
+	{
+		st->speech[0] = '\0';
+		st->speechAt = 0;
+	}
+	st->menuMode = 1;
+	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
 
 void EFW_ThinkConversation( void )
@@ -637,17 +792,31 @@ void EFW_ThinkConversation( void )
 				EFW_DebugPrint( ">>> FUN_100c5b60 t=%.2f", gpGlobals->time );
 			}
 		}
-		if( !pPlayer || !st->talkNpc )
-			EFW_CloseTalk();
-		else if( gpGlobals->time >= st->talkStart + EFW_TALK_TIMEOUT )
-			EFW_CloseTalk();
-		else
 		{
-			dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
-			if( dist >= st->hideDist )
+			/* FUN_100c6c10: gpGlobals->time >= DAT_1013487c + 20. The
+			   listen server leaves sv.time at 1.00, so both a squark and
+			   a choice menu measure those 20 seconds on the host clock.
+			   A null partner (narration pushes 0) skips the range test.
+			   It does not close the menu on its own. */
+			float now = EFW_HostClock();
+			if( now >= st->talkStart + EFW_TALK_TIMEOUT )
 			{
-				EFW_DebugPrint( "Conversation hidden, partner too far" );
+				if( !st->talkNpc )
+					EFW_DebugPrint( "efw: caption timeout" );
+				else if( st->menuMode == 0 )
+					EFW_DebugPrint( "efw: squark timeout" );
+				else
+					EFW_DebugPrint( "efw: menu timeout" );
 				EFW_CloseTalk();
+			}
+			else if( pPlayer && st->talkNpc )
+			{
+				dist = ( st->talkNpc->pev->origin - pPlayer->pev->origin ).Length();
+				if( dist >= st->hideDist )
+				{
+					EFW_DebugPrint( "Conversation hidden, partner too far" );
+					EFW_CloseTalk();
+				}
 			}
 		}
 		st->talkIdleTicks = 0;
@@ -666,19 +835,16 @@ static Vector EFW_AbsCenter( CBaseEntity *pEnt )
 	return c;
 }
 
-static int EFW_FacingDot( CBasePlayer *pPlayer, const Vector &target, float minDot )
+/* 0x100afc60 from the eye. fcomp 0x100f9158: keep when fraction >= 0.97. */
+static int EFW_TraceClear( CBasePlayer *pPlayer, const Vector &target )
 {
-	Vector dir;
-	float len;
+	TraceResult tr;
+	Vector eye;
 	if( !pPlayer )
 		return 0;
-	dir = target - ( pPlayer->pev->origin + pPlayer->pev->view_ofs );
-	len = dir.Length();
-	if( len < 1.0f )
-		return 1;
-	dir = dir * ( 1.0f / len );
-	UTIL_MakeVectors( pPlayer->pev->v_angle );
-	return DotProduct( gpGlobals->v_forward, dir ) >= minDot;
+	eye = pPlayer->EyePosition();
+	UTIL_TraceLine( eye, target, dont_ignore_monsters, pPlayer->edict(), &tr );
+	return tr.flFraction >= 0.97f;
 }
 
 static void EFW_FillScan( int type, const char *name, const Vector &pos )
@@ -699,12 +865,13 @@ static void EFW_FillScan( int type, const char *name, const Vector &pos )
 	st->scanCount++;
 }
 
-/* FUN_100c43b0 table labels — same strings as client EFW_WepLabel. */
+/* FUN_100440b0: same display names the client inventory and Give
+   caption use. Slots 21, 22, and 23 are all "Phone Card". */
 static const char *EFW_HtmlWepLabel( int id )
 {
 	static const char *kNames[] = {
-		"pliers", "lever", "branch", "phone", "ID tag",
-		"red card", "green card", "blue card", "powder"
+		"Pliers", "Lever", "Branch", "SIM Card", "ID Tag",
+		"Phone Card", "Phone Card", "Phone Card", "Washing Powder"
 	};
 	if( id < 16 || id > 24 )
 		return "item";
@@ -727,9 +894,10 @@ struct EfwHtmlVguiBtn
 	int x, y, w, h;
 	char cmd[96];
 	char label[64];
+	char spr[8];
 };
 
-static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const char *label, const char *cmd )
+static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const char *label, const char *cmd, const char *spr = NULL )
 {
 	EfwHtmlVguiBtn *b;
 	int w = 168;
@@ -744,18 +912,67 @@ static void EFW_HtmlVguiAdd( EfwHtmlVguiBtn *out, int *n, int x, int y, const ch
 		x = EFW_HTML_SW - 180;
 	if( y > EFW_HTML_SH - 180 )
 		y = EFW_HTML_SH - 180;
-	y += ( *n ) * 32;
-	if( y > EFW_HTML_SH - 32 )
-		y = 32 + ( ( *n ) % 10 ) * 32;
+	/* FUN_10044f70 stores this projected point on every button. The client
+	   spreads them with FUN_10045f20 (radius 130, index/count). A 32px
+	   stagger here piled the 97px quads on top of each other. */
 	b = &out[( *n )++];
 	b->w = w;
 	b->h = h;
 	b->x = x - w / 2;
 	b->y = y - h;
+	b->spr[0] = '\0';
+	if( spr && spr[0] )
+	{
+		strncpy( b->spr, spr, sizeof( b->spr ) - 1 );
+		b->spr[sizeof( b->spr ) - 1] = '\0';
+	}
 	strncpy( b->label, label ? label : "", sizeof( b->label ) - 1 );
 	b->label[sizeof( b->label ) - 1] = '\0';
 	strncpy( b->cmd, cmd ? cmd : "", sizeof( b->cmd ) - 1 );
 	b->cmd[sizeof( b->cmd ) - 1] = '\0';
+}
+
+/* FUN_10041fb0 (%C): a map hit is the display string. A miss copies the
+   targetname and turns '_' into a space. */
+static void EFW_PercentC( char *out, size_t n, const char *raw )
+{
+	static const struct
+	{
+		const char *key;
+		const char *disp;
+	} map[] = {
+		{ "efw_compound_gate_guard", "Gate Guard" },
+		{ "efw_electrician", "Electrician" },
+		{ "detainee", "Detainee" },
+		{ "detainee queue", "Detainee in queue" },
+	};
+	size_t i;
+
+	if( !out || n < 1 )
+		return;
+	out[0] = '\0';
+	if( !raw || !raw[0] )
+	{
+		strncpy( out, "them", n - 1 );
+		out[n - 1] = '\0';
+		return;
+	}
+	for( i = 0; i < sizeof( map ) / sizeof( map[0] ); i++ )
+	{
+		if( !strcmp( raw, map[i].key ) )
+		{
+			strncpy( out, map[i].disp, n - 1 );
+			out[n - 1] = '\0';
+			return;
+		}
+	}
+	strncpy( out, raw, n - 1 );
+	out[n - 1] = '\0';
+	for( i = 0; out[i]; i++ )
+	{
+		if( out[i] == '_' )
+			out[i] = ' ';
+	}
 }
 
 /* Match client EFW_BuildVgui / FUN_10044f70 CommandButton set. */
@@ -763,19 +980,34 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 {
 	char label[64];
 	char cmd[96];
+	char who[64];
 	if( s->type == 0 )
 	{
 		int id;
-		snprintf( label, sizeof( label ), "Talk to %s", s->name[0] ? s->name : "them" );
+		EFW_PercentC( who, sizeof( who ), s->name );
+		{
+			static int s_pc;
+			if( s_pc < 4 && s->name[0] && strcmp( s->name, who ) )
+			{
+				s_pc++;
+				EFW_DebugPrint( "efw: percentC %s -> %s", s->name, who );
+			}
+		}
+		snprintf( label, sizeof( label ), "Talk to %s", who );
 		snprintf( cmd, sizeof( cmd ), "efw_Talk %s", s->name[0] ? s->name : "" );
 		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+		/* FUN_10044f70: columns of 10, stride 11. The red phone card
+		   sits on the skipped index and never becomes a Give button. */
 		for( id = 16; id <= 24; id++ )
 		{
+			if( !EFW_HudWeaponVisited( id ) )
+				continue;
 			if( !EFW_HtmlHasWep( pPlayer, id ) )
 				continue;
-			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), s->name[0] ? s->name : "them" );
+			snprintf( label, sizeof( label ), "Give %s to %s", EFW_HtmlWepLabel( id ), who );
 			snprintf( cmd, sizeof( cmd ), "efw_Give %d %s", id, s->name[0] ? s->name : "" );
-			EFW_HtmlVguiAdd( out, n, x, y + 30, label, cmd );
+			/* weapon+0xbc is the item sprite, the same handle the fly uses. */
+			EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 		}
 		return;
 	}
@@ -783,16 +1015,13 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 	{
 		if( !strcmp( s->name, "efw_IDTag_Position" ) )
 		{
+			/* FUN_10044f30(0x14). A miss jumps to the end of FUN_10044f70,
+			   so the fence has no button until the ID tag is held. */
 			if( EFW_HtmlHasWep( pPlayer, 20 ) )
 			{
 				snprintf( label, sizeof( label ), "Place %s on fence", EFW_HtmlWepLabel( 20 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 20, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
-			}
-			else
-			{
-				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %s", s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, "Take ID from fence", cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_kitchen_bin" ) )
@@ -801,7 +1030,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 			{
 				snprintf( label, sizeof( label ), "Hide %s in bin", EFW_HtmlWepLabel( 16 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 16, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else if( !strcmp( s->name, "efw_hiding_place" ) )
@@ -814,7 +1043,7 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 			{
 				snprintf( label, sizeof( label ), "Force open cage door with %s", EFW_HtmlWepLabel( 17 ) );
 				snprintf( cmd, sizeof( cmd ), "efw_UseWithMarker %d %s", 17, s->name );
-				EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+				EFW_HtmlVguiAdd( out, n, x, y, label, cmd, "wep" );
 			}
 		}
 		else
@@ -829,9 +1058,35 @@ static void EFW_HtmlBuild( EfwHtmlVguiBtn *out, int *n, const EfwScanSlot *s, CB
 		int id = s->type - 100;
 		snprintf( label, sizeof( label ), "Pick up %s", EFW_HtmlWepLabel( id ) );
 		snprintf( cmd, sizeof( cmd ), "efw_Pickup %u", (unsigned)id );
-		EFW_HtmlVguiAdd( out, n, x, y, label, cmd );
+		/* HasWep null loads efw_give_icon.spr. A hit uses weapon+0xbc. */
+		EFW_HtmlVguiAdd( out, n, x, y, label, cmd, EFW_HtmlHasWep( pPlayer, id ) ? "wep" : "give" );
 	}
 }
+
+/* client.dll 0x10044f70 fallback: same 90° pinhole as EFW_Project. */
+static int EFW_HtmlProject( CBasePlayer *pPlayer, const Vector &world, int *sx, int *sy )
+{
+	Vector delta;
+	float z, px, py;
+	if( !pPlayer || !sx || !sy )
+		return 0;
+	delta = world - pPlayer->EyePosition();
+	UTIL_MakeVectors( pPlayer->pev->v_angle );
+	z = DotProduct( delta, gpGlobals->v_forward );
+	if( z < 16.0f )
+		return 0;
+	px = DotProduct( delta, gpGlobals->v_right ) / z;
+	py = DotProduct( delta, gpGlobals->v_up ) / z;
+	*sx = (int)( EFW_HTML_SW * 0.5f + px * EFW_HTML_SW * 0.5f );
+	*sy = (int)( EFW_HTML_SH * 0.5f - py * EFW_HTML_SW * 0.5f );
+	if( *sx <= 90 || *sy <= 90 || *sx >= EFW_HTML_SW - 90 || *sy >= EFW_HTML_SH - 90 )
+		return 0;
+	return 1;
+}
+
+/* FUN_10046370 sets this; FUN_10048740 clears it. World CommandButtons
+   exist only while it is set. */
+static int s_promptContext;
 
 void EFW_HtmlVguiSync( void )
 {
@@ -865,10 +1120,10 @@ void EFW_HtmlVguiSync( void )
 			EFW_HtmlVguiAdd( btns, &n, x, y, label, cmd );
 		}
 	}
-	else if( !st->talkActive )
+	else if( !st->talkActive && s_promptContext )
 	{
-		/* FUN_10044f70 world-space Talk/Give/Hide CommandButtons. HUD_Redraw
-		   never projects these in WASM, so TalkScan writes the same cmds. */
+		/* FUN_10044f70 runs only from FUN_10046370, after the interact
+		   bar click. WorldToScreen, drop the 90px edge band, then clamp. */
 		{
 			static int s_world;
 			if( !s_world )
@@ -878,14 +1133,20 @@ void EFW_HtmlVguiSync( void )
 			}
 		}
 		for( i = 0; i < st->scanCount && n < EFW_HTML_VGUI_MAX; i++ )
-			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, 320, 200 );
+		{
+			int sx, sy;
+			Vector world( st->scan[i].x, st->scan[i].y, st->scan[i].z );
+			if( !EFW_HtmlProject( pPlayer, world, &sx, &sy ) )
+				continue;
+			EFW_HtmlBuild( btns, &n, &st->scan[i], pPlayer, sx, sy );
+		}
 	}
 
 	sig[0] = '\0';
 	used = 0;
 	for( i = 0; i < n; i++ )
 	{
-		used += snprintf( sig + used, sizeof( sig ) - used, "%s|", btns[i].cmd );
+		used += snprintf( sig + used, sizeof( sig ) - used, "%s#%s@%d,%d|", btns[i].cmd, btns[i].spr, btns[i].x, btns[i].y );
 		if( used >= (int)sizeof( sig ) - 1 )
 			break;
 	}
@@ -899,12 +1160,20 @@ void EFW_HtmlVguiSync( void )
 		fprintf( fp, "EFWVGUI CLR\n" );
 	for( i = 0; i < n; i++ )
 	{
-		snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
-			(float)btns[i].x / (float)EFW_HTML_SW,
-			(float)btns[i].y / (float)EFW_HTML_SH,
-			(float)btns[i].w / (float)EFW_HTML_SW,
-			(float)btns[i].h / (float)EFW_HTML_SH,
-			btns[i].cmd, btns[i].label );
+		if( btns[i].spr[0] )
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\t%s\n",
+				(float)btns[i].x / (float)EFW_HTML_SW,
+				(float)btns[i].y / (float)EFW_HTML_SH,
+				(float)btns[i].w / (float)EFW_HTML_SW,
+				(float)btns[i].h / (float)EFW_HTML_SH,
+				btns[i].cmd, btns[i].label, btns[i].spr );
+		else
+			snprintf( line, sizeof( line ), "EFWVGUI ADD %.4f %.4f %.4f %.4f %s\t%s\n",
+				(float)btns[i].x / (float)EFW_HTML_SW,
+				(float)btns[i].y / (float)EFW_HTML_SH,
+				(float)btns[i].w / (float)EFW_HTML_SW,
+				(float)btns[i].h / (float)EFW_HTML_SH,
+				btns[i].cmd, btns[i].label );
 		EFW_EnginePrint( line );
 		if( fp )
 			fputs( line, fp );
@@ -916,6 +1185,44 @@ void EFW_HtmlVguiSync( void )
 	}
 	snprintf( line, sizeof( line ), "efw: vgui buttons=%d\n", n );
 	EFW_EnginePrint( line );
+}
+
+void EFW_SetPromptContext( CBasePlayer *pPlayer, int on )
+{
+	EfwDllState *st;
+	int i;
+	int hit = 0;
+	int next = 0;
+
+	st = EFW_Dll();
+	if( on && pPlayer && st )
+	{
+		for( i = 0; i < st->scanCount; i++ )
+		{
+			int sx, sy;
+			Vector world( st->scan[i].x, st->scan[i].y, st->scan[i].z );
+			if( EFW_HtmlProject( pPlayer, world, &sx, &sy ) )
+			{
+				hit = 1;
+				break;
+			}
+		}
+	}
+	if( on && hit )
+		next = 1;
+	if( s_promptContext == next )
+	{
+		EFW_DebugPrint( ">>> FUN_10046370 context=%d held", next );
+		return;
+	}
+	s_promptContext = next;
+	if( next )
+		EFW_DebugPrint( ">>> FUN_10046370 context=1" );
+	else
+		EFW_DebugPrint( ">>> FUN_10048740 context=0" );
+	/* FUN_10048710 ClientCmd efw_pause 1 before the buttons; dismiss is 0. */
+	EFW_SetPause( next );
+	EFW_HtmlVguiSync();
 }
 
 void EFW_SendCntxt( void )
@@ -981,7 +1288,11 @@ void EFW_TalkScan( void )
 		if( dist >= EFW_TALK_SCAN && !EFW_FStrEq( cn, "efw_Marker" ) )
 			continue;
 
-		if( EFW_IsTalkNpc( pScan ) || !strcmp( cn, "monster_barney" ) )
+		/* FUN_100c7830: type 0 only for monster_refugee or monster_barney.
+		   monster_patrol_guard is not in that test, so a level-2 guard
+		   does not grow a speech bubble. Use/Give still go through
+		   EFW_IsTalkNpc. */
+		if( !strcmp( cn, "monster_refugee" ) || !strcmp( cn, "monster_barney" ) )
 		{
 			pos = pScan->pev->origin;
 			pos.z += 64.0f;
@@ -990,8 +1301,10 @@ void EFW_TalkScan( void )
 		}
 		if( !strcmp( cn, "efw_Marker" ) )
 		{
+			/* 0x100c78f0: hiding place needs the 0.97 trace. Other markers
+			   in the 123 sphere are added with no view test. */
 			pos = EFW_AbsCenter( pScan );
-			if( !EFW_FStrEq( tn, "efw_hiding_place" ) && !EFW_FacingDot( pPlayer, pos, 0.97f ) )
+			if( EFW_FStrEq( tn, "efw_hiding_place" ) && !EFW_TraceClear( pPlayer, pos ) )
 				continue;
 			if( EFW_FStrEq( tn, "efw_PliersMarker" ) && EFW_HasWeapon( pPlayer, "weapon_efw_Pliers" ) )
 				continue;
@@ -1006,7 +1319,7 @@ void EFW_TalkScan( void )
 		}
 		if( !strncmp( cn, "weapon_efw", 10 ) )
 		{
-			if( EFW_FStrEq( cn, "weapon_efw_Pliers" ) && !EFW_FacingDot( pPlayer, pScan->pev->origin, 0.97f ) )
+			if( EFW_FStrEq( cn, "weapon_efw_Pliers" ) && !EFW_TraceClear( pPlayer, pScan->pev->origin ) )
 				continue;
 			if( pScan->pev->owner )
 				continue;
