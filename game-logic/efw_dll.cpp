@@ -2616,13 +2616,13 @@ static int EFW_BindOneDetainee( void )
 		pent->v.sequence = 0;
 		pent->v.frame = 0;
 		pent->v.framerate = 1.0f;
-		/* PE CRefugee::Spawn hull. SOLID_BBOX so look-use can see them.
-		   MOVETYPE_NONE: WALK_MOVE on these studios stalls the WASM frame. */
+		/* PE CRefugee::Spawn hull. pfnWalkMove returns 0 until
+		   FL_ONGROUND is set, which DROP_TO_FLOOR does. */
 		pent->v.mins = Vector( -16, -16, 0 );
 		pent->v.maxs = Vector( 16, 16, 72 );
 		pent->v.solid = SOLID_BBOX;
 		pent->v.flags |= FL_MONSTER;
-		pent->v.movetype = MOVETYPE_NONE;
+		pent->v.movetype = MOVETYPE_STEP;
 		{
 			char line[160];
 			snprintf( line, sizeof( line ), "efw: studio apply edict=%d %s idx=%d\n",
@@ -2633,20 +2633,20 @@ static int EFW_BindOneDetainee( void )
 		   this frame, outside the think, which is the path that does not
 		   re-enter IdleThink. */
 		EFW_LinkNpcBody( pent );
-		/* One studio, one 16-unit step. "enter" without "ret" means the
-		   call did not return; a later PreThink means the frame lived. */
 		{
+			float oz = pent->v.origin.z;
+			int drop = DROP_TO_FLOOR( pent );
 			static int s_walkProbe;
 			if( !s_walkProbe && g_engfuncs.pfnWalkMove )
 			{
-				char line[180];
+				char line[200];
 				float ox = pent->v.origin.x;
 				float oy = pent->v.origin.y;
 				int ret;
 				s_walkProbe = 1;
 				snprintf( line, sizeof( line ),
-					"efw: walk probe enter edict=%d yaw=%.0f\n",
-					i, pent->v.angles.y );
+					"efw: drop edict=%d ret=%d z %.0f -> %.0f flags=%d\n",
+					i, drop, oz, pent->v.origin.z, pent->v.flags );
 				EFW_LogLine( line );
 				ret = g_engfuncs.pfnWalkMove( pent, pent->v.angles.y, 16.0f, WALKMOVE_NORMAL );
 				snprintf( line, sizeof( line ),

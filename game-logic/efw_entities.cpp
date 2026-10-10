@@ -2808,33 +2808,23 @@ void CRefugee::IdleThink( void )
 		}
 		if( ( s_walkTick % 0x52 ) == 0 && dist > 100.0f && dist < 300.0f )
 		{
-			/* vtable+0x1a8(3), FUN_1005d290, then FUN_1005d500(this, ACT_WALK, 0)
-			   which is MoveToTarget. FRefreshRoute's local move calls WALK_MOVE
-			   and stalls the WASM frame, so the route is not built. The hull
-			   step is the next pulse. This one only stores the walk. */
+			/* MoveToTarget is FUN_1005d500: it stores the walk and builds
+			   the route through CheckLocalMove's WALK_MOVE. */
 			EFW_DebugPrint( "SetActivity WALK %s before seq=%d dist=%.0f",
 				( tn && tn[0] ) ? tn : "?", pev->sequence, dist );
 			SetActivity( ACT_WALK );
-			m_movementGoal = MOVEGOAL_NONE;
-			m_movementActivity = ACT_IDLE;
 			Forget( bits_MEMORY_MOVE_FAILED );
-			m_movementGoal = MOVEGOAL_TARGETENT;
-			m_movementActivity = ACT_WALK;
 			m_hTargetEnt = pPlayer;
-			/* MoveToTarget (0x1005d500) calls BuildRoute once.
-			   0x1005e720 copies the target origin into the route.
-			   Move() aims at that point on later thinks. The 100 and
-			   300 gates still use the live player. */
 			m_vecMoveGoal = pPlayer->pev->origin;
-			m_moveWaitTime = 0.0f;
-			/* The route is this spot. A wall on the way stores the
-			   corner in front of it, the way BuildRoute does before
-			   the first Move(). A z miss or a failed triangle leaves
-			   the route empty. Move() then stops without facing it. */
 			{
 				int built;
 
-				built = EFW_SeedBlockedRoute( pev, m_vecMoveGoal, pPlayer->edict() );
+				EFW_DebugPrint( "sdk route enter %s dist=%.0f",
+					( tn && tn[0] ) ? tn : "?", dist );
+				built = MoveToTarget( ACT_WALK, 2 ) ? 1 : 0;
+				EFW_DebugPrint( "sdk route %s ok=%d origin=%.0f %.0f %.0f",
+					( tn && tn[0] ) ? tn : "?", built,
+					pev->origin.x, pev->origin.y, pev->origin.z );
 				if( !built )
 				{
 					float heldYaw = pev->angles.y;
@@ -3031,10 +3021,23 @@ void CRefugee::IdleThink( void )
 			}
 			else
 			{
+				float ox = pev->origin.x;
+				float oy = pev->origin.y;
 				dt = EFW_HostInterval();
 				if( dt < 0.001f )
 					dt = 0.05f;
-				moved = EFW_StepNpc( pev, m_vecMoveGoal, speed, dt, pPlayer->edict() );
+				Move( dt );
+				moved = ( fabsf( pev->origin.x - ox ) + fabsf( pev->origin.y - oy ) ) > 0.5f;
+				{
+					static int s_sdkMove;
+					if( s_sdkMove < 8 )
+					{
+						s_sdkMove++;
+						EFW_DebugPrint( "sdk move %s dist=%.0f %.0f %.0f -> %.0f %.0f",
+							( tn && tn[0] ) ? tn : "?", dist,
+							ox, oy, pev->origin.x, pev->origin.y );
+					}
+				}
 			}
 			if( s_follow < 8 )
 			{
