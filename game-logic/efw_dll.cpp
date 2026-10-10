@@ -2104,6 +2104,7 @@ void EFW_LinkUserMessages( void )
 	EFW_RegisterHostCmds();
 	ALERT( at_error, "efw: GameDLLInit ents=%d max=%d\n",
 		NUMBER_OF_ENTITIES(), gpGlobals->maxEntities );
+	EFW_LogLine( "efw: reg user messages\n" );
 	if( !gmsgEFWShow )
 		gmsgEFWShow = REG_USER_MSG( "EFWShow", -1 );
 	if( !gmsgEFWData )
@@ -2114,6 +2115,7 @@ void EFW_LinkUserMessages( void )
 		gmsgEFWCntxt = REG_USER_MSG( "EFW_Cntxt", -1 );
 	if( !gmsgEFWCtPrv )
 		gmsgEFWCtPrv = REG_USER_MSG( "EFW_CtPrv", 1 );
+	EFW_LogLine( "efw: GameDLLInit done\n" );
 }
 
 static int s_worldPrecache;
