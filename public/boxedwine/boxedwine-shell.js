@@ -723,7 +723,9 @@
       };
       Module.setStatus('Downloading...');
       function reportPageError(kind, detail) {
-        try { parent.postMessage({ source: 'boxedwine', line: kind + ': ' + detail }, '*'); } catch (e) {}
+        var text = kind + ': ' + detail;
+        console.log(text);
+        try { parent.postMessage({ source: 'boxedwine', line: text }, '*'); } catch (e) {}
         Module.setStatus('Exception thrown, see JavaScript console');
         spinnerElement.style.display = 'none';
         Module.setStatus = function(text) {
@@ -732,6 +734,8 @@
       }
       window.onerror = function(message, source, lineno, colno, error) {
         var detail = String(message) + ' @ ' + source + ':' + lineno + ':' + colno;
+        if (error && error.message)
+          detail += '\nmessage=' + JSON.stringify(error.message);
         if (error && error.stack)
           detail += '\n' + error.stack;
         reportPageError('exception', detail);

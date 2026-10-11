@@ -159,3 +159,4 @@ third_party/*.tar.gz
 third_party/vgui-msvc.dll
 third_party/vgui-msvc.lib
 third_party/psapi.dll
+third_party/wmic.exe

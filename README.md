@@ -14,9 +14,11 @@ Project page that inspired this: https://julianoliver.com/projects/escape-from-w
   cross-origin isolation headers) plus the Wine 6.0 root filesystem
   shipped in that build (`wine6.zip`). Wine 11's web filesystem omits
   API-set DLLs, so `wineboot` never finishes and `xash.dll` cannot load.
-  Wine 6's `psapi.dll` is a placeholder with no builtin, so
-  `scripts/build-psapi-shim.sh` replaces it with a small PE that exports
-  the three symbols `xash.dll` imports.
+  Wine 6's `psapi.dll` and `wmic.exe` are placeholders with no builtin.
+  `scripts/build-psapi-shim.sh` replaces them and rewrites `ntdll`'s
+  `xsave`/`xrstor` as `fxsave`/`fxrstor`, which this emulator can run.
+  `run.bat` turns off SDL's DirectInput and Windows.Gaming.Input probes,
+  and the page starts Boxedwine with `-nosound`.
 - `public/boxedwine/woomera.zip` — the Windows game Boxedwine mounts as
   `C:\files`:
   - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, SDL2 and the MinGW
@@ -59,9 +61,10 @@ npm run dev
 # → http://127.0.0.1:47831/
 ```
 
-The first load fetches the Wine filesystem and the Windows game (about 120 MB).
-Click the view, then use the mouse and WASD. The CPU is interpreted, so the
-software renderer is slow.
+The first load fetches the Wine filesystem and the Windows game (about 110 MB).
+Wine opens a window titled Escape from Woomera. The CPU is interpreted, so
+startup is slow. Click the view, then use the mouse and WASD. Sound is left
+off; Boxedwine's web audio path is not used.
 
 Re-vendor the mod and Uplink `valve/` archives (the pack script reads them):
 

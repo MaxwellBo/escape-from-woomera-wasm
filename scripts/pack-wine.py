@@ -29,6 +29,13 @@ ENGINE_FILES = (
 RUN_BAT = (
     "@echo off\r\n"
     "cd /d %~dp0\r\n"
+    "rem SDL 2.32 probes DirectInput, Windows.Gaming.Input and wmic. Those\r\n"
+    "rem Wine 6 builtins are missing and the probe crashes Boxedwine.\r\n"
+    "set SDL_DIRECTINPUT_ENABLED=0\r\n"
+    "set SDL_XINPUT_ENABLED=0\r\n"
+    "set SDL_JOYSTICK_WGI=0\r\n"
+    "set SDL_JOYSTICK_RAWINPUT=0\r\n"
+    "set SDL_JOYSTICK_HIDAPI=0\r\n"
     "xash3d.exe -game woomera -ref soft -windowed -width 640 -height 480 "
     "-console +map efw_prototype_level1\r\n"
 )

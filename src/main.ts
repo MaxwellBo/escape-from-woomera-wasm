@@ -86,7 +86,9 @@ const params = new URLSearchParams({
   app: 'woomera',
   p: 'run.bat',
   resolution: '800x600',
-  sound: 'true',
+  // Sound stays off. A placeholder wmic.exe was what aborted startup;
+  // the web audio device is not required to boot and is left unused.
+  sound: 'false',
   skipFrameFPS: '20',
 });
 frame.src = `${publicAsset('boxedwine/boxedwine.html')}?${params.toString()}`;
