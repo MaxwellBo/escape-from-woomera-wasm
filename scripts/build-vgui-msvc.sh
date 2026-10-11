@@ -18,6 +18,10 @@ if [[ ! -f "$SRC/vgui.cpp" ]]; then
   echo "freevgui sources not found at $SRC (set XASH_SRC)" >&2
   exit 1
 fi
+# client.dll builds Labels from CRT startup, before Xash creates an App.
+if ! grep -q "No App during client.dll CRT startup" "$SRC/image.cpp"; then
+  patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-null-app.patch"
+fi
 for tool in clang++ lld-link python3 i686-w64-mingw32-objdump; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
@@ -62,6 +66,9 @@ while IFS= read -r -d '' src; do
 done < <(find "$SRC" -name '*.cpp' -print0)
 
 clang++ --target=i686-windows-msvc -c "$HELPER/abi.cpp" -O2 -o "$WORK/objs/abi.obj"
+clang++ "${FLAGS[@]}" -c "$HELPER/vgui_support.cpp" \
+  -I "${XASH_SRC:-$ROOT/third_party/xash3d-fwgs}/engine" \
+  -o "$WORK/objs/vgui_support.obj"
 
 python3 - "$CLIENT" "$WORK/vgui.def" << 'PY'
 import re, subprocess, sys
@@ -80,6 +87,7 @@ for line in text.splitlines():
         names.append(match.group(1))
 if not names:
     raise SystemExit(f"no vgui imports in {client}")
+names.append("InitAPI")
 open(dest, "w").write("LIBRARY vgui\nEXPORTS\n" + "\n".join(names) + "\n")
 print(f"{len(names)} vgui exports")
 PY
@@ -88,7 +96,7 @@ GCCLIB="$(dirname "$(i686-w64-mingw32-gcc -print-libgcc-file-name)")"
 lld-link /dll /nodefaultlib /safeseh:no /entry:DllMain \
   /def:"$WORK/vgui.def" /out:"$OUT" \
   "/alternatename:??_7type_info@@6B@=_ti_vftable" \
-  "${objs[@]}" "$WORK/objs/abi.obj" \
+  "${objs[@]}" "$WORK/objs/abi.obj" "$WORK/objs/vgui_support.obj" \
   /usr/i686-w64-mingw32/lib/libmsvcrt.a \
   /usr/i686-w64-mingw32/lib/libmingwex.a \
   "$GCCLIB/libgcc.a" \

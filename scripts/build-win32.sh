@@ -28,6 +28,8 @@ git -C "$SRC" apply --check "$ROOT/scripts/xash-mingw-i386-rename.patch"
 git -C "$SRC" apply "$ROOT/scripts/xash-mingw-i386-rename.patch" || true
 git -C "$SRC" apply --check "$ROOT/scripts/xash-console-log.patch"
 git -C "$SRC" apply "$ROOT/scripts/xash-console-log.patch" || true
+git -C "$SRC" apply --check "$ROOT/scripts/xash-win32-stat-slash.patch"
+git -C "$SRC" apply "$ROOT/scripts/xash-win32-stat-slash.patch" || true
 
 if [[ ! -f "$SDL_ROOT/i686-w64-mingw32/include/SDL2/SDL.h" ]]; then
   mkdir -p "$ROOT/third_party"
@@ -61,6 +63,20 @@ rm -rf "$DEST"
 ./waf install --destdir="$DEST"
 # GUI subsystem leaves stdout detached from the cmd.exe Boxedwine captures.
 i686-w64-mingw32-objcopy --subsystem console "$DEST/xash3d.exe"
+# client.dll's CRT probes the stack a page at a time. Commit the whole
+# reserve up front so that probe does not depend on guard-page growth.
+python3 - "$DEST/xash3d.exe" << 'PY'
+import struct, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+data = bytearray(path.read_bytes())
+e = struct.unpack_from("<I", data, 0x3C)[0]
+off = e + 24 + 72
+reserve, commit = struct.unpack_from("<II", data, off)
+struct.pack_into("<I", data, off + 4, reserve)
+path.write_bytes(data)
+print(f"stack reserve={reserve:#x} commit={reserve:#x} (was {commit:#x})")
+PY
 cp -f "$SDL_ROOT/i686-w64-mingw32/bin/SDL2.dll" "$DEST/"
 cp -f "$MINGW_RUNTIME/libgcc_s_dw2-1.dll" "$MINGW_RUNTIME/libstdc++-6.dll" "$DEST/"
 
