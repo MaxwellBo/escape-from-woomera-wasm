@@ -1,0 +1,100 @@
+diff --git a/panel.cpp b/panel.cpp
+index ebf1eba..e0a4d68 100644
+--- a/panel.cpp
++++ b/panel.cpp
+@@ -1,6 +1,10 @@
+ // SPDX-License-Identifier: BSD-3-Clause
+ // Copyright (C) 2024-2026 Alibek Omarov
+ 
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++#endif
+ #include "panel.h"
+ #include "vgui_internal.h"
+ #include "input.h"
+@@ -216,7 +220,17 @@ bool Panel::wasKeyReleased( KeyCode code )
+ 
+ void Panel::addInputSignal(InputSignal *is)
+ {
++#ifdef _WIN32
++	DWORD wrote = 0;
++	HANDLE out = GetStdHandle( STD_OUTPUT_HANDLE );
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, "VGUI-ADDSIG\n", 12, &wrote, nullptr );
++#endif
+ 	inputSignals.putElement( is );
++#ifdef _WIN32
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, "VGUI-ADDSIG-OK\n", 15, &wrote, nullptr );
++#endif
+ }
+ 
+ void Panel::removeInputSignal(InputSignal *is)
+diff --git a/surface.cpp b/surface.cpp
+index 98f91ca..c5db86e 100644
+--- a/surface.cpp
++++ b/surface.cpp
+@@ -2,6 +2,19 @@
+ // Copyright (C) 2024-2026 Alibek Omarov
+ 
+ #include <stdio.h>
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++static void vgui_trace( const char *s )
++{
++	DWORD wrote = 0;
++	HANDLE out = GetStdHandle( STD_OUTPUT_HANDLE );
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, s, (DWORD)strlen( s ), &wrote, nullptr );
++}
++#else
++static void vgui_trace( const char * ) {}
++#endif
+ #include "vgui_internal.h"
+ #include "surface.h"
+ #include "input.h"
+@@ -270,15 +283,36 @@ void Surface::invalidate( Panel * )
+ {
+ }
+ 
+-bool Surface::createPlat()
++static App *createPlatApp()
+ {
+-	if( impl )
+-		return true;
++	/* The original client uses eax as an App* and calls getScheme.
++	   A bool in al makes that load fault. */
++	vgui_trace( "VGUI-CREATEPLAT\n" );
+ 
+-	impl = new SurfacePlat;
+-	memset( impl, 0, sizeof( *impl ));
++	App *app = App::getInstance();
+ 
+-	return true;
++	if( !app )
++	{
++		class LocalApp : public App
++		{
++		public:
++			LocalApp() : App( true ) {}
++			void main( int, char ** ) override {}
++		};
++		app = new LocalApp();
++	}
++
++	return app;
++}
++
++static void createPlatEntry()
++{
++	vgui_trace( "VGUI-PLAT-ENTRY\n" );
++}
++
++__attribute__(( naked )) bool Surface::createPlat()
++{
++	asm volatile( "call %P0\n\tcall %P1\n\tret\n\t" :: "i"( createPlatEntry ), "i"( createPlatApp ) );
+ }
+ 
+ bool Surface::recreateContext()

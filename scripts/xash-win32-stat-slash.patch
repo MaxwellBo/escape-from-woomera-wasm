@@ -1,0 +1,73 @@
+diff --git a/filesystem/sys.c b/filesystem/sys.c
+index 712c3e4..39411a4 100644
+--- a/filesystem/sys.c
++++ b/filesystem/sys.c
+@@ -240,6 +240,32 @@ void FS_CreatePath( char *path )
+ 	}
+ }
+ 
++#if XASH_WIN32
++/*
++ * Boxedwine's msvcrt returns ENOENT for a directory path that ends in a
++ * slash. Search paths are stored that way, so the directory cache treated
++ * a real game folder as missing and never opened maps inside it.
++ */
++static const char *FS_TrimTrailingSlash( const char *path )
++{
++	static char trimmed[MAX_SYSPATH];
++	size_t len;
++
++	if( !path || !path[0] )
++		return path;
++
++	len = Q_strlen( path );
++	if( len > 1 && len < sizeof( trimmed ) && ( path[len - 1] == '/' || path[len - 1] == '\\' ))
++	{
++		memcpy( trimmed, path, len - 1 );
++		trimmed[len - 1] = '\0';
++		return trimmed;
++	}
++
++	return path;
++}
++#endif
++
+ /*
+ ====================
+ FS_SysFileTime
+@@ -251,7 +277,7 @@ int FS_SysFileTime( const char *filename )
+ {
+ #if XASH_WIN32
+ 	struct _stat buf;
+-	if( _wstat( FS_PathToWideChar( filename ), &buf ) < 0 )
++	if( _wstat( FS_PathToWideChar( FS_TrimTrailingSlash( filename )), &buf ) < 0 )
+ #else
+ 	struct stat buf;
+ 	if( stat( filename, &buf ) < 0 )
+@@ -272,7 +298,7 @@ qboolean FS_SysFileExists( const char *path )
+ {
+ #if XASH_WIN32
+ 	struct _stat buf;
+-	if( _wstat( FS_PathToWideChar( path ), &buf ) < 0 )
++	if( _wstat( FS_PathToWideChar( FS_TrimTrailingSlash( path )), &buf ) < 0 )
+ #else // !XASH_WIN32
+ 	struct stat buf;
+ 	if( stat( path, &buf ) < 0 )
+@@ -293,7 +319,7 @@ qboolean FS_SysFolderExists( const char *path )
+ {
+ #if XASH_WIN32
+ 	struct _stat buf;
+-	if( _wstat( FS_PathToWideChar( path ), &buf ) < 0 )
++	if( _wstat( FS_PathToWideChar( FS_TrimTrailingSlash( path )), &buf ) < 0 )
+ #else
+ 	struct stat buf;
+ 	if( stat( path, &buf ) < 0 )
+@@ -314,7 +340,7 @@ qboolean FS_SysFileOrFolderExists( const char *path )
+ {
+ #if XASH_WIN32
+ 	struct _stat buf;
+-	return _wstat( FS_PathToWideChar( path ), &buf ) >= 0;
++	return _wstat( FS_PathToWideChar( FS_TrimTrailingSlash( path )), &buf ) >= 0;
+ #else
+ 	struct stat buf;
+ 	return stat( path, &buf ) >= 0;

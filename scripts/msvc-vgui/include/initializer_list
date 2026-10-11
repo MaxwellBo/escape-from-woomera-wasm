@@ -1,0 +1,13 @@
+#pragma once
+namespace std {
+template <class T>
+class initializer_list {
+public:
+    const T *b;
+    const T *e;
+    initializer_list() : b(0), e(0) {}
+    const T *begin() const { return b; }
+    const T *end() const { return e; }
+    unsigned size() const { return (unsigned)(e - b); }
+};
+}

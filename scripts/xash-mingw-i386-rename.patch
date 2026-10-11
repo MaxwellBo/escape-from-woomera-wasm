@@ -1,0 +1,19 @@
+diff --git a/common/xash3d_types.h b/common/xash3d_types.h
+index 9b98264..fbcda1c 100644
+--- a/common/xash3d_types.h
++++ b/common/xash3d_types.h
+@@ -123,7 +123,13 @@ typedef int qboolean;
+ 	#define ALLOC_CHECK( x )   __attribute__(( alloc_size( x )))
+ 	#define WARN_UNUSED_RESULT __attribute__(( warn_unused_result ))
+ 	#define MAYBE_UNUSED       __attribute__(( unused ))
+-	#define RENAME_SYMBOL( x ) asm( x )
++	/* PE/COFF i386 prefixes C symbols with '_'. An asm name without that
++	   prefix makes ld --export-all-symbols fail ("cannot export"). */
++	#if defined( __MINGW32__ ) && defined( __i386__ )
++		#define RENAME_SYMBOL( x ) asm( "_" x )
++	#else
++		#define RENAME_SYMBOL( x ) asm( x )
++	#endif
+ 	#if !defined( offsetof )
+ 		#define offsetof( s, m )   __builtin_offsetof( s, m )
+ 	#endif // !defined( offsetof )
