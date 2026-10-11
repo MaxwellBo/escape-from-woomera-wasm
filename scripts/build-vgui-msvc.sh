@@ -26,6 +26,10 @@ fi
 if ! grep -q "Default scheme stores a zero height" "$SRC/font.cpp"; then
   patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-font-fallback.patch"
 fi
+# The client uses Surface::createPlat's eax as an App* and calls getScheme.
+if ! grep -q "VGUI-CREATEPLAT" "$SRC/surface.cpp"; then
+  patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-createplat-app.patch"
+fi
 for tool in clang++ lld-link python3 i686-w64-mingw32-objdump; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
