@@ -22,6 +22,10 @@ fi
 if ! grep -q "No App during client.dll CRT startup" "$SRC/image.cpp"; then
   patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-null-app.patch"
 fi
+# A missing text scheme asks for a zero-height font. Wine's GDI faults on it.
+if ! grep -q "Default scheme stores a zero height" "$SRC/font.cpp"; then
+  patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-font-fallback.patch"
+fi
 for tool in clang++ lld-link python3 i686-w64-mingw32-objdump; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
