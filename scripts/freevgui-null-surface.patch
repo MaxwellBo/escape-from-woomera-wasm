@@ -1,0 +1,137 @@
+--- a/panel.cpp
++++ b/panel.cpp
+@@ -116,6 +116,9 @@
+ 
+ void Panel::repaintAll()
+ {
++	/* The HUD builds panels before any plat surface exists. */
++	if( !surfaceBase )
++		return;
+ 	surfaceBase->getPanel()->repaint();
+ }
+ 
+@@ -648,17 +651,20 @@
+ 
+ void Panel::drawSetColor( int r, int g, int b, int a )
+ {
+-	surfaceBase->drawSetColor( r, g, b, a );
++	if( surfaceBase )
++		surfaceBase->drawSetColor( r, g, b, a );
+ }
+ 
+ void Panel::drawFilledRect( int x0, int y0, int x1, int y1 )
+ {
+-	surfaceBase->drawFilledRect( x0, y0, x1, y1 );
++	if( surfaceBase )
++		surfaceBase->drawFilledRect( x0, y0, x1, y1 );
+ }
+ 
+ void Panel::drawOutlinedRect( int x0, int y0, int x1, int y1 )
+ {
+-	surfaceBase->drawOutlinedRect( x0, y0, x1, y1 );
++	if( surfaceBase )
++		surfaceBase->drawOutlinedRect( x0, y0, x1, y1 );
+ }
+ 
+ void Panel::drawSetTextFont( Scheme::SchemeFont sf )
+@@ -668,7 +674,8 @@
+ 
+ void Panel::drawSetTextFont( Font *f )
+ {
+-	surfaceBase->drawSetTextFont( f );
++	if( surfaceBase )
++		surfaceBase->drawSetTextFont( f );
+ }
+ 
+ void Panel::drawSetTextColor( Scheme::SchemeColor sc )
+@@ -680,32 +687,40 @@
+ 
+ void Panel::drawSetTextColor( int r, int g, int b, int a )
+ {
+-	surfaceBase->drawSetTextColor( r, g, b, a );
++	if( surfaceBase )
++		surfaceBase->drawSetTextColor( r, g, b, a );
+ }
+ 
+ void Panel::drawSetTextPos( int x, int y )
+ {
+-	surfaceBase->drawSetTextPos( x, y );
++	if( surfaceBase )
++		surfaceBase->drawSetTextPos( x, y );
+ }
+ 
+ void Panel::drawPrintText( const char *str, int len )
+ {
+-	surfaceBase->drawPrintText( str, len );
++	if( surfaceBase )
++		surfaceBase->drawPrintText( str, len );
+ }
+ 
+ void Panel::drawPrintText( int x, int y, const char *str, int len )
+ {
++	if( !surfaceBase )
++		return;
+ 	surfaceBase->drawSetTextPos( x, y );
+ 	surfaceBase->drawPrintText( str, len );
+ }
+ 
+ void Panel::drawPrintChar( char ch )
+ {
+-	surfaceBase->drawPrintText( &ch, 1 );
++	if( surfaceBase )
++		surfaceBase->drawPrintText( &ch, 1 );
+ }
+ 
+ void Panel::drawPrintChar( int x, int y, char ch )
+ {
++	if( !surfaceBase )
++		return;
+ 	surfaceBase->drawSetTextPos( x, y );
+ 	surfaceBase->drawPrintText( &ch, 1 );
+ }
+@@ -718,12 +733,14 @@
+ 
+ void Panel::drawSetTexture( int id )
+ {
+-	surfaceBase->drawSetTexture( id );
++	if( surfaceBase )
++		surfaceBase->drawSetTexture( id );
+ }
+ 
+ void Panel::drawTexturedRect( int x0, int y0, int x1, int y1 )
+ {
+-	surfaceBase->drawTexturedRect( x0, y0, x1, y1 );
++	if( surfaceBase )
++		surfaceBase->drawTexturedRect( x0, y0, x1, y1 );
+ }
+ 
+ void Panel::solve()
+@@ -769,7 +786,7 @@
+ 		if( clipRect[2] <= clipRect[0] || clipRect[3] <= clipRect[1] )
+ 			repaint = false;
+ 
+-		if( repaint && ( paintBorderEnabled || paintBackgroundEnabled || paintEnabled ))
++		if( surfaceBase && repaint && ( paintBorderEnabled || paintBackgroundEnabled || paintEnabled ))
+ 		{
+ 			surfaceBase->pushMakeCurrent( this, true );
+ 
+@@ -790,7 +807,7 @@
+ 			children[i]->paintTraverse( repaint );
+ 		}
+ 
+-		if( repaint )
++		if( surfaceBase && repaint )
+ 		{
+ 			if( isBuildGroupEnabled() && hasFocus() )
+ 			{
+--- a/image.cpp
++++ b/image.cpp
+@@ -633,6 +633,8 @@
+ 	getSize( wrapWide, wrapTall );
+ 
+ 	Font *f = getFont();
++	if( !f )
++		return;
+ 	int x = 0, y = 0, lineTall = f->getTall();
+ 
+ 	for( int i = 0; ; i++ )
