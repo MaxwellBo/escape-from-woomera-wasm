@@ -1,8 +1,29 @@
 diff --git a/font.cpp b/font.cpp
-index 02974c1..631f3e4 100644
+index 02974c1..69e9365 100644
 --- a/font.cpp
 +++ b/font.cpp
-@@ -173,7 +173,12 @@ void Font::init( const char *newName, void *pFileData, int fileDataLen, int tall
+@@ -5,6 +5,20 @@
+ #include "platform/common/font.h"
+ #include "fileimage.h"
+ 
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++static void font_trace( const char *s )
++{
++	DWORD wrote = 0;
++	HANDLE out = GetStdHandle( STD_OUTPUT_HANDLE );
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, s, (DWORD)strlen( s ), &wrote, nullptr );
++}
++#else
++static void font_trace( const char * ) {}
++#endif
++
+ using namespace vgui;
+ 
+ static int staticFontId = 100;
+@@ -173,7 +187,14 @@ void Font::init( const char *newName, void *pFileData, int fileDataLen, int tall
  	id = -1;
  	impl = nullptr;
  
@@ -12,10 +33,28 @@ index 02974c1..631f3e4 100644
 +	if( tall <= 0 )
 +		tall = 17;
 +
++	font_trace( "VGUI-FONT-ENTER\n" );
++
 +	if( pFileData && fileDataLen > 0 )
  	{
  		FileImageStream_Memory stream( pFileData, fileDataLen );
  		FontPlat_Bitmap *bitmap = FontPlat_Bitmap::Create( name, &stream );
+@@ -207,6 +228,15 @@ void Font::init( const char *newName, void *pFileData, int fileDataLen, int tall
+ 			id = staticFontId++;
+ 		}
+ 	}
++
++	if( !impl )
++	{
++		impl = new StubFontPlat( name, tall, wide, rotation, weight, italic, underline, strikeout, symbol );
++		staticFontPlatDar.addElement( impl );
++		id = staticFontId++;
++	}
++
++	font_trace( "VGUI-FONT-LEAVE\n" );
+ }
+ 
+ void Font::getCharRGBA( int ch, int rgbaX, int rgbaY, int rgbaWide, int rgbaTall, unsigned char *rgba )
 diff --git a/platform/win32/font.cpp b/platform/win32/font.cpp
 index 44854ce..9bbefd7 100644
 --- a/platform/win32/font.cpp
