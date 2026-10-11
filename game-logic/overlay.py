@@ -86,6 +86,14 @@ def main() -> None:
         "efw_weapons.cpp": dlls / "efw_weapons.cpp",
         "efw_world.cpp": dlls / "efw_world.cpp",
         "hud_efw.cpp": cldll / "hud_efw.cpp",
+        # Mechanical Ghidra lift. Server only: it defines lift_* copies of
+        # entity exports the hand port already provides.
+        "efw_lift.c": dlls / "efw_lift.c",
+        "efw_lift_prelude.h": dlls / "efw_lift_prelude.h",
+        "efw_lift_size.h": dlls / "efw_lift_size.h",
+        "efw_lift_host.c": dlls / "efw_lift_host.c",
+        "efw_lift_bind.cpp": dlls / "efw_lift_bind.cpp",
+        "efw_image.c": dlls / "efw_image.c",
     }
     for src_name, dest in copies.items():
         shutil.copy2(ROOT / src_name, dest)
@@ -139,7 +147,20 @@ def main() -> None:
         "\tefw_clientcmd.cpp\n"
         "\tefw_entities.cpp\n"
         "\tefw_weapons.cpp\n"
-        "\tefw_world.cpp\n",
+        "\tefw_world.cpp\n"
+        "\tefw_lift.c\n"
+        "\tefw_image.c\n"
+        "\tefw_lift_host.c\n"
+        "\tefw_lift_bind.cpp\n",
+    )
+    ensure_contains(
+        cmake_dlls,
+        "\n".join([
+            "# EFW_OVERLAY mechanical lift: Ghidra C, compiled for the slot table.",
+            "set_source_files_properties(",
+            "\tefw_lift.c efw_image.c efw_lift_host.c",
+            "\tPROPERTIES COMPILE_FLAGS \"-w -fno-strict-aliasing\")",
+        ]),
     )
 
     cmake_cl = cldll / "CMakeLists.txt"

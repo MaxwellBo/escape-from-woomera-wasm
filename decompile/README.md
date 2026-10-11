@@ -50,16 +50,45 @@ GHIDRA_MAXMEM=4G /path/to/analyzeHeadless /tmp/ghidra-proj EFW \
   -import decompile/binaries/EscapeFromWoomera.dll \
   -processor x86:LE:32:default -cspec windows \
   -scriptPath decompile/ghidra_scripts \
-  -postScript ExportEfwDecomp.java decompile/out \
-  -deleteProject
+  -postScript ApplyEngineTable.java \
+  -postScript ExportEfwDecomp.java decompile/out
 ```
+
+Keep the project. `-deleteProject` throws away the engine-slot labels
+`ApplyEngineTable.java` writes (143 server slots at `0x10121e08`, 98 client
+slots at `0x100a4ff0`, `gpGlobals` at `0x10122044`).
 
 Repeat for `client.dll`. Then:
 
 ```bash
 python3 decompile/recover_commands.py   # ClientCommand strcmp chain
 python3 decompile/annotate_efw.py       # recovered names + drop CRT
+python3 decompile/lift_overlay.py       # compile the overlay against the slot table
+python3 decompile/lift_overlay.py --test
 ```
+
+## Mechanical lift
+
+`lift_overlay.py` turns `out/EscapeFromWoomera_ghidra_efw.c` into
+`game-logic/efw_lift.c`. Engine calls become `EFW_EngSlots()[n]`
+(`engine_slots_server.txt`; slot 2 is `pfnSetModel`). Absolute addresses
+go through `EFW_VA` into a relocated copy of the DLL image
+(`game-logic/efw_image.c`, generated, not committed). The four Win32
+imports the overlay actually makes (`FindFirstFileA` / `FindNextFileA` /
+`FindClose`, `GetTickCount`, `OutputDebugStringA`, `GetAsyncKeyState`)
+are POSIX stubs in `efw_lift_host.c`.
+
+Every lifted function is prefixed `lift_` so it does not collide with
+hlsdk exports such as `monster_refugee`. `scripts/build-hlsdk.sh`
+regenerates the lift and links it into the server only.
+`EFW_LiftAnchor` keeps it from being stripped. The hand port still owns
+hope, commands, and spawn; the anchor does not call `lift_efw_ThinkHope`.
+
+`npm run test:lift` compiles the lift with `gcc -m32` and checks the hope
+drain (80 → 79, 10 → 9, clamp at 100) without booting the game.
+
+The same script writes `recovered/client_lift.c` from the client dump.
+That file is not compiled or linked; the client HUD stays on the hand port.
 
 ## What the exports already prove
 

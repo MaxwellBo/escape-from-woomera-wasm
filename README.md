@@ -63,6 +63,7 @@ Rebuild the WASM modules after changing `game-logic/`:
 
 ```bash
 npm run test:efw
+npm run test:lift     # gcc -m32 hope drain of the mechanical overlay lift
 npm run build:hlsdk   # needs Emscripten (scripts/build-hlsdk.sh)
 ```
 

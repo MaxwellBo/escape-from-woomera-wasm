@@ -5540,6 +5540,9 @@ void EFW_OnServerActivate( void )
 	char line[192];
 	const char *map;
 
+	/* Keep the lifted overlay in the link. Hope stays on the hand port. */
+	EFW_LiftAnchor();
+
 	map = ( gpGlobals && gpGlobals->mapname ) ? STRING( gpGlobals->mapname ) : "";
 	if( s_mapLive && s_precacheMap[0] && map[0] && !strcmp( s_precacheMap, map ) )
 	{

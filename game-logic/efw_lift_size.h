@@ -1,0 +1,3 @@
+#define EFW_IMAGE_BASE 0x10000000u
+#define EFW_MEM_SIZE 0x153000u
+#define EFW_RELOC_LO 0x100dd000u
