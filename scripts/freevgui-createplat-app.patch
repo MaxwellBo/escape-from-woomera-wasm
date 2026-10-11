@@ -32,7 +32,7 @@ index ebf1eba..e0a4d68 100644
  
  void Panel::removeInputSignal(InputSignal *is)
 diff --git a/surface.cpp b/surface.cpp
-index 98f91ca..5921a54 100644
+index 98f91ca..c5db86e 100644
 --- a/surface.cpp
 +++ b/surface.cpp
 @@ -2,6 +2,19 @@
@@ -55,7 +55,7 @@ index 98f91ca..5921a54 100644
  #include "vgui_internal.h"
  #include "surface.h"
  #include "input.h"
-@@ -270,15 +283,31 @@ void Surface::invalidate( Panel * )
+@@ -270,15 +283,36 @@ void Surface::invalidate( Panel * )
  {
  }
  
@@ -87,9 +87,14 @@ index 98f91ca..5921a54 100644
 +	return app;
 +}
 +
++static void createPlatEntry()
++{
++	vgui_trace( "VGUI-PLAT-ENTRY\n" );
++}
++
 +__attribute__(( naked )) bool Surface::createPlat()
 +{
-+	asm volatile( "call %P0\n\tret\n\t" :: "i"( createPlatApp ) );
++	asm volatile( "call %P0\n\tcall %P1\n\tret\n\t" :: "i"( createPlatEntry ), "i"( createPlatApp ) );
  }
  
  bool Surface::recreateContext()
