@@ -26,6 +26,8 @@ git -C "$SRC" checkout --force FETCH_HEAD
 git -C "$SRC" submodule update --init --recursive --depth 1
 git -C "$SRC" apply --check "$ROOT/scripts/xash-mingw-i386-rename.patch"
 git -C "$SRC" apply "$ROOT/scripts/xash-mingw-i386-rename.patch" || true
+git -C "$SRC" apply --check "$ROOT/scripts/xash-console-log.patch"
+git -C "$SRC" apply "$ROOT/scripts/xash-console-log.patch" || true
 
 if [[ ! -f "$SDL_ROOT/i686-w64-mingw32/include/SDL2/SDL.h" ]]; then
   mkdir -p "$ROOT/third_party"
@@ -57,6 +59,8 @@ cd "$SRC"
 ./waf build -j"$(nproc)"
 rm -rf "$DEST"
 ./waf install --destdir="$DEST"
+# GUI subsystem leaves stdout detached from the cmd.exe Boxedwine captures.
+i686-w64-mingw32-objcopy --subsystem console "$DEST/xash3d.exe"
 cp -f "$SDL_ROOT/i686-w64-mingw32/bin/SDL2.dll" "$DEST/"
 cp -f "$MINGW_RUNTIME/libgcc_s_dw2-1.dll" "$MINGW_RUNTIME/libstdc++-6.dll" "$DEST/"
 

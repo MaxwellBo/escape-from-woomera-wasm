@@ -1,0 +1,54 @@
+diff --git a/engine/common/system.c b/engine/common/system.c
+index 4450307..9e7f026 100644
+--- a/engine/common/system.c
++++ b/engine/common/system.c
+@@ -17,6 +17,7 @@ GNU General Public License for more details.
+ #include "xash3d_mathlib.h"
+ #include "platform/platform.h"
+ #include <stdlib.h>
++#include <stdio.h>
+ #include <errno.h>
+ 
+ #if _MSC_VER
+@@ -451,6 +452,11 @@ print into window console
+ */
+ void Sys_Print( const char *pMsg )
+ {
++	if( pMsg && pMsg[0] && stdout )
++	{
++		fwrite( pMsg, 1, Q_strlen( pMsg ), stdout );
++		fflush( stdout );
++	}
+ #if !XASH_DEDICATED
+ 	if( !Host_IsDedicated() )
+ 	{
+diff --git a/engine/platform/win32/sys_win.c b/engine/platform/win32/sys_win.c
+index 40f3dc1..472977b 100644
+--- a/engine/platform/win32/sys_win.c
++++ b/engine/platform/win32/sys_win.c
+@@ -17,6 +17,7 @@ GNU General Public License for more details.
+ #include "menu_int.h"
+ #include "server.h"
+ #include <shellapi.h>
++#include <stdio.h>
+ 
+ HANDLE g_waitable_timer;
+ 
+@@ -46,6 +47,17 @@ void Platform_Sleep( int msec )
+ 
+ void Win32_Init( qboolean con_showalways )
+ {
++	/* The launcher is a GUI image, so the C runtime's stdout is not the
++	   console cmd.exe is already attached to. Reattach and point stdout at
++	   it. Boxedwine forwards that console into the page log. */
++	if( AttachConsole( ATTACH_PARENT_PROCESS ) || GetConsoleWindow( ))
++	{
++		if( freopen( "CONOUT$", "w", stdout ))
++			setvbuf( stdout, NULL, _IONBF, 0 );
++		if( freopen( "CONOUT$", "w", stderr ))
++			setvbuf( stderr, NULL, _IONBF, 0 );
++	}
++
+ 	HMODULE hModule = LoadLibraryW( L"kernel32.dll" );
+ 	if( hModule )
+ 	{
