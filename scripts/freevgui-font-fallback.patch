@@ -17,10 +17,23 @@ index 02974c1..631f3e4 100644
  		FileImageStream_Memory stream( pFileData, fileDataLen );
  		FontPlat_Bitmap *bitmap = FontPlat_Bitmap::Create( name, &stream );
 diff --git a/platform/win32/font.cpp b/platform/win32/font.cpp
-index 44854ce..59a305b 100644
+index 44854ce..9bbefd7 100644
 --- a/platform/win32/font.cpp
 +++ b/platform/win32/font.cpp
-@@ -57,6 +57,12 @@ bool FontPlat_Win32::init( const char *newName, int newTall, int newWide, float
+@@ -33,6 +33,12 @@ FontPlat_Win32::~FontPlat_Win32()
+ 
+ FontPlat_Win32 *FontPlat_Win32::Create( const char *name, int tall, int wide, float rotation, int weight, bool italic, bool underline, bool strikeout, bool symbol )
+ {
++	/* Wine GDI font calls fault Boxedwine while the HUD builds its default
++	   text scheme. The stub face draws boxes and keeps the client alive. */
++	(void)name; (void)tall; (void)wide; (void)rotation; (void)weight;
++	(void)italic; (void)underline; (void)strikeout; (void)symbol;
++	return nullptr;
++
+ 	if( !name )
+ 		return nullptr;
+ 
+@@ -57,6 +63,12 @@ bool FontPlat_Win32::init( const char *newName, int newTall, int newWide, float
  	if( !name )
  		return false;
  
@@ -33,7 +46,7 @@ index 44854ce..59a305b 100644
  	tall = newTall;
  	wide = newWide;
  	rotation = newRotation;
-@@ -100,6 +106,9 @@ bool FontPlat_Win32::init( const char *newName, int newTall, int newWide, float
+@@ -100,6 +112,9 @@ bool FontPlat_Win32::init( const char *newName, int newTall, int newWide, float
  	height = tm.tmHeight;
  	maxCharWidth = tm.tmMaxCharWidth;
  
