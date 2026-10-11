@@ -23,7 +23,7 @@ index 4450307..9e7f026 100644
  	if( !Host_IsDedicated() )
  	{
 diff --git a/engine/platform/win32/sys_win.c b/engine/platform/win32/sys_win.c
-index 40f3dc1..472977b 100644
+index 40f3dc1..5737b03 100644
 --- a/engine/platform/win32/sys_win.c
 +++ b/engine/platform/win32/sys_win.c
 @@ -17,6 +17,7 @@ GNU General Public License for more details.
@@ -34,7 +34,7 @@ index 40f3dc1..472977b 100644
  
  HANDLE g_waitable_timer;
  
-@@ -46,6 +47,17 @@ void Platform_Sleep( int msec )
+@@ -46,6 +47,19 @@ void Platform_Sleep( int msec )
  
  void Win32_Init( qboolean con_showalways )
  {
@@ -43,10 +43,12 @@ index 40f3dc1..472977b 100644
 +	   it. Boxedwine forwards that console into the page log. */
 +	if( AttachConsole( ATTACH_PARENT_PROCESS ) || GetConsoleWindow( ))
 +	{
++		/* Line buffered. Unbuffered stdout makes Wine emit a cursor
++		   sequence per byte, which floods the page log and stalls startup. */
 +		if( freopen( "CONOUT$", "w", stdout ))
-+			setvbuf( stdout, NULL, _IONBF, 0 );
++			setvbuf( stdout, NULL, _IOLBF, 0 );
 +		if( freopen( "CONOUT$", "w", stderr ))
-+			setvbuf( stderr, NULL, _IONBF, 0 );
++			setvbuf( stderr, NULL, _IOLBF, 0 );
 +	}
 +
  	HMODULE hModule = LoadLibraryW( L"kernel32.dll" );

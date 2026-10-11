@@ -1,6 +1,11 @@
+#include <stdio.h>
+
 /* Wine 6 ships wmic.exe as a builtin placeholder and omits wmic.exe.so.
-   Loading that placeholder aborts Boxedwine. A native exe that exits 0 is
-   enough for the monitor queries SDL makes while creating the game window. */
+   Loading that placeholder aborts Boxedwine. The engine also reads wmic's
+   stdout from a pipe and blocks until the child writes something, so an
+   empty process is not enough. */
 int main(void) {
-    return 0;
+	fputs("SerialNumber\r\nNONE\r\n", stdout);
+	fflush(stdout);
+	return 0;
 }

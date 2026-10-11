@@ -20,7 +20,11 @@ let sawWine = false;
 let sawGame = false;
 
 function log(line: string) {
-  const text = line.replace(/\s+$/, '');
+  const text = line
+    .replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '')
+    .replace(/\u001b\]0;[^\u0007]*\u0007/g, '')
+    .replace(/[\u0008\u0000]/g, '')
+    .replace(/\s+$/, '');
   if (!text)
     return;
   logLines += 1;
