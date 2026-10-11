@@ -18,6 +18,7 @@ if [[ -d "$SDK/.git" ]]; then
   git -C "$SDK" submodule update --init --recursive
 fi
 
+python3 "$ROOT/decompile/lift_overlay.py"
 python3 "$ROOT/game-logic/overlay.py" "$SDK"
 
 if [[ ! -f "$EMSDK/emsdk" ]]; then

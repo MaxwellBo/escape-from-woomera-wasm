@@ -1,3 +1,5 @@
 binaries/
 out/*_strings_all.txt
 out/*_ghidra.c
+__pycache__/
+recovered/client_lift.c

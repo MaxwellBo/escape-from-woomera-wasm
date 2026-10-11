@@ -1,0 +1,48 @@
+Spirit match
+============
+enginefuncs slots copied by GiveFnptrsToDll: 143 (last pfnVoice_SetClientListening)
+pfnSetModel is slot 2 at 0x10121e10
+pfnRegUserMsg is slot 75
+gpGlobals stored at 0x10122044
+exports: 597 (318 unmangled class / C names)
+Spirit-only classnames present in the export table:
+  button_target
+  calc_ratio
+  env_beamtrail
+  env_warpball
+  info_alias
+  info_group
+  locus_alias
+  multi_alias
+  scripted_action
+  scripted_tanksequence
+  scripted_trainsequence
+  trigger_changealias
+Spirit-only classnames spawned by the three prototype maps:
+  (none)
+Map classnames:
+  aiscripted_sequence
+  ambient_generic
+  efw_Marker
+  env_sound
+  env_sprite
+  func_door
+  func_door_rotating
+  func_wall
+  info_null
+  info_player_start
+  light
+  light_environment
+  monster_barney
+  monster_patrol_guard
+  monster_refugee
+  path_corner
+  trigger_multiple
+  worldspawn
+
+The prototype maps spawn stock Half-Life classes plus monster_refugee,
+monster_patrol_guard, and efw_Marker. Those three are the overlay.
+Spirit-only entities are in the DLL because it was linked as spirit.dll,
+and the export table already names them. They are not part of the lift,
+and the wasm server stays on hlsdk-portable, which already has the
+classes these maps spawn.

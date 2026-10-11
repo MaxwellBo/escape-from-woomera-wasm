@@ -44,6 +44,7 @@ void EFW_ApplyWorldSky( void ); /* FUN_100b6140: skyname → day256 / evening256
 int EFW_PrecacheOnce( const char *szClassname ); /* one CREATE_NAMED_ENTITY per class */
 void EFW_WPrecache( void ); /* FUN_100b2f80 tail: weapon_efw_* */
 void EFW_OnServerActivate( void );
+void EFW_LiftAnchor( void ); /* keep the mechanical lift linked; hope stays on the hand port */
 void EFW_OnServerDeactivate( void );
 int EFW_DeferStudio( void ); /* skip SET_MODEL during ED_LoadFromFile (WASM stall) */
 void EFW_StartFrame( void ); /* apply one deferred studio model per frame */
