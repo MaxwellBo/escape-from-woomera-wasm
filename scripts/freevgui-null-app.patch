@@ -1,0 +1,36 @@
+diff --git a/image.cpp b/image.cpp
+index 0f784d8..10c28ee 100644
+--- a/image.cpp
++++ b/image.cpp
+@@ -60,7 +60,15 @@ void Color::getColor( int &r, int &g, int &b, int &a )
+ 	}
+ 	else
+ 	{
+-		App::getInstance()->getScheme()->getColor( schemeColor, r, g, b, a );
++		/* Client static constructors build Labels before any App exists. */
++		App *app = App::getInstance();
++		Scheme *scheme = app ? app->getScheme() : nullptr;
++		if( !scheme )
++		{
++			r = g = b = a = 0;
++			return;
++		}
++		scheme->getColor( schemeColor, r, g, b, a );
+ 	}
+ }
+ 
+@@ -709,7 +717,13 @@ Font *TextImage::getFont()
+ 	if( font )
+ 		return font;
+ 
+-	return App::getInstance()->getScheme()->getFont( schemeFont );
++	/* No App during client.dll CRT startup. Callers already treat NULL as
++	   "no font yet" and skip measurement. */
++	App *app = App::getInstance();
++	Scheme *scheme = app ? app->getScheme() : nullptr;
++	if( !scheme )
++		return nullptr;
++	return scheme->getFont( schemeFont );
+ }
+ 
+ void TextImage::setText( int len, const char *str )

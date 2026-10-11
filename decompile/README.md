@@ -1,5 +1,8 @@
 # Original DLL decompilation
 
+The browser build does **not** use this tree. It runs the original Win32 DLLs
+under Wine. These notes are the earlier recovery attempt.
+
 The v0.84 gameplay was compiled as Win32 GoldSrc modules:
 
 - `dlls/EscapeFromWoomera.dll` (server, 1 302 621 bytes)

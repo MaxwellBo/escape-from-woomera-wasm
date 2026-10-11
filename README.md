@@ -1,69 +1,58 @@
-# Escape from Woomera — Original Mod in the Browser (WASM)
+# Escape from Woomera — original Windows mod under Wine
 
 Boots the **original Escape From Woomera v0.84 Half-Life mod files** (2004, EFW Team)
-in the browser using the open-source **Xash3D-FWGS engine cross-compiled to
-WebAssembly**, with stock Half-Life game logic likewise compiled to WASM.
+in the browser. The game logic is the **original Win32 DLLs**, not a decompile.
+A 32-bit **Windows** build of the open-source Xash3D FWGS engine loads those DLLs,
+and [Boxedwine](https://github.com/danoon2/Boxedwine) runs that Windows build
+under **Wine** (x86 emulator compiled to WebAssembly).
 
 Project page that inspired this: https://julianoliver.com/projects/escape-from-woomera/
 
 ## How it works
 
-- `public/woomera.zip` — the vendored, freely-distributed mod demo. Unpacked in
-  the browser (fflate) and written into the engine's in-memory filesystem as
-  `woomera/`. Win32-only `dlls/`/`cl_dlls/` and `SAVE/` are skipped;
-  `liblist.gam` is rewritten to reference the WASM game-logic names.
-  Conversation scripts, diary sprites, and storyboard screens are staged.
-- `public/valve.zip` — `valve/` from the official Half-Life: Uplink demo
-  (models, sounds, sprites, HUD, `pak0.pak`) plus `delta.lst` from the
-  open Half-Life 1 SDK. Unpacked beside the mod.
-- `public/engine/` — Xash3D-FWGS WebAssembly runtime
-  (`xash.wasm`, renderers, menu, filesystem layer).
-- `public/hlsdk/` — Half-Life client/server game logic as WASM (hlsdk-portable
-  plus the in-repo EFW overlay in `game-logic/`), plus `delta.lst`.
-- `src/main.ts` — loader UI: stages the mod, stages vendored Uplink `valve/`
-  data, writes everything into WASM memory, then boots with `-game woomera`
-  and loads `efw_prototype_level1` (buttons for levels 1–3 + engine console
-  included).
+- `public/boxedwine/` — Boxedwine 26R1 single-threaded web build (no
+  cross-origin isolation headers) plus the Wine 6.0 root filesystem
+  shipped in that build (`wine6.zip`). Wine 11's web filesystem omits
+  API-set DLLs, so `wineboot` never finishes and `xash.dll` cannot load.
+  Wine 6's `psapi.dll` and `wmic.exe` are placeholders with no builtin.
+  `scripts/build-psapi-shim.sh` replaces them and rewrites `ntdll`'s
+  `xsave`/`xrstor` as `fxsave`/`fxrstor`, which this emulator can run.
+  `run.bat` turns off SDL's DirectInput and Windows.Gaming.Input probes,
+  passes `-nosound` to the engine, and the page starts Boxedwine with
+  `-nosound` and `-p3` so the original client DLL's SSE instructions run.
+  The launcher is a console image so engine messages show up in the page log.
+- `public/boxedwine/woomera.zip` — the Windows game Boxedwine mounts as
+  `C:\files`:
+  - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, SDL2 and the MinGW
+    runtime. `vgui.dll` is freevgui rebuilt for the MSVC i386 C++ ABI
+    (`scripts/build-vgui-msvc.sh`), because `client.dll` imports the
+    original MSVC-mangled methods and the MinGW build does not export them.
+  - `woomera/` from the vendored mod, **including**
+    `dlls/EscapeFromWoomera.dll` and `cl_dlls/client.dll`
+  - `valve/` from the Half-Life: Uplink demo, plus SDK `delta.lst`
+  - `run.bat` launches `xash3d.exe -game woomera -ref soft`
+- `src/main.ts` embeds that runtime and starts `run.bat`.
 
-## Half-Life data (Uplink demo)
+The web build of Boxedwine cannot translate OpenGL or Direct3D to WebGL, so
+the engine is built with the software renderer (`--enable-soft`). `ref_soft`
+draws into an SDL window surface, which Wine presents with GDI.
 
-Valve open-sourced the **Half-Life 1 SDK** (game logic), not the GoldSrc
-engine binary or the retail `valve/` art. This site uses:
+## Build the Windows engine
 
-- **Xash3D-FWGS** — open-source GoldSrc-compatible engine, compiled to WASM
-- **hlsdk-portable** — that open SDK, compiled to WASM (`public/hlsdk/`)
-- **Half-Life: Uplink** demo `valve/` — Valve/Sierra’s freely distributed
-  1999 demo (models, sounds, sprites, HUD). Retail WADs such as
-  `halflife.wad` are *not* included.
-- **`delta.lst`** — from [ValveSoftware/halflife](https://github.com/ValveSoftware/halflife)
-  (`network/delta.lst`). Uplink does not ship this file; Xash will not boot
-  without it. Redistributed under the Half-Life 1 SDK LICENSE
-  (`public/hlsdk/LICENSE`).
-
-`scripts/vendor.sh` downloads the archived Uplink installer, extracts it,
-and `scripts/pack-valve.py` writes `public/valve.zip` (Win32 DLLs and the
-demo’s own maps omitted; SDK `delta.lst` added).
-
-1. Wait for steps 1–2 (mod zip + Uplink `valve/`). The engine boots itself.
-2. Click the game view to capture the mouse (pointer lock) and keyboard. Esc releases the mouse.
-
-## Scripted systems (DLL-derived)
-
-The original hope meter, conversations, diary, and markers only shipped as
-Win32 DLLs. Those PE files are not loaded. Their overlay was decompiled and
-ported into `game-logic/` using the recovered functions, then compiled into
-the WASM client/server:
-
-- Hope starts at **80** and drains at `dt/12` from `efw_SendHudState` (`0x100c6b60`)
-- Conversations `LoadAll` of `Conversations/*.txt`; hide past **200** units / **20** s
-- HUD uses original `EFWData` / `EFWShow` / `EFW_Menu` / `EFW_CtPrv` (no invented Hope/EfwHint mailbox)
-- `ClientCommand` is the recovered chain only (`efw_Talk`, `efw_Give`, `efw_UseWithMarker`, …)
-
-Rebuild the WASM modules after changing `game-logic/`:
+Requires `gcc-mingw-w64-i686` (and `i686-w64-mingw32-windres`).
 
 ```bash
-npm run test:efw
-npm run build:hlsdk   # needs Emscripten (scripts/build-hlsdk.sh)
+npm run build:win32   # scripts/build-win32.sh
+```
+
+That clones Xash3D FWGS at the pinned commit, applies
+`scripts/xash-mingw-i386-rename.patch` (PE/COFF i386 export names), configures
+with `--enable-soft --disable-gl`, and writes `public/boxedwine/woomera.zip`.
+
+Repack an existing `third_party/xash-win32` tree with:
+
+```bash
+npm run pack:wine
 ```
 
 ## Run it
@@ -74,11 +63,16 @@ npm run dev
 # → http://127.0.0.1:47831/
 ```
 
-Re-vendor third-party binaries (documents provenance):
+The first load fetches the Wine filesystem and the Windows game (about 110 MB).
+Wine opens a window titled Escape from Woomera. The CPU is interpreted, so
+startup is slow. Click the view, then use the mouse and WASD. Sound is left
+off; Boxedwine's web audio path is not used.
+
+Re-vendor the mod and Uplink `valve/` archives (the pack script reads them):
 
 ```bash
-npm run vendor      # scripts/vendor.sh
-npm run build:hlsdk # overlay + emscripten rebuild of public/hlsdk/*.wasm
+npm run vendor
+npm run pack:wine
 ```
 
 ## Provenance
@@ -86,11 +80,16 @@ npm run build:hlsdk # overlay + emscripten rebuild of public/hlsdk/*.wasm
 - Mod: `EscapeFromWoomera_v084.zip`, archived official site,
   http://www.ljudmila.org/~selectparks/archive/escapefromwoomera/
   (also on ModDB: https://www.moddb.com/mods/escape-from-woomera)
-- Engine WASM: `xash3d-fwgs@1.2.2` (npm)
-- Game-logic WASM: `hlsdk-portable@0.1.3` (npm mirror — upstream delisted it;
-  source fallback: https://github.com/FWGS/hlsdk-portable)
-- Engine source: FWGS/Xash3D-FWGS (GPL)
+- Engine: [FWGS/xash3d-fwgs](https://github.com/FWGS/xash3d-fwgs) (GPL),
+  commit `51353ff8d65e58300eeb2bd014867673f1f367c6`, MinGW i686
+- SDL2 2.32.10 MinGW development package
+- Wine host: [Boxedwine 26R1](https://github.com/danoon2/Boxedwine/releases/tag/26R1.0)
+  `Boxedwine26R1Web.zip`, single-threaded emulator and its Wine 6.0
+  filesystem, copied here as `wine6.zip` (GPL)
 - Base game: Half-Life: Uplink demo `valve/` from
   https://archive.org/download/Half-lifeUplink/hluplink.exe
   (Valve/Sierra, 1999, freely distributed demo)
 - `delta.lst` + HLSDK LICENSE: https://github.com/ValveSoftware/halflife
+
+`decompile/` and `game-logic/` are leftover notes from an earlier port that
+reimplemented the DLLs. The page does not load them.

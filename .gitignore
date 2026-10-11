@@ -147,3 +147,16 @@ vite.config.ts.timestamp-*
 # HLSDK / Emscripten trees used to rebuild public/hlsdk/*.wasm
 third_party/emsdk/
 third_party/hlsdk-portable/
+
+# Windows cross-compile of Xash3D (scripts/build-win32.sh)
+third_party/xash3d-fwgs/
+third_party/xash-win32/
+third_party/SDL2-*/
+third_party/mingw-bin/
+third_party/*.tar.gz
+
+# MSVC vgui and the psapi shim (also copied into the Boxedwine zips)
+third_party/vgui-msvc.dll
+third_party/vgui-msvc.lib
+third_party/psapi.dll
+third_party/wmic.exe
