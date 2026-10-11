@@ -36,8 +36,11 @@ RUN_BAT = (
     "set SDL_JOYSTICK_WGI=0\r\n"
     "set SDL_JOYSTICK_RAWINPUT=0\r\n"
     "set SDL_JOYSTICK_HIDAPI=0\r\n"
+    "rem Boxedwine -nosound does not reach the engine. SDL audio init\r\n"
+    "rem runs after the window is created and stalls the emulator.\r\n"
+    "echo EFW-BOOT\r\n"
     "xash3d.exe -game woomera -ref soft -windowed -width 640 -height 480 "
-    "-console +map efw_prototype_level1\r\n"
+    "-console -nosound -dev 2 +map efw_prototype_level1\r\n"
 )
 
 MOD_PREFIX = "EscapeFromWoomera_v084/"

@@ -45,6 +45,11 @@ function log(line: string) {
     engineStatus.textContent = 'booting';
     stepLaunch.classList.add('done');
   }
+  if (/EFW-BOOT|Xash3D|Host_Main|Loading|Audio:/i.test(text)) {
+    gameStatus.textContent = 'engine running';
+    engineStatus.textContent = 'running';
+    launchStatus.textContent = 'engine running';
+  }
 }
 
 window.addEventListener('message', (ev) => {
