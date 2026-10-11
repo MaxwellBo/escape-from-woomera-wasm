@@ -95,6 +95,8 @@ const params = new URLSearchParams({
   app: 'woomera',
   p: 'run.bat',
   resolution: '800x600',
+  // client.dll's CRT uses SSE. The default CPU traps those as illegal.
+  cpu: 'p3',
   // Sound stays off. A placeholder wmic.exe was what aborted startup;
   // the web audio device is not required to boot and is left unused.
   sound: 'false',

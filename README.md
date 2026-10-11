@@ -19,8 +19,8 @@ Project page that inspired this: https://julianoliver.com/projects/escape-from-w
   `xsave`/`xrstor` as `fxsave`/`fxrstor`, which this emulator can run.
   `run.bat` turns off SDL's DirectInput and Windows.Gaming.Input probes,
   passes `-nosound` to the engine, and the page starts Boxedwine with
-  `-nosound`. The launcher is a console image so engine messages show up
-  in the page log.
+  `-nosound` and `-p3` so the original client DLL's SSE instructions run.
+  The launcher is a console image so engine messages show up in the page log.
 - `public/boxedwine/woomera.zip` — the Windows game Boxedwine mounts as
   `C:\files`:
   - `xash3d.exe`, `xash.dll`, `ref_soft.dll`, `menu.dll`, SDL2 and the MinGW
