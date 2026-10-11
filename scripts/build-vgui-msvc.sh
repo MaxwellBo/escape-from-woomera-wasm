@@ -30,6 +30,10 @@ fi
 if ! grep -q "VGUI-CREATEPLAT" "$SRC/surface.cpp"; then
   patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-createplat-app.patch"
 fi
+# Absolute App::_instance disagrees across Boxedwine's DLL relocation.
+if ! grep -q "IP-relative App slot" "$SRC/app.cpp"; then
+  patch -d "$SRC" -p1 < "$ROOT/scripts/freevgui-app-slot.patch"
+fi
 for tool in clang++ lld-link python3 i686-w64-mingw32-objdump; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done

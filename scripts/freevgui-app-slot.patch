@@ -1,0 +1,108 @@
+diff --git a/app.cpp b/app.cpp
+index 8d2ae34..a32cc29 100644
+--- a/app.cpp
++++ b/app.cpp
+@@ -8,9 +8,58 @@
+ #include "panel.h"
+ #include "font.h"
+ 
++#ifdef _WIN32
++#define WIN32_LEAN_AND_MEAN
++#include <windows.h>
++static void app_trace( const char *s, int n )
++{
++	DWORD wrote = 0;
++	HANDLE out = GetStdHandle( STD_OUTPUT_HANDLE );
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, s, n, &wrote, nullptr );
++}
++#else
++static void app_trace( const char *, int ) {}
++#endif
++
+ using namespace vgui;
+ 
+ App* App::_instance = nullptr;
++
++/* IP-relative App slot.
++ * client.dll and vgui.dll both prefer image base 0x10000000, so one of
++ * them is relocated. Boxedwine has returned a null App from the absolute
++ * load in getInstance after the constructor stored `this`. A displacement
++ * from the instruction pointer stays valid at whatever base the DLL got. */
++#if defined( _WIN32 ) && ( defined( __i386__ ) || defined( _M_IX86 ))
++extern "C" App *efw_app_slot = nullptr;
++__attribute__(( naked )) static App **instance_slot()
++{
++	asm(
++		"call 1f\n\t"
++		"1:\n\t"
++		"popl %eax\n\t"
++		"addl $(_efw_app_slot - 1b), %eax\n\t"
++		"ret\n\t"
++	);
++}
++static App *load_instance()
++{
++	return *instance_slot();
++}
++static void store_slot( App *app )
++{
++	*instance_slot() = app;
++}
++#else
++static App *load_instance()
++{
++	return nullptr;
++}
++static void store_slot( App * )
++{
++}
++#endif
+ static const char* staticKeyTrans[KEY_LAST] =
+ {
+ 	"0)KEY_0",
+@@ -128,7 +177,15 @@ App::App() : App( false ) { }
+ 
+ App *App::getInstance()
+ {
+-	return _instance;
++	app_trace( "VGUI-GETINST\n", 13 );
++	App *app = load_instance();
++	if( !app )
++		app = _instance;
++	if( !app )
++		app_trace( "VGUI-GETINST-NULL\n", 18 );
++	else
++		app_trace( "VGUI-GETINST-OK\n", 16 );
++	return app;
+ }
+ 
+ void App::start()
+@@ -273,6 +330,19 @@ void App::setScheme( Scheme *sc )
+ 
+ Scheme *App::getScheme()
+ {
++	app_trace( "VGUI-GETSCHEME\n", 15 );
++	if( !scheme )
++	{
++		static bool making = false;
++		app_trace( "VGUI-GETSCHEME-NULL\n", 20 );
++		if( making )
++			return nullptr;
++		making = true;
++		scheme = new Scheme();
++		making = false;
++	}
++	else
++		app_trace( "VGUI-GETSCHEME-OK\n", 18 );
+ 	return scheme;
+ }
+ 
+@@ -445,6 +515,7 @@ void App::init()
+ 	running = false;
+ 	keyFocusPanel = oldMouseFocusPanel = mouseCapturePanel = keyFocusPanelRequested = nullptr;
+ 	_instance = this;
++	store_slot( this );
+ 	scheme = new Scheme();
+ 	mouseArenaPanel = nullptr;
+ 	buildModeEnabled = buildModeRequested = false;
