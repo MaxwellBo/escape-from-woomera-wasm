@@ -1,5 +1,5 @@
 diff --git a/panel.cpp b/panel.cpp
-index ebf1eba..7d61829 100644
+index ebf1eba..e0a4d68 100644
 --- a/panel.cpp
 +++ b/panel.cpp
 @@ -1,6 +1,10 @@
@@ -13,7 +13,7 @@ index ebf1eba..7d61829 100644
  #include "panel.h"
  #include "vgui_internal.h"
  #include "input.h"
-@@ -216,6 +220,12 @@ bool Panel::wasKeyReleased( KeyCode code )
+@@ -216,7 +220,17 @@ bool Panel::wasKeyReleased( KeyCode code )
  
  void Panel::addInputSignal(InputSignal *is)
  {
@@ -24,8 +24,13 @@ index ebf1eba..7d61829 100644
 +		WriteFile( out, "VGUI-ADDSIG\n", 12, &wrote, nullptr );
 +#endif
  	inputSignals.putElement( is );
++#ifdef _WIN32
++	if( out && out != INVALID_HANDLE_VALUE )
++		WriteFile( out, "VGUI-ADDSIG-OK\n", 15, &wrote, nullptr );
++#endif
  }
  
+ void Panel::removeInputSignal(InputSignal *is)
 diff --git a/surface.cpp b/surface.cpp
 index 98f91ca..5921a54 100644
 --- a/surface.cpp
