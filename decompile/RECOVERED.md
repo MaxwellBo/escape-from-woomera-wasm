@@ -16,13 +16,24 @@ Not exported. `Squark` is only named in an error string.
 
 | VA | Recovered | What it does |
 |----|-----------|----------------|
-| `0x100b8ff0` | `LoadAll` | `GetGameDir` + `FindFirstFileA("…\\Conversations\\*.txt")`, parse each file, then seed keywords `ESCAPE`, `GREET`, `GOODBYE` |
+| `0x100b8ff0` | `LoadAll` | `GetGameDir` + `FindFirstFileA("…\\Conversations\\*.txt")`, parse each file, then seed keywords `ESCAPE`, `GREET`, `GOODBYE`. The prologue erases speech map `DAT_10132428` |
 | `0x100c2660` | `ParseFile` | allocate a 0x74-byte parser object (`0x100c1dc0`) |
 | `0x100ba040` | `Squark` | `UTIL_FindEntityByTargetname`; if missing, `OutputDebugStringA("WARNING -- efwConversation::Squark -- character (%s) is not found")` |
-| `0x100b86b0` | `RegisterDefaults` | display names: Gate Guard, Electrician, Detainee, Detainee in queue |
+| `0x100ba080` | `SetSpeech` | per-NPC record from `0x100b93f0`. Bit 8 skips the 1.0s gate (`now - stamp <= 1`). Then stamp, copy the line, `0x100c7430`, and a title-only `ShowMenu`. Hide distance is bit 2 → 1024 (`0x44800000`), bit 4 → 256 (`0x43800000`), else 128 (`0x43000000`), stored at `DAT_1011d130` |
+| `0x100b9990` | `ShowTopics` | case-insensitive script match (`0x100b9770`), walk questions at the cursor depth, at most 6 lines. Title is that NPC's speech string while `now - stamp < DAT_1011d128` (20s); otherwise the empty global at `0x10121c38`. Does not clear the record. `ShowMenu` hide float is 200 (`0x43480000`) |
+| `0x100c6420` | `efw_Talk` entry | 21 bytes: `MapLevel` (`0x100c5b80`) then `ShowTopics`. This is the `efw_Talk` target in `ClientCommand_dispatch.c` |
+| `0x100b9cd0` | `ChooseReply` | Ghidra auto-analysis left no function here (no frame-pointer prologue), so REA reported no procedure. Near calls: filter with `0x100b9720`, `rand` (`0x100c84e4`), then compare a result string with `""`, `Top` (`0x1011c424`), and `Goodbye` (`0x1011c41c`). `Top` stores a null cursor, `SetSpeech` flag 8, `ShowTopics`. `Goodbye` `SetSpeech`s only when the reply length is nonzero, then `0x100c7430` and `ClearSpeechMap` |
+| `0x100b94e0` | `ClearSpeechMap` | three near calls: ThinkConversation at `0x100c6c3e` (20s) and `0x100c6cda` (too far), and `ChooseReply` at `0x100b9fb3` (Goodbye) |
+| `0x100b95a0` | `GiveUnwanted` | find the script, `0x100bdc80` selects type-1 `UNWANTED_ITEM`, `0x100b9720` requires every flag, `rand` picks a reply, Squark with the caller's flag byte. Fallback string at `0x1011c3fc`: `Thanks, but I don't need it.` |
+| `0x100b86b0` | `RegisterDefaults` | display names: Gate Guard, Electrician, Detainee, Detainee in queue. `0x100b89a0` returns that string, or the key with `_` turned into spaces |
 | `0x100c6e60` | `efw_ShowMenu` | up to 7 menu lines → GoldSrc `ShowMenu`; logs `CONVERSATION   (%d messages)` / `<conversation inactive>` |
-| `0x100c6c10` | `efw_ThinkConversation` | hide menu if partner distance ≥ float at `0x1011d130`; log `Conversation hidden, partner too far` |
+| `0x100c6c10` | `efw_ThinkConversation` | hide menu if partner distance ≥ float at `0x1011d130`; log `Conversation hidden, partner too far`. Both that path and the 20s timeout wipe the speech map |
+| `0x100c7430` | close menu | `ShowMenu(0, nulls…, 200)`. Clears `talkActive`. Leaves the speech map |
 | `0x100c7830` | `efw_TalkScan` | sphere search `monster_refugee` / `monster_barney`, send user message `EFW_CtPrv` |
+
+REA pseudocode for the functions the EFW export skipped is in `decompile/recovered/rea/`. See `decompile/recovered/REA.md`.
+
+`game-logic/efw_conversation.cpp` keeps one speech slot per NPC edict (`SetSpeech` / `ShowTopics`). `EFW_HostClock` stands in for `FUN_100c5b60` because the listen server parks `gpGlobals->time`. The slot table is wiped where `FUN_100b94e0` runs: menu timeout, partner too far, and a `Goodbye` reply. `EFW_CloseTalk` (`FUN_100c6950` / `FUN_100c7430`) does not wipe it. `A:[Goodbye]` has no answer text; `ChooseReply` still runs that action and closes. `Top` resets the cursor to the depth-0 menu. The shipped scripts use `Goodbye` and do not use `Top`.
 
 ### Hope
 

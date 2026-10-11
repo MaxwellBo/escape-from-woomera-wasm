@@ -1486,6 +1486,8 @@ void EFW_RunScriptAction( CBasePlayer *pPlayer, const char *action )
 		return;
 	if( !strcmp( action, "Goodbye" ) )
 	{
+		/* FUN_100b9cd0 matches the result string "Goodbye", then closes
+		   and wipes the speech map. ChooseTalk does that itself. */
 		EFW_CloseTalk();
 		return;
 	}

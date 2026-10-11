@@ -140,6 +140,8 @@ static int EFW_LoadConversationDir( const char *dir )
 	return n;
 }
 
+static void EFW_ClearSpeechRecords( void );
+
 void EFW_LoadAllConversations( void )
 {
 	int i;
@@ -186,6 +188,91 @@ void EFW_LoadAllConversations( void )
 	EFW_AddKeyword( "GREET", 1 );
 	EFW_AddKeyword( "GOODBYE", 1 );
 	EFW_RegisterDefaults();
+	/* LoadAll erases DAT_10132428 (FUN_100bb5b0) before it parses.
+	   That is the same speech map FUN_100b94e0 clears later. */
+	EFW_ClearSpeechRecords();
+}
+
+/* FUN_100b93f0 map (ctor FUN_100b8c10, clear FUN_100b94e0). Keyed by the
+   NPC edict. FUN_100ba080 writes the line; FUN_100b9990 reads it back as
+   the ShowMenu title while age < DAT_1011d128 (20s). */
+#define EFW_SPEECH_SLOTS 32
+struct EfwSpeechSlot
+{
+	edict_t *ed;
+	char text[512];
+	float at;
+};
+static EfwSpeechSlot g_speech[EFW_SPEECH_SLOTS];
+
+static void EFW_ClearSpeechRecords( void )
+{
+	memset( g_speech, 0, sizeof( g_speech ) );
+}
+
+static EfwSpeechSlot *EFW_SpeechSlot( edict_t *ed, int create )
+{
+	int i;
+	int freeSlot;
+
+	if( !ed )
+		return NULL;
+	freeSlot = -1;
+	for( i = 0; i < EFW_SPEECH_SLOTS; i++ )
+	{
+		if( g_speech[i].ed == ed )
+			return &g_speech[i];
+		if( freeSlot < 0 && !g_speech[i].ed )
+			freeSlot = i;
+	}
+	if( !create )
+		return NULL;
+	if( freeSlot < 0 )
+		freeSlot = 0;
+	memset( &g_speech[freeSlot], 0, sizeof( g_speech[freeSlot] ) );
+	g_speech[freeSlot].ed = ed;
+	return &g_speech[freeSlot];
+}
+
+static void EFW_RememberSpeech( CBaseEntity *pNpc, const char *text )
+{
+	EfwSpeechSlot *slot;
+	EfwDllState *st;
+
+	if( !pNpc || !text || !text[0] )
+		return;
+	slot = EFW_SpeechSlot( pNpc->edict(), 1 );
+	if( !slot )
+		return;
+	strncpy( slot->text, text, sizeof( slot->text ) - 1 );
+	slot->text[sizeof( slot->text ) - 1] = '\0';
+	/* FUN_100c5b60 reads gpGlobals->time. That clock stays parked on the
+	   listen server, so the host pump is the stand-in already used by the
+	   1s gate in FUN_100ba080. */
+	slot->at = EFW_HostClock();
+	st = EFW_Dll();
+	strncpy( st->speech, slot->text, sizeof( st->speech ) - 1 );
+	st->speech[sizeof( st->speech ) - 1] = '\0';
+	st->speechAt = slot->at;
+}
+
+static void EFW_CopySpeechTitle( CBaseEntity *pNpc, char *title, size_t cap )
+{
+	EfwSpeechSlot *slot;
+
+	if( cap == 0 )
+		return;
+	title[0] = '\0';
+	if( !pNpc )
+		return;
+	slot = EFW_SpeechSlot( pNpc->edict(), 0 );
+	if( !slot || !slot->text[0] )
+		return;
+	/* FUN_100b9990: now - record < DAT_1011d128. Age of exactly 20s is stale. */
+	if( !( EFW_HostClock() - slot->at < EFW_TALK_TIMEOUT ) )
+		return;
+	strncpy( title, slot->text, cap - 1 );
+	title[cap - 1] = '\0';
 }
 
 /* FUN_100ba080: bit 8 skips the 1.0s gate at 0x100dd618. The stamp lives
@@ -278,6 +365,9 @@ void EFW_Squark( const char *targetname, const char *text, int flags )
 	/* 0x100ba15a closes the previous line, then 0x100c6e60 shows this one
 	   on the speaker so FUN_100c6c10 can hide it past the range. */
 	EFW_CloseTalk();
+	/* FUN_100ba080 stores the line on this NPC, then FUN_100c7430 closes
+	   the previous menu. CloseTalk above is that close; the record survives it. */
+	EFW_RememberSpeech( pEnt, text );
 	st = EFW_Dll();
 	st->talkNpc = pEnt;
 	st->talkActive = 1;
@@ -491,6 +581,8 @@ void EFW_CloseTalk( void )
 	st->talkCursor = -1;
 	st->talkStart = 0;
 	st->prevQuestion[0] = '\0';
+	/* FUN_100b94e0 is the map wipe, and it is not this close. The NPC's
+	   last line stays so a later FUN_100b9990 can still title the menu. */
 	st->speech[0] = '\0';
 	st->speechAt = 0;
 	if( pPlayer )
@@ -523,13 +615,13 @@ void EFW_ShowConversationMenu( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	st->hideDist = EFW_HIDE_DIST;
 	st->menuMode = 1;
 	st->menuCount = 0;
-	/* FUN_100b9bb9: time-speechAt < 20 uses the speech string. Otherwise
-	   the title is the empty global at 0x10121c38. A fresh efw_Talk
-	   clears speech, so the first open has no "Talk to" line. */
-	if( st->speech[0] && gpGlobals->time - st->speechAt < EFW_TALK_TIMEOUT )
+	/* FUN_100b9990: title is this NPC's FUN_100b93f0 line while
+	   FUN_100c5b60() - stamp < DAT_1011d128. Otherwise the empty
+	   global at 0x10121c38. The listen server parks gpGlobals->time,
+	   so the compare uses EFW_HostClock. efw_Talk does not clear it. */
+	EFW_CopySpeechTitle( pNpc, title, sizeof( title ) );
+	if( title[0] )
 	{
-		strncpy( title, st->speech, sizeof( title ) - 1 );
-		title[sizeof( title ) - 1] = '\0';
 		EFW_DebugPrint( ">>> FUN_100b9bb9 speech=1" );
 	}
 	else
@@ -620,8 +712,8 @@ void EFW_StartTalk( CBasePlayer *pPlayer, CBaseEntity *pNpc )
 	}
 	(void)EFW_MapLevel();
 	EFW_DebugPrint( ">>> efw_Talk %s", STRING( pNpc->pev->targetname ) );
-	st->speech[0] = '\0';
-	st->speechAt = 0;
+	/* FUN_100c6420 is MapLevel then FUN_100b9990. It does not clear the
+	   speech record, so a squark younger than 20s stays the menu title. */
 	st->talkCursor = -1;
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
@@ -721,38 +813,54 @@ void EFW_ChooseTalk( CBasePlayer *pPlayer, int slot )
 	st->prevQuestion[sizeof( st->prevQuestion ) - 1] = '\0';
 	EFW_DebugPrint( ">>> menuselect %d  %s", slot, q->topic[0] ? q->topic : q->text );
 	body[0] = '\0';
+	/* FUN_100b9cd0 runs the reply actions even when the answer text is
+	   empty. A:[Goodbye] is that shape in every shipped script. */
 	if( r && r->text[0] )
 	{
 		strncpy( body, r->text, sizeof( body ) - 1 );
 		body[sizeof( body ) - 1] = '\0';
 		EFW_Print( pPlayer, r->text );
-		if( r->actionCount )
+	}
+	{
+		/* The result string starts as the empty global at 0x10121c38.
+		   Each action virtual may replace it. The chooser then compares
+		   "Top" (0x1011c424) and "Goodbye" (0x1011c41c). The last of
+		   those two wins, matching an overwritten std::string. */
+		int flow = 0;
+		if( r )
 		{
 			for( i = 0; i < r->actionCount; i++ )
 			{
-				if( !strcmp( r->actions[i], "Goodbye" ) )
-				{
-					EFW_Print( pPlayer, r->text );
-					EFW_CloseTalk();
-					return;
-				}
-				EFW_RunScriptAction( pPlayer, r->actions[i] );
+				if( !strcmp( r->actions[i], "Top" ) )
+					flow = 1;
+				else if( !strcmp( r->actions[i], "Goodbye" ) )
+					flow = 2;
+				else
+					EFW_RunScriptAction( pPlayer, r->actions[i] );
 			}
 		}
+		if( flow == 2 )
+		{
+			EFW_DebugPrint( ">>> FUN_100b9cd0 Goodbye" );
+			/* Nonempty text is SetSpeech flag 8, then FUN_100c7430 and
+			   FUN_100b94e0. The wipe drops that line, and DAT_10134480
+			   is replaced with the empty global. */
+			EFW_CloseTalk();
+			EFW_ClearSpeechRecords();
+			return;
+		}
+		if( flow == 1 )
+		{
+			EFW_DebugPrint( ">>> FUN_100b9cd0 Top" );
+			/* Null cursor: ShowTopics walks depth 0. */
+			st->talkCursor = -1;
+		}
 	}
-	/* FUN_100b9cd0 stores the reply (squark flag 8) then FUN_100b9990
-	   shows the topic lines again. "Continue" is not in the DLL. */
+	/* Any other result, including an empty one: flag-8 SetSpeech when the
+	   reply has text, then ShowTopics. An empty reply leaves the previous
+	   line in place. */
 	if( body[0] )
-	{
-		strncpy( st->speech, body, sizeof( st->speech ) - 1 );
-		st->speech[sizeof( st->speech ) - 1] = '\0';
-		st->speechAt = gpGlobals->time;
-	}
-	else
-	{
-		st->speech[0] = '\0';
-		st->speechAt = 0;
-	}
+		EFW_RememberSpeech( pNpc, body );
 	st->menuMode = 1;
 	EFW_ShowConversationMenu( pPlayer, pNpc );
 }
@@ -808,6 +916,9 @@ void EFW_ThinkConversation( void )
 				else
 					EFW_DebugPrint( "efw: menu timeout" );
 				EFW_CloseTalk();
+				/* FUN_100c6c10: FUN_100c7430, then FUN_100b94e0.
+				   The wipe is the whole map, including other NPCs. */
+				EFW_ClearSpeechRecords();
 			}
 			else if( pPlayer && st->talkNpc )
 			{
@@ -816,6 +927,7 @@ void EFW_ThinkConversation( void )
 				{
 					EFW_DebugPrint( "Conversation hidden, partner too far" );
 					EFW_CloseTalk();
+					EFW_ClearSpeechRecords();
 				}
 			}
 		}
