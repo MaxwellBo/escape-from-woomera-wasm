@@ -69,8 +69,8 @@ struct EfwDllState
 	char menuTitle[80];
 	char menuText[EFW_MENU_LINES][160];
 	char prevQuestion[160]; /* DAT_10134480; FUN_100c69a0 copies the hotkey line */
-	char speech[512]; /* character record+8; FUN_100b9bb9 title while fresh */
-	float speechAt; /* compared with DAT_1011d128 (20s) */
+	char speech[512]; /* mirror of the active NPC's FUN_100b93f0 string */
+	float speechAt; /* FUN_100c5b60 stamp; menu title uses the per-NPC slot */
 
 	int items;
 	int mapLevel; /* FUN_100c5b80: 0 level1, 1 level2, 2 level3 */

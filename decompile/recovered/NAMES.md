@@ -6,7 +6,20 @@
 | 0x1007af20 | `LinkUserMessages` | registers ShowMenu, EFWShow, EFWData, EFW_Menu, EFW_Cntxt, EFW_CtPrv |
 | 0x100ba040 | `efwConversation::Squark` | look up NPC by targetname; warn if missing |
 | 0x100b86b0 | `efwConversation::RegisterDefaults` | Gate Guard / Electrician / detainee display names |
-| 0x100b8ff0 | `efwConversation::LoadAll` | FindFirstFile game dir\\Conversations\\*.txt, then seed ESCAPE/GREET/GOODBYE |
+| 0x100b8ff0 | `efwConversation::LoadAll` | FindFirstFile game dir\\Conversations\\*.txt, then seed ESCAPE/GREET/GOODBYE; erases speech map DAT_10132428 |
+| 0x100b89a0 | `DisplayName` | map hit returns the RegisterDefaults string at +0x1c; a miss copies the key and turns `_` into space |
+| 0x100b8c10 | `InitSpeechMap` | ctor of the speech map at DAT_10132428 (0x28-byte nodes) |
+| 0x100b8e10 | `InitCursorMap` | ctor of the question-cursor map at DAT_10132408 |
+| 0x100b93f0 | `SpeechRecord` | insert-or-find by entity pointer; returns the node at +0x10 (float stamp, std::string at +8) |
+| 0x100b94e0 | `ClearSpeechMap` | callers: ThinkConversation timeout, ThinkConversation too-far, and ChooseReply on Goodbye |
+| 0x100b9cd0 | `ChooseReply` | flag-filter and rand a reply; `Top` returns to depth 0; `Goodbye` closes and wipes the speech map |
+| 0x100b95a0 | `GiveUnwanted` | match the script, walk type-1 UNWANTED_ITEM replies whose flags pass, `rand` one, Squark with the caller's flag byte |
+| 0x100b9720 | `ReplyFlagsPass` | AND of each flag's virtual +4; a null flag list passes |
+| 0x100b9770 | `MatchScriptName` | tolower both sides, then `efw_FStrEq`, against STRING(pev+0x1cc) |
+| 0x100b9990 | `ShowTopics` | depth walk, at most 6 lines, flag filter; title is that NPC's speech while age < 20s |
+| 0x100ba080 | `SetSpeech` | bit 8 skips the 1.0s gate; stamp + copy; close the menu; ShowMenu hide distance 1024 / 256 / 128 |
+| 0x100c6420 | `efw_TalkEntry` | `MapLevel` then `ShowTopics`; does not clear the speech record |
+| 0x100c7430 | `efw_CloseMenuNull` | `ShowMenu` with null lines and hide float 200; leaves the speech map alone |
 | 0x100c1dc0 | `efwConversationFile ctor` | 0x74-byte conversation parser object |
 | 0x100c2660 | `efwConversation::ParseFile` | open one Conversations/*.txt |
 | 0x100c3120 | `efw_Marker` | LINK_ENTITY_TO_CLASS, alloc 0x15c |

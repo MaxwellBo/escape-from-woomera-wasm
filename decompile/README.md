@@ -23,6 +23,8 @@ range, refugee IdleThink, ClientCommand names).
 | `recovered/CRefugee_Spawn.c` | Capstone of CRefugee::Spawn named model table |
 | `recovered/FUN_100c4af0_LookUse.c` | Capstone of player look-use (Ghidra gap after WashingPowder) |
 | `recovered/FUN_100c6320_StudioHull.c` | Capstone of CRefugee sequence hull |
+| `recovered/rea/*.c` | REA / Ghidra pseudocode for the conversation range the EFW export skipped |
+| `recovered/REA.md` | what that pass recovered, and what the port does with it |
 | `RECOVERED.md` | narrative map of hope / conversations / markers / HUD |
 
 Full dumps `out/*_ghidra.c` (~3.5 MB server, ~1.8 MB client) are gitignored; regenerate with Ghidra.
@@ -72,3 +74,5 @@ The server DLL is stock Half-Life SDK plus a small overlay:
 - conversation engine is **not** exported; strings name `efwConversation::Squark`
 
 The client DLL owns diary sprites, speech-bubble HUD, give/hide icons, storyboards, and issues `efw_Talk` / `efw_Give` / `efw_UseWithMarker` / `efw_ShowMenu`.
+
+The conversation cluster is `0x100b8600`–`0x100c0000`, just below the overlay window `ExportEfwDecomp.java` always keeps (`0x100c0000`–`0x100c84b0`). Functions there are exported only when they reference an EFW string. Of the 128 functions from `0x100b8000` through `0x100bffff`, the dump keeps four: `RegisterDefaults`, `LoadAll`, `Squark`, and `ServerCommand`. [REA](https://github.com/morluto/rea) 6.4.0 with Ghidra 12.1.4 decompiled the speech map and the topic menu; notes are in `recovered/REA.md`.
